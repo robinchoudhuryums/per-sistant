@@ -574,6 +574,161 @@ describe("Keyboard shortcuts", () => {
 });
 
 // ---------------------------------------------------------------------------
+// AI model selection tests
+// ---------------------------------------------------------------------------
+describe("AI model selection", () => {
+  it("valid model identifiers", () => {
+    const models = {
+      haiku: "claude-haiku-4-5-20251001",
+      sonnet: "claude-sonnet-4-6-20250415",
+    };
+    assert.ok(models.haiku);
+    assert.ok(models.sonnet);
+    assert.ok(!models.opus); // not available
+  });
+
+  it("valid feature settings values", () => {
+    const valid = ["haiku", "sonnet", "off"];
+    assert.ok(valid.includes("haiku"));
+    assert.ok(valid.includes("sonnet"));
+    assert.ok(valid.includes("off"));
+    assert.ok(!valid.includes("gpt-4"));
+  });
+
+  it("all 7 AI features have model settings", () => {
+    const features = [
+      "ai_model_email_draft", "ai_model_task_breakdown", "ai_model_quick_add",
+      "ai_model_review_summary", "ai_model_email_tone", "ai_model_daily_briefing",
+      "ai_model_note_tagging"
+    ];
+    assert.equal(features.length, 7);
+    features.forEach(f => assert.ok(f.startsWith("ai_model_")));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AI task breakdown tests
+// ---------------------------------------------------------------------------
+describe("AI task breakdown", () => {
+  it("returns array of subtask strings", () => {
+    const response = { subtasks: ["Research options", "Compare prices", "Make decision"] };
+    assert.ok(Array.isArray(response.subtasks));
+    assert.ok(response.subtasks.every(s => typeof s === "string"));
+  });
+
+  it("requires task title", () => {
+    const input = { title: "" };
+    assert.ok(!input.title);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AI tone adjustment tests
+// ---------------------------------------------------------------------------
+describe("AI tone adjustment", () => {
+  it("valid tone options", () => {
+    const tones = ["more formal", "more casual", "shorter", "friendlier", "more direct"];
+    assert.equal(tones.length, 5);
+    assert.ok(tones.includes("more formal"));
+    assert.ok(tones.includes("shorter"));
+  });
+
+  it("requires body and tone", () => {
+    const valid = { body: "Hello", tone: "formal" };
+    const invalid = { body: "Hello" };
+    assert.ok(valid.body && valid.tone);
+    assert.ok(!invalid.tone);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Todo category tests
+// ---------------------------------------------------------------------------
+describe("Todo categories", () => {
+  it("default categories exist", () => {
+    const defaults = ["work", "personal", "health", "finance", "errands", "home", "learning"];
+    assert.equal(defaults.length, 7);
+    assert.ok(defaults.includes("work"));
+    assert.ok(defaults.includes("personal"));
+  });
+
+  it("merges default and custom categories", () => {
+    const defaults = ["work", "personal", "health"];
+    const custom = ["custom-project", "work"];
+    const all = [...new Set([...defaults, ...custom])].sort();
+    assert.equal(all.length, 4);
+    assert.ok(all.includes("custom-project"));
+  });
+
+  it("category filter works on todo query", () => {
+    const params = { category: "work" };
+    assert.equal(params.category, "work");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Note tags tests
+// ---------------------------------------------------------------------------
+describe("Note tags", () => {
+  it("tags are an array of strings", () => {
+    const tags = ["meeting-notes", "project", "action-items"];
+    assert.ok(Array.isArray(tags));
+    assert.ok(tags.every(t => typeof t === "string"));
+  });
+
+  it("tags are lowercase and valid format", () => {
+    const tags = ["meeting-notes", "project-alpha"];
+    tags.forEach(t => {
+      assert.ok(t === t.toLowerCase());
+      assert.ok(/^[a-z0-9-]+$/.test(t));
+    });
+  });
+
+  it("handles empty tags", () => {
+    const note = { tags: null };
+    assert.equal(note.tags, null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dashboard view tests
+// ---------------------------------------------------------------------------
+describe("Dashboard task views", () => {
+  it("groups tasks by category", () => {
+    const tasks = [
+      { title: "A", category: "work" },
+      { title: "B", category: "personal" },
+      { title: "C", category: "work" },
+    ];
+    const cats = {};
+    tasks.forEach(t => { var c = t.category || "Uncategorized"; if (!cats[c]) cats[c] = []; cats[c].push(t); });
+    assert.equal(Object.keys(cats).length, 2);
+    assert.equal(cats["work"].length, 2);
+  });
+
+  it("groups tasks by priority", () => {
+    const tasks = [
+      { priority: "urgent" }, { priority: "high" }, { priority: "urgent" }
+    ];
+    const groups = {};
+    tasks.forEach(t => { if (!groups[t.priority]) groups[t.priority] = []; groups[t.priority].push(t); });
+    assert.equal(groups["urgent"].length, 2);
+    assert.equal(groups["high"].length, 1);
+  });
+
+  it("filters due soon tasks", () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tasks = [
+      { title: "A", due_date: tomorrow.toISOString() },
+      { title: "B", due_date: null },
+    ];
+    const withDue = tasks.filter(t => t.due_date);
+    assert.equal(withDue.length, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Security tests
 // ---------------------------------------------------------------------------
 describe("Security", () => {

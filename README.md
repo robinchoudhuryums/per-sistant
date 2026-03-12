@@ -7,7 +7,7 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 ```
 ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
 │   Browser (PWA)  │────>│  Express Server  │────>│  Claude API      │
-│  Tasks / Emails  │     │  (port 3001)     │     │  (AI drafting)   │
+│  Tasks / Emails  │     │  (port 3001)     │     │  (7 AI features) │
 │  Notes / Calendar│     └────────┬─────────┘     └──────────────────┘
 └──────────────────┘              │
                         ┌────────┴────────┐
@@ -27,11 +27,11 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 ### To-Do Lists
 - **Three horizons**: Short-term, medium-term, long-term
 - **Four priorities**: Low, medium, high, urgent
-- **Categories**: Custom labels (work, personal, health, etc.)
+- **Categories**: Preset categories (work, personal, health, finance, errands, home, learning) + custom categories with dropdown selector
 - **Due dates**: With overdue detection and visual indicators
-- **Filters**: By horizon, status (pending/completed), and priority
+- **Filters**: By horizon, status (pending/completed), priority, and category
 - **Drag-and-drop**: Reorder tasks by dragging
-- **Natural language Quick Add**: Type "Buy groceries tomorrow urgent" and it auto-detects priority, horizon, and due date
+- **Natural language Quick Add**: Type "Buy groceries tomorrow urgent" and it auto-detects priority, horizon, and due date (AI-enhanced when enabled)
 
 ### Recurring Tasks
 - **Five recurrence rules**: Daily, weekly, monthly, yearly, weekdays
@@ -40,6 +40,7 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 
 ### Subtasks
 - **Checklists**: Add subtasks within any todo
+- **AI Task Breakdown**: Click "AI Breakdown" to auto-generate subtasks from a task title
 - **Progress tracking**: Visual progress bar showing completion percentage
 - **Inline management**: Add, check off, and delete subtasks without leaving the todo view
 
@@ -48,6 +49,7 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 - **Schedule**: Set a specific date/time for automatic sending
 - **Quick Send**: Natural language input — *"Send an email to Mom Tuesday morning at 9AM about dinner plans"*
 - **AI Drafting**: Claude-powered email composition — describe what you want and AI writes the email
+- **AI Tone Adjustment**: One-click rewrite — make any email more formal, casual, shorter, friendlier, or more direct
 - **Email Templates**: Save and reuse common email formats
 - **Contact lookup**: Type a name, auto-fills the email address
 - **SMTP**: Sends via any SMTP provider (Gmail, Outlook, etc.)
@@ -57,6 +59,7 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 - **Quick notes**: Title + content, color-coded cards
 - **Pin important notes**: Pinned notes stay at the top
 - **Colors**: Default, warm, teal, green, blue
+- **Tags**: Add tags manually or use AI auto-tagging to suggest tags based on content
 - **Reminders**: Optional datetime reminders on notes
 
 ### Contacts
@@ -66,6 +69,8 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 
 ### Dashboard
 - **Overview cards**: Task counts, email stats, note totals
+- **Task overview tabs**: All / By Category / By Urgency / Due Soon views
+- **AI Daily Briefing**: AI-generated summary of your day's priorities and schedule
 - **Upcoming tasks**: Next due items at a glance
 - **Scheduled emails**: Pending sends
 - **Global search**: Search across all todos, emails, and notes
@@ -78,9 +83,23 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 
 ### Weekly Review
 - **Stats cards**: Tasks completed, created, emails sent, notes added
+- **AI Weekly Summary**: AI-generated narrative of your week's accomplishments and what needs attention
 - **Completed tasks list**: What you accomplished this week
 - **Overdue items**: Tasks needing attention
 - **Upcoming**: What's coming next week
+
+### AI Features (7 total)
+All AI features are optional and independently configurable. Choose **Haiku** (fast, ~$0.0003/call), **Sonnet** (smarter, ~$0.002/call), or **Off** for each feature in Settings.
+
+| Feature | Description | Default |
+|---------|-------------|---------|
+| Email Drafting | Compose emails from a prompt | Haiku |
+| Task Breakdown | Auto-generate subtasks from task title | Haiku |
+| Smart Quick Add | AI-parse natural language into structured tasks | Off |
+| Weekly Review Summary | Narrative summary of your week | Haiku |
+| Email Tone Adjustment | Rewrite emails (formal/casual/shorter/etc.) | Haiku |
+| Daily Briefing | Dashboard summary of today's priorities | Off |
+| Note Auto-Tagging | Suggest tags for notes based on content | Off |
 
 ### Authentication
 Two login modes — set one in your environment variables:
@@ -154,7 +173,7 @@ docker compose up --build
 npm test
 ```
 
-57 tests across 16 suites covering: time parsing, input validation, data structures, sorting, security, recurring tasks, subtasks, email templates, natural language parsing, global search, calendar, weekly review, drag-and-drop, and keyboard shortcuts.
+73 tests across 22 suites covering: time parsing, input validation, data structures, sorting, security, recurring tasks, subtasks, email templates, natural language parsing, global search, calendar, weekly review, drag-and-drop, keyboard shortcuts, AI model selection, AI task breakdown, AI tone adjustment, todo categories, note tags, and dashboard views.
 
 ## API Endpoints
 
@@ -200,11 +219,20 @@ npm test
 | `POST` | `/api/email-templates` | Create template |
 | `PUT` | `/api/email-templates/:id` | Update template |
 | `DELETE` | `/api/email-templates/:id` | Delete template |
+| `GET` | `/api/todo-categories` | List all categories (defaults + custom) |
 | `POST` | `/api/ai/draft-email` | AI-powered email drafting |
+| `POST` | `/api/ai/task-breakdown` | Generate subtasks from task title |
+| `POST` | `/api/ai/parse-todo` | Parse natural language into structured todo |
+| `POST` | `/api/ai/review-summary` | Generate weekly review narrative |
+| `POST` | `/api/ai/adjust-tone` | Rewrite email in different tone |
+| `GET` | `/api/ai/daily-briefing` | Generate daily task briefing |
+| `POST` | `/api/ai/suggest-tags` | Suggest tags for note content |
+| `GET` | `/api/ai/models` | Get per-feature model preferences |
+| `PATCH` | `/api/ai/models` | Update per-feature model preferences |
 | `GET` | `/api/search` | Global search (query: q) |
-| `GET` | `/api/calendar/:year/:month` | Calendar events for month |
+| `GET` | `/api/calendar` | Calendar events (query: month, year) |
 | `GET` | `/api/review` | Weekly review stats |
-| `GET` | `/api/perfin/subscriptions` | Proxy to Perfin API |
+| `GET` | `/api/perfin/stats` | Proxy to Perfin API |
 
 ## Environment Variables
 

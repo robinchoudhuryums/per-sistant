@@ -41,6 +41,31 @@ try {
   Anthropic = require("@anthropic-ai/sdk").default || require("@anthropic-ai/sdk");
 } catch { Anthropic = null; }
 
+// AI model mapping — always use latest versions
+const AI_MODELS = {
+  haiku: "claude-haiku-4-5-20251001",
+  sonnet: "claude-sonnet-4-6-20250415",
+};
+
+async function callAI(model, prompt, maxTokens = 1024) {
+  if (!Anthropic || !process.env.ANTHROPIC_API_KEY) throw new Error("AI not configured");
+  if (!AI_MODELS[model]) throw new Error("Invalid model: " + model);
+  const client = new Anthropic();
+  const msg = await client.messages.create({
+    model: AI_MODELS[model],
+    max_tokens: maxTokens,
+    messages: [{ role: "user", content: prompt }],
+  });
+  return msg.content[0].text.trim();
+}
+
+async function getAIModelForFeature(feature) {
+  try {
+    const r = await pool.query(`SELECT ai_model_${feature} as model FROM user_settings WHERE id = 1`);
+    return r.rows[0]?.model || "off";
+  } catch { return "off"; }
+}
+
 const SESSION_PASSWORD = process.env.SESSION_PASSWORD;
 const SESSION_PIN = process.env.SESSION_PIN;
 const AUTH_SECRET = SESSION_PASSWORD || SESSION_PIN || null;
@@ -716,11 +741,11 @@ app.get("/api/notes", async (req, res) => {
 
 app.post("/api/notes", async (req, res) => {
   try {
-    const { title, content, pinned, color, reminder_at } = req.body;
+    const { title, content, pinned, color, reminder_at, tags } = req.body;
     if (!content) return res.status(400).json({ error: "Content is required." });
     const r = await pool.query(
-      `INSERT INTO notes (title, content, pinned, color, reminder_at) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [title || null, content, pinned || false, color || "default", reminder_at || null]
+      `INSERT INTO notes (title, content, pinned, color, reminder_at, tags) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [title || null, content, pinned || false, color || "default", reminder_at || null, tags || null]
     );
     res.json(r.rows[0]);
   } catch (err) {
@@ -730,7 +755,7 @@ app.post("/api/notes", async (req, res) => {
 
 app.patch("/api/notes/:id", async (req, res) => {
   try {
-    const { title, content, pinned, color, reminder_at } = req.body;
+    const { title, content, pinned, color, reminder_at, tags } = req.body;
     const fields = [];
     const params = [];
     let idx = 1;
@@ -739,6 +764,7 @@ app.patch("/api/notes/:id", async (req, res) => {
     if (pinned !== undefined) { fields.push(`pinned = $${idx++}`); params.push(pinned); }
     if (color !== undefined) { fields.push(`color = $${idx++}`); params.push(color); }
     if (reminder_at !== undefined) { fields.push(`reminder_at = $${idx++}`); params.push(reminder_at); }
+    if (tags !== undefined) { fields.push(`tags = $${idx++}`); params.push(tags); }
     if (!fields.length) return res.status(400).json({ error: "No fields to update." });
     params.push(req.params.id);
     const r = await pool.query(`UPDATE notes SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, params);
@@ -1009,28 +1035,18 @@ app.delete("/api/email-templates/:id", async (req, res) => {
 // API — AI Email Drafting
 // ============================================================================
 app.post("/api/ai/draft-email", async (req, res) => {
-  if (!Anthropic || !process.env.ANTHROPIC_API_KEY) {
-    return res.status(500).json({ error: "AI not configured. Set ANTHROPIC_API_KEY in .env" });
-  }
   try {
+    const model = await getAIModelForFeature("email_draft");
+    if (model === "off") return res.status(400).json({ error: "AI email drafting is disabled. Enable it in Settings." });
     const { prompt, recipient_name } = req.body;
     if (!prompt) return res.status(400).json({ error: "Prompt is required." });
-    const client = new Anthropic();
-    const msg = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 1024,
-      messages: [{
-        role: "user",
-        content: `Draft a professional email based on this request: "${prompt}"${recipient_name ? ` The recipient's name is ${recipient_name}.` : ""}
+    const text = await callAI(model, `Draft a professional email based on this request: "${prompt}"${recipient_name ? ` The recipient's name is ${recipient_name}.` : ""}
 
 Return ONLY a JSON object with these fields:
 - "subject": the email subject line
 - "body": the email body text (plain text, no HTML)
 
-Keep the tone professional but warm. Do not include any other text outside the JSON.`
-      }],
-    });
-    const text = msg.content[0].text.trim();
+Keep the tone professional but warm. Do not include any other text outside the JSON.`);
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
     const draft = JSON.parse(jsonMatch[0]);
@@ -1038,6 +1054,205 @@ Keep the tone professional but warm. Do not include any other text outside the J
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ============================================================================
+// API — AI Task Breakdown (generate subtasks)
+// ============================================================================
+app.post("/api/ai/task-breakdown", async (req, res) => {
+  try {
+    const model = await getAIModelForFeature("task_breakdown");
+    if (model === "off") return res.status(400).json({ error: "AI task breakdown is disabled. Enable it in Settings." });
+    const { title, description } = req.body;
+    if (!title) return res.status(400).json({ error: "Task title is required." });
+    const text = await callAI(model, `Break down this task into actionable subtasks (3-8 items):
+
+Task: "${title}"${description ? `\nDetails: "${description}"` : ""}
+
+Return ONLY a JSON array of strings, where each string is a subtask. Keep them specific and actionable.
+Example: ["Research options", "Compare prices", "Make decision"]`, 512);
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
+    const subtasks = JSON.parse(jsonMatch[0]);
+    res.json({ subtasks });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// API — AI Quick Add (parse natural language into structured todo)
+// ============================================================================
+app.post("/api/ai/parse-todo", async (req, res) => {
+  try {
+    const model = await getAIModelForFeature("quick_add");
+    if (model === "off") return res.status(400).json({ error: "AI quick add is disabled." });
+    const { input } = req.body;
+    if (!input) return res.status(400).json({ error: "Input is required." });
+    const today = new Date().toISOString().split("T")[0];
+    const text = await callAI(model, `Parse this natural language task description into structured data. Today is ${today}.
+
+Input: "${input}"
+
+Return ONLY a JSON object with:
+- "title": clean task title (remove time/priority words)
+- "priority": one of "low", "medium", "high", "urgent"
+- "horizon": one of "short", "medium", "long"
+- "category": inferred category (e.g. "work", "personal", "health", "finance", "errands", "home") or null
+- "due_date": ISO date string (YYYY-MM-DD) if a date/time is mentioned, or null
+
+Be smart about inferring: "ASAP" = urgent, "someday" = low priority long-term, "this week" = short-term, etc.`, 256);
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
+    const parsed = JSON.parse(jsonMatch[0]);
+    res.json(parsed);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// API — AI Weekly Review Summary
+// ============================================================================
+app.post("/api/ai/review-summary", async (req, res) => {
+  try {
+    const model = await getAIModelForFeature("review_summary");
+    if (model === "off") return res.status(400).json({ error: "AI review summary is disabled." });
+    const { stats } = req.body;
+    if (!stats) return res.status(400).json({ error: "Stats required." });
+    const text = await callAI(model, `Write a brief, encouraging weekly review summary (2-4 sentences) based on these stats:
+
+- Tasks completed: ${stats.tasks_completed}
+- Tasks created: ${stats.tasks_created}
+- Emails sent: ${stats.emails_sent}
+- Notes created: ${stats.notes_created}
+- Overdue tasks: ${stats.overdue}
+- Completed task titles: ${stats.completed_titles || "none"}
+
+Be conversational and motivating. Highlight accomplishments. If there are overdue tasks, gently remind. Don't use emojis.`, 256);
+    res.json({ summary: text });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// API — AI Email Tone Adjustment
+// ============================================================================
+app.post("/api/ai/adjust-tone", async (req, res) => {
+  try {
+    const model = await getAIModelForFeature("email_tone");
+    if (model === "off") return res.status(400).json({ error: "AI tone adjustment is disabled." });
+    const { body, tone } = req.body;
+    if (!body || !tone) return res.status(400).json({ error: "Body and tone are required." });
+    const text = await callAI(model, `Rewrite this email body with a "${tone}" tone. Keep the same meaning and content but adjust the language.
+
+Original email:
+${body}
+
+Return ONLY the rewritten email body text (plain text, no JSON wrapping, no quotes).
+Valid tones: more formal, more casual, shorter, friendlier, more direct.`, 1024);
+    res.json({ body: text });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// API — AI Daily Briefing
+// ============================================================================
+app.get("/api/ai/daily-briefing", async (req, res) => {
+  try {
+    const model = await getAIModelForFeature("daily_briefing");
+    if (model === "off") return res.status(400).json({ error: "AI daily briefing is disabled." });
+    const today = new Date().toISOString().split("T")[0];
+    const [pending, overdue, scheduled, upcoming] = await Promise.all([
+      pool.query("SELECT title, priority, category, due_date FROM todos WHERE NOT completed ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END LIMIT 15"),
+      pool.query("SELECT title, due_date FROM todos WHERE NOT completed AND due_date < $1", [today]),
+      pool.query("SELECT subject, recipient_name, scheduled_at FROM emails WHERE status = 'scheduled' AND DATE(scheduled_at) = $1", [today]),
+      pool.query("SELECT title, due_date FROM todos WHERE NOT completed AND due_date = $1", [today]),
+    ]);
+    const text = await callAI(model, `Generate a brief, helpful daily briefing (3-5 sentences) for today (${today}). Be conversational and actionable.
+
+Today's tasks (${upcoming.rows.length}): ${upcoming.rows.map(t => t.title).join(", ") || "none"}
+Overdue tasks (${overdue.rows.length}): ${overdue.rows.map(t => t.title).join(", ") || "none"}
+Scheduled emails today: ${scheduled.rows.map(e => `"${e.subject}" to ${e.recipient_name}`).join(", ") || "none"}
+Total pending tasks: ${pending.rows.length}
+Top priorities: ${pending.rows.slice(0, 5).map(t => `${t.title} (${t.priority})`).join(", ")}
+
+Summarize what needs attention today. Don't use emojis.`, 300);
+    res.json({ briefing: text });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// API — AI Note Auto-Tagging
+// ============================================================================
+app.post("/api/ai/suggest-tags", async (req, res) => {
+  try {
+    const model = await getAIModelForFeature("note_tagging");
+    if (model === "off") return res.status(400).json({ error: "AI note tagging is disabled." });
+    const { title, content } = req.body;
+    if (!content) return res.status(400).json({ error: "Content is required." });
+    const text = await callAI(model, `Suggest 1-4 short tags for this note. Tags should be lowercase single words or hyphenated phrases.
+
+${title ? `Title: "${title}"` : ""}
+Content: "${content.substring(0, 500)}"
+
+Return ONLY a JSON array of tag strings.
+Example: ["meeting-notes", "project-alpha", "action-items"]`, 128);
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
+    const tags = JSON.parse(jsonMatch[0]);
+    res.json({ tags });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// API — AI Model Preferences
+// ============================================================================
+app.get("/api/ai/models", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT ai_model_email_draft, ai_model_task_breakdown, ai_model_quick_add, ai_model_review_summary, ai_model_email_tone, ai_model_daily_briefing, ai_model_note_tagging FROM user_settings WHERE id = 1");
+    const models = r.rows[0] || {};
+    models.available = !!(Anthropic && process.env.ANTHROPIC_API_KEY);
+    res.json(models);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch("/api/ai/models", async (req, res) => {
+  try {
+    const allowed = ["ai_model_email_draft", "ai_model_task_breakdown", "ai_model_quick_add", "ai_model_review_summary", "ai_model_email_tone", "ai_model_daily_briefing", "ai_model_note_tagging"];
+    const validValues = ["haiku", "sonnet", "off"];
+    const fields = []; const params = []; let idx = 1;
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) {
+        if (!validValues.includes(req.body[key])) return res.status(400).json({ error: `Invalid value for ${key}: must be haiku, sonnet, or off` });
+        fields.push(`${key} = $${idx++}`);
+        params.push(req.body[key]);
+      }
+    }
+    if (!fields.length) return res.status(400).json({ error: "No fields to update." });
+    const r = await pool.query(`UPDATE user_settings SET ${fields.join(", ")} WHERE id = 1 RETURNING *`, params);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Todo Categories (list distinct categories)
+// ============================================================================
+app.get("/api/todo-categories", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT DISTINCT category FROM todos WHERE category IS NOT NULL AND category != '' ORDER BY category");
+    const defaults = ["work", "personal", "health", "finance", "errands", "home", "learning"];
+    const dbCats = r.rows.map(row => row.category);
+    const all = [...new Set([...defaults, ...dbCats])].sort();
+    res.json(all);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ============================================================================
@@ -1180,6 +1395,28 @@ ${themeScript()}
 
   <div class="top-cards" id="cards"></div>
 
+  <!-- AI Daily Briefing -->
+  <div id="briefing-section" style="display:none;margin-bottom:24px;">
+    <div class="section">
+      <h2>Today's Briefing</h2>
+      <div id="briefing-content" style="font-size:14px;font-weight:300;line-height:1.7;"></div>
+    </div>
+  </div>
+
+  <!-- Task Overview with Tabs -->
+  <div class="section" style="margin-bottom:24px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <h2 style="margin-bottom:0;">Task Overview</h2>
+    </div>
+    <div class="filters" id="dash-task-filters">
+      <button class="active" onclick="setDashView(this,'all')">All</button>
+      <button onclick="setDashView(this,'category')">By Category</button>
+      <button onclick="setDashView(this,'urgency')">By Urgency</button>
+      <button onclick="setDashView(this,'due')">Due Soon</button>
+    </div>
+    <div id="dash-tasks"></div>
+  </div>
+
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
     <div class="section">
       <h2>Upcoming Tasks</h2>
@@ -1221,6 +1458,48 @@ function doSearch(q) {
   }, 300);
 }
 
+var dashView = 'all';
+var allTodos = [];
+function setDashView(btn, v) { dashView = v; document.querySelectorAll('#dash-task-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); renderDashTasks(); }
+
+function renderDashTasks() {
+  var container = document.getElementById('dash-tasks');
+  if (!allTodos.length) { container.innerHTML = '<div class="empty-msg">No pending tasks</div>'; return; }
+  var html = '';
+  if (dashView === 'category') {
+    var cats = {};
+    allTodos.forEach(t => { var c = t.category || 'Uncategorized'; if (!cats[c]) cats[c] = []; cats[c].push(t); });
+    Object.keys(cats).sort().forEach(c => {
+      html += '<div style="margin-bottom:16px;"><div style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border);">'+esc(c)+' ('+cats[c].length+')</div>';
+      cats[c].slice(0,5).forEach(t => { html += renderDashTodo(t); });
+      if (cats[c].length > 5) html += '<div style="font-size:11px;color:var(--text-muted);padding:4px 0;">+'+(cats[c].length-5)+' more</div>';
+      html += '</div>';
+    });
+  } else if (dashView === 'urgency') {
+    ['urgent','high','medium','low'].forEach(p => {
+      var items = allTodos.filter(t=>t.priority===p);
+      if (!items.length) return;
+      html += '<div style="margin-bottom:16px;"><div style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border);">'+p+' ('+items.length+')</div>';
+      items.slice(0,5).forEach(t => { html += renderDashTodo(t); });
+      if (items.length > 5) html += '<div style="font-size:11px;color:var(--text-muted);padding:4px 0;">+'+(items.length-5)+' more</div>';
+      html += '</div>';
+    });
+  } else if (dashView === 'due') {
+    var withDue = allTodos.filter(t=>t.due_date).sort((a,b)=>new Date(a.due_date)-new Date(b.due_date));
+    if (!withDue.length) { container.innerHTML = '<div class="empty-msg">No tasks with due dates</div>'; return; }
+    withDue.slice(0,10).forEach(t => { html += renderDashTodo(t); });
+  } else {
+    allTodos.slice(0,10).forEach(t => { html += renderDashTodo(t); });
+    if (allTodos.length > 10) html += '<div style="font-size:11px;color:var(--text-muted);padding:8px 0;text-align:center;"><a href="/todos">View all '+allTodos.length+' tasks &rarr;</a></div>';
+  }
+  container.innerHTML = html;
+}
+
+function renderDashTodo(t) {
+  var overdue = t.due_date && new Date(t.due_date) <= new Date() ? ' style="color:var(--red)"' : '';
+  return '<div class="todo-item"><div class="todo-content"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span>'+(t.category?'<span>'+esc(t.category)+'</span>':'')+(t.due_date?'<span'+overdue+'>Due: '+new Date(t.due_date).toLocaleDateString()+'</span>':'')+(t.recurring?'<span class="badge recurring">recurring</span>':'')+'</div></div></div>';
+}
+
 async function load() {
   const stats = await fetch('/api/stats').then(r=>r.json());
   document.getElementById('cards').innerHTML = [
@@ -1234,8 +1513,10 @@ async function load() {
     {label:'Notes',value:stats.notes.total,cls:'warm'},
   ].map(c => '<div class="card"><div class="label">'+c.label+'</div><div class="value '+c.cls+'">'+c.value+'</div></div>').join('');
 
-  const todos = await fetch('/api/todos?completed=false').then(r=>r.json());
-  const upcoming = todos.filter(t=>t.due_date).sort((a,b)=>new Date(a.due_date)-new Date(b.due_date)).slice(0,5);
+  allTodos = await fetch('/api/todos?completed=false').then(r=>r.json());
+  renderDashTasks();
+
+  const upcoming = allTodos.filter(t=>t.due_date).sort((a,b)=>new Date(a.due_date)-new Date(b.due_date)).slice(0,5);
   document.getElementById('upcoming-tasks').innerHTML = upcoming.length
     ? upcoming.map(t => '<div class="todo-item"><div class="todo-content"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span>'+(t.recurring?'<span class="badge recurring">recurring</span>':'')+'<span>Due: '+new Date(t.due_date).toLocaleDateString()+'</span></div></div></div>').join('')
     : '<div class="empty-msg">No upcoming tasks with due dates</div>';
@@ -1265,6 +1546,14 @@ async function load() {
       document.getElementById('perfin-data').innerHTML = html;
     }
   } catch {}
+
+  // Load AI daily briefing (non-blocking)
+  fetch('/api/ai/daily-briefing').then(r=>r.json()).then(d => {
+    if (d.briefing) {
+      document.getElementById('briefing-content').textContent = d.briefing;
+      document.getElementById('briefing-section').style.display = 'block';
+    }
+  }).catch(function(){});
 }
 
 // Keyboard shortcuts
@@ -1300,6 +1589,9 @@ ${themeScript()}
     <button onclick="openQuickTodo()">Quick Add</button>
   </div>
 
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;font-weight:500;">
+    <span style="padding:6px 0;">View:</span>
+  </div>
   <div class="filters" id="horizon-filters">
     <button class="active" onclick="setHorizon(this,'')">All</button>
     <button onclick="setHorizon(this,'short')">Short-term</button>
@@ -1310,6 +1602,16 @@ ${themeScript()}
     <button class="active" onclick="setStatus(this,'pending')">Pending</button>
     <button onclick="setStatus(this,'all')">All</button>
     <button onclick="setStatus(this,'done')">Completed</button>
+  </div>
+  <div class="filters" id="priority-filters">
+    <button class="active" onclick="setPriority(this,'')">Any Priority</button>
+    <button onclick="setPriority(this,'urgent')">Urgent</button>
+    <button onclick="setPriority(this,'high')">High</button>
+    <button onclick="setPriority(this,'medium')">Medium</button>
+    <button onclick="setPriority(this,'low')">Low</button>
+  </div>
+  <div class="filters" id="category-filters">
+    <button class="active" onclick="setCategory(this,'')">All Categories</button>
   </div>
 
   <div class="section">
@@ -1336,7 +1638,12 @@ ${themeScript()}
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div><label>Category</label>
-        <input type="text" id="f-category" placeholder="e.g. work, personal"></div>
+        <select id="f-category-select" onchange="if(this.value==='__custom__'){document.getElementById('f-category-custom').style.display='block';document.getElementById('f-category-custom').focus();}else{document.getElementById('f-category-custom').style.display='none';}">
+          <option value="">None</option>
+          <option value="__custom__">Custom...</option>
+        </select>
+        <input type="text" id="f-category-custom" placeholder="Type custom category" style="display:none;margin-top:6px;">
+      </div>
       <div><label>Due Date</label>
         <input type="date" id="f-due"></div>
     </div>
@@ -1352,7 +1659,7 @@ ${themeScript()}
       </div>
     </div>
     <div id="subtasks-section" style="display:none;margin-top:16px;">
-      <label>Subtasks</label>
+      <label>Subtasks <button onclick="aiBreakdown()" id="ai-breakdown-btn" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Breakdown</button></label>
       <div id="subtask-list-edit"></div>
       <div style="display:flex;gap:8px;margin-top:8px;">
         <input type="text" id="new-subtask" placeholder="Add subtask..." style="flex:1">
@@ -1382,23 +1689,46 @@ ${themeScript()}
     </div>
     <div class="modal-actions">
       <button onclick="closeQuickTodo()">Cancel</button>
-      <button class="primary" onclick="parseQuickTodo()">Parse</button>
+      <button class="primary" onclick="parseQuickTodoAI()">Parse</button>
       <button class="primary" id="qt-confirm" style="display:none" onclick="confirmQuickTodo()">Create</button>
     </div>
   </div>
 </div>
 
 <script>
-var curHorizon = '', curStatus = 'pending';
+var curHorizon = '', curStatus = 'pending', curPriority = '', curCategory = '';
 var dragSrcId = null;
 function setHorizon(btn, h) { curHorizon = h; document.querySelectorAll('#horizon-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
 function setStatus(btn, s) { curStatus = s; document.querySelectorAll('#status-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
+function setPriority(btn, p) { curPriority = p; document.querySelectorAll('#priority-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
+function setCategory(btn, c) { curCategory = c; document.querySelectorAll('#category-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
+
+async function loadCategories() {
+  try {
+    var cats = await fetch('/api/todo-categories').then(r=>r.json());
+    var container = document.getElementById('category-filters');
+    var existing = container.querySelector('button.active');
+    var html = '<button class="'+(curCategory===''?'active':'')+'" onclick="setCategory(this,\\'\\')">All Categories</button>';
+    cats.forEach(c => { html += '<button class="'+(curCategory===c?'active':'')+'" onclick="setCategory(this,\\''+c+'\\')">'+c.charAt(0).toUpperCase()+c.slice(1)+'</button>'; });
+    container.innerHTML = html;
+    // Also populate category select in modal
+    var sel = document.getElementById('f-category-select');
+    var curVal = sel.value;
+    sel.innerHTML = '<option value="">None</option>';
+    cats.forEach(c => { sel.innerHTML += '<option value="'+c+'">'+c.charAt(0).toUpperCase()+c.slice(1)+'</option>'; });
+    sel.innerHTML += '<option value="__custom__">Custom...</option>';
+    sel.value = curVal;
+  } catch {}
+}
 
 async function load() {
+  loadCategories();
   var q = [];
   if (curHorizon) q.push('horizon='+curHorizon);
   if (curStatus === 'pending') q.push('completed=false');
   else if (curStatus === 'done') q.push('completed=true');
+  if (curPriority) q.push('priority='+curPriority);
+  if (curCategory) q.push('category='+curCategory);
   var todos = await fetch('/api/todos'+(q.length?'?'+q.join('&'):'')).then(r=>r.json());
   if (!todos.length) { document.getElementById('todo-list').innerHTML = '<div class="empty-msg">No tasks found</div>'; return; }
 
@@ -1491,7 +1821,9 @@ function openAdd() {
   document.getElementById('f-desc').value = '';
   document.getElementById('f-priority').value = 'medium';
   document.getElementById('f-horizon').value = 'short';
-  document.getElementById('f-category').value = '';
+  document.getElementById('f-category-select').value = '';
+  document.getElementById('f-category-custom').style.display = 'none';
+  document.getElementById('f-category-custom').value = '';
   document.getElementById('f-due').value = '';
   document.getElementById('f-recurring').checked = false;
   document.getElementById('f-recurrence').style.display = 'none';
@@ -1513,7 +1845,17 @@ async function openEdit(id) {
   document.getElementById('f-desc').value = t.description||'';
   document.getElementById('f-priority').value = t.priority;
   document.getElementById('f-horizon').value = t.horizon;
-  document.getElementById('f-category').value = t.category||'';
+  var catSel = document.getElementById('f-category-select');
+  var catCustom = document.getElementById('f-category-custom');
+  if (t.category && ![...catSel.options].some(o=>o.value===t.category)) {
+    catSel.value = '__custom__';
+    catCustom.style.display = 'block';
+    catCustom.value = t.category;
+  } else {
+    catSel.value = t.category || '';
+    catCustom.style.display = 'none';
+    catCustom.value = '';
+  }
   document.getElementById('f-due').value = t.due_date?t.due_date.split('T')[0]:'';
   document.getElementById('f-recurring').checked = t.recurring||false;
   document.getElementById('f-recurrence').style.display = t.recurring ? 'block' : 'none';
@@ -1534,7 +1876,7 @@ async function saveTodo() {
     description: document.getElementById('f-desc').value || null,
     priority: document.getElementById('f-priority').value,
     horizon: document.getElementById('f-horizon').value,
-    category: document.getElementById('f-category').value || null,
+    category: (document.getElementById('f-category-select').value === '__custom__' ? document.getElementById('f-category-custom').value : document.getElementById('f-category-select').value) || null,
     due_date: document.getElementById('f-due').value || null,
     recurring: isRecurring,
     recurrence_rule: isRecurring ? document.getElementById('f-recurrence-rule').value : null,
@@ -1618,6 +1960,48 @@ async function confirmQuickTodo() {
   closeQuickTodo(); load();
 }
 
+// AI Task Breakdown
+async function aiBreakdown() {
+  var title = document.getElementById('f-title').value;
+  if (!title) return alert('Enter a task title first');
+  var btn = document.getElementById('ai-breakdown-btn');
+  btn.textContent = 'Thinking...'; btn.disabled = true;
+  try {
+    var r = await fetch('/api/ai/task-breakdown', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title, description: document.getElementById('f-desc').value})}).then(r=>r.json());
+    if (r.error) { alert(r.error); return; }
+    var todoId = document.getElementById('edit-id').value;
+    if (todoId) {
+      for (var s of r.subtasks) {
+        await fetch('/api/todos/'+todoId+'/subtasks', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:s})});
+      }
+      loadEditSubtasks(todoId);
+    } else {
+      r.subtasks.forEach(s => editSubtasks.push({title:s, completed:false}));
+      renderEditSubtasks();
+    }
+  } catch (err) { alert('AI breakdown failed: '+err.message); }
+  finally { btn.textContent = 'AI Breakdown'; btn.disabled = false; }
+}
+
+// AI-enhanced Quick Add
+var parsedTodoAI = null;
+async function parseQuickTodoAI() {
+  var input = document.getElementById('qt-input').value.trim();
+  if (!input) return;
+  var btn = document.querySelector('#quick-todo-modal .primary');
+  btn.textContent = 'Parsing...'; btn.disabled = true;
+  try {
+    var r = await fetch('/api/ai/parse-todo', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input})}).then(r=>r.json());
+    if (r.error) { parseQuickTodo(); return; } // Fallback to regex parsing
+    parsedTodo = r;
+    document.getElementById('qt-preview-content').innerHTML =
+      '<div style="font-size:13px;"><strong>Task:</strong> '+esc(r.title)+'<br><strong>Priority:</strong> '+r.priority+'<br><strong>Horizon:</strong> '+r.horizon+'<br><strong>Category:</strong> '+(r.category||'None')+'<br><strong>Due:</strong> '+(r.due_date||'None')+'</div>';
+    document.getElementById('qt-preview').style.display = 'block';
+    document.getElementById('qt-confirm').style.display = 'inline-block';
+  } catch { parseQuickTodo(); } // Fallback to regex
+  finally { btn.textContent = 'Parse'; btn.disabled = false; }
+}
+
 // Keyboard shortcuts
 document.addEventListener('keydown', function(e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
@@ -1676,6 +2060,14 @@ ${themeScript()}
     <input type="text" id="e-subject" placeholder="Subject line">
     <label>Body <button onclick="aiDraft()" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Draft</button></label>
     <textarea id="e-body" style="min-height:160px" placeholder="Write your email..."></textarea>
+    <div id="tone-buttons" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+      <span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;padding:5px 0;">Adjust tone:</span>
+      <button onclick="adjustTone('more formal')" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Formal</button>
+      <button onclick="adjustTone('more casual')" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Casual</button>
+      <button onclick="adjustTone('shorter')" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Shorter</button>
+      <button onclick="adjustTone('friendlier')" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Friendlier</button>
+      <button onclick="adjustTone('more direct')" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Direct</button>
+    </div>
     <label>Schedule Send (optional)</label>
     <input type="datetime-local" id="e-schedule">
     <div class="modal-actions">
@@ -1832,6 +2224,20 @@ async function aiDraft() {
     if (r.body) document.getElementById('e-body').value = r.body;
   } catch (err) { alert('AI draft failed: '+err.message); }
   finally { btn.textContent = 'AI Draft'; btn.disabled = false; }
+}
+
+// Tone adjustment
+async function adjustTone(tone) {
+  var body = document.getElementById('e-body').value;
+  if (!body) return alert('Write or draft an email first');
+  var btns = document.querySelectorAll('.tone-btn');
+  btns.forEach(b => { b.disabled = true; });
+  try {
+    var r = await fetch('/api/ai/adjust-tone', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body, tone})}).then(r=>r.json());
+    if (r.error) { alert(r.error); return; }
+    if (r.body) document.getElementById('e-body').value = r.body;
+  } catch (err) { alert('Tone adjustment failed: '+err.message); }
+  finally { btns.forEach(b => { b.disabled = false; }); }
 }
 
 // Templates
@@ -2015,6 +2421,14 @@ ${themeScript()}
         <input type="checkbox" id="n-pinned" style="width:auto;margin-right:6px;"> Pin to top
       </label>
     </div>
+    <div style="margin-top:12px;">
+      <label>Tags <button onclick="suggestTags()" id="suggest-tags-btn" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Suggest</button></label>
+      <div id="n-tags-list" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;"></div>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="n-tag-input" placeholder="Add tag..." style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();addTag();}">
+        <button onclick="addTag()" style="padding:8px 12px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:6px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
+      </div>
+    </div>
     <div class="modal-actions">
       <button onclick="closeNote()">Cancel</button>
       <button class="primary" onclick="saveNote()">Save</button>
@@ -2025,16 +2439,47 @@ ${themeScript()}
 
 <script>
 var colorMap = {warm:'var(--warm)',teal:'var(--teal)',green:'var(--green)',blue:'var(--blue)',default:'var(--border)'};
+var currentTags = [];
+
+function renderTags() {
+  document.getElementById('n-tags-list').innerHTML = currentTags.map((t,i) =>
+    '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:500;background:var(--surface-2);border:1px solid var(--border);color:var(--text-muted);">'+esc(t)+'<span onclick="removeTag('+i+')" style="cursor:pointer;color:var(--red);font-size:12px;">&times;</span></span>'
+  ).join('');
+}
+function addTag() {
+  var input = document.getElementById('n-tag-input');
+  var tag = input.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  if (tag && !currentTags.includes(tag)) { currentTags.push(tag); renderTags(); }
+  input.value = '';
+}
+function removeTag(i) { currentTags.splice(i, 1); renderTags(); }
+
+async function suggestTags() {
+  var content = document.getElementById('n-content').value;
+  var title = document.getElementById('n-title').value;
+  if (!content) return alert('Write some content first');
+  var btn = document.getElementById('suggest-tags-btn');
+  btn.textContent = 'Thinking...'; btn.disabled = true;
+  try {
+    var r = await fetch('/api/ai/suggest-tags', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title, content})}).then(r=>r.json());
+    if (r.error) { alert(r.error); return; }
+    r.tags.forEach(t => { if (!currentTags.includes(t)) currentTags.push(t); });
+    renderTags();
+  } catch (err) { alert('Failed: '+err.message); }
+  finally { btn.textContent = 'AI Suggest'; btn.disabled = false; }
+}
 
 async function load() {
   var notes = await fetch('/api/notes').then(r=>r.json());
   if (!notes.length) { document.getElementById('notes-grid').innerHTML = '<div class="empty-msg" style="grid-column:1/-1">No notes yet. Create your first note!</div>'; return; }
   document.getElementById('notes-grid').innerHTML = notes.map(n => {
     var borderStyle = n.pinned ? 'border-color:'+(colorMap[n.color]||'var(--warm)') : (n.color!=='default'?'border-color:'+colorMap[n.color]:'');
+    var tagsHtml = n.tags && n.tags.length ? '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px;">'+n.tags.map(t=>'<span style="padding:2px 8px;border-radius:12px;font-size:9px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-muted);">'+esc(t)+'</span>').join('')+'</div>' : '';
     return '<div class="note-card'+(n.pinned?' pinned':'')+'" style="'+borderStyle+'" onclick="openEditNote('+n.id+')">'+
       (n.pinned?'<div style="font-size:10px;color:var(--warm);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">&#128204; Pinned</div>':'')+
       (n.title?'<div class="note-title">'+esc(n.title)+'</div>':'')+
       '<div class="note-preview">'+esc(n.content)+'</div>'+
+      tagsHtml+
       '<div class="note-date">'+new Date(n.updated_at).toLocaleDateString()+
       (n.reminder_at?' &bull; Reminder: '+new Date(n.reminder_at).toLocaleString():'')+
       '</div></div>';
@@ -2050,6 +2495,7 @@ function openNote() {
   document.getElementById('n-reminder').value = '';
   document.getElementById('n-pinned').checked = false;
   document.getElementById('n-delete-btn').style.display = 'none';
+  currentTags = []; renderTags();
   document.getElementById('note-modal').classList.add('active');
 }
 
@@ -2065,6 +2511,7 @@ async function openEditNote(id) {
   document.getElementById('n-reminder').value = n.reminder_at?n.reminder_at.slice(0,16):'';
   document.getElementById('n-pinned').checked = n.pinned;
   document.getElementById('n-delete-btn').style.display = 'inline-block';
+  currentTags = n.tags || []; renderTags();
   document.getElementById('note-modal').classList.add('active');
 }
 
@@ -2077,6 +2524,7 @@ async function saveNote() {
     color: document.getElementById('n-color').value,
     pinned: document.getElementById('n-pinned').checked,
     reminder_at: document.getElementById('n-reminder').value ? new Date(document.getElementById('n-reminder').value).toISOString() : null,
+    tags: currentTags.length ? currentTags : null,
   };
   if (!data.content) return alert('Content is required');
   var id = document.getElementById('n-id').value;
@@ -2302,6 +2750,14 @@ ${themeScript()}
     </div>
   </div>
 
+  <!-- AI Summary -->
+  <div id="review-summary-section" style="display:none;margin-top:24px;">
+    <div class="section">
+      <h2>AI Weekly Summary</h2>
+      <div id="review-summary" style="font-size:14px;font-weight:300;line-height:1.7;"></div>
+    </div>
+  </div>
+
   <div class="section" style="margin-top:24px;">
     <h2>Coming Up Next Week</h2>
     <div id="next-week-list"></div>
@@ -2332,6 +2788,21 @@ async function load() {
   document.getElementById('next-week-list').innerHTML = data.upcoming_tasks.length
     ? data.upcoming_tasks.map(t => '<div class="todo-item"><div class="todo-content"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span>Due: '+new Date(t.due_date).toLocaleDateString()+'</span></div></div></div>').join('')
     : '<div class="empty-msg">No tasks scheduled for next week</div>';
+
+  // Load AI review summary (non-blocking)
+  fetch('/api/ai/review-summary', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stats:{
+    tasks_completed: data.tasks_completed.length,
+    tasks_created: data.tasks_created_count,
+    emails_sent: data.emails_sent_count,
+    notes_created: data.notes_created_count,
+    overdue: data.overdue_tasks.length,
+    completed_titles: data.tasks_completed.map(t=>t.title).join(', ')
+  }})}).then(r=>r.json()).then(d => {
+    if (d.summary) {
+      document.getElementById('review-summary').textContent = d.summary;
+      document.getElementById('review-summary-section').style.display = 'block';
+    }
+  }).catch(function(){});
 }
 function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 load();
@@ -2392,8 +2863,41 @@ ${themeScript()}
   </div>
 
   <div class="section">
-    <h2>AI Email Drafting</h2>
-    <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px;" id="ai-status"></p>
+    <h2>AI Features</h2>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px;" id="ai-status"></p>
+    <div id="ai-models-section" style="display:none;">
+      <p style="font-size:11px;color:var(--text-muted);margin-bottom:16px;">Choose a model for each AI feature. Sonnet is smarter but ~5x more expensive than Haiku. Set to Off to disable.</p>
+      <div style="display:grid;gap:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
+          <div><div style="font-size:13px;font-weight:400;">Email Drafting</div><div style="font-size:10px;color:var(--text-muted);">AI-compose emails from a prompt</div></div>
+          <select id="aim-email_draft" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
+          <div><div style="font-size:13px;font-weight:400;">Task Breakdown</div><div style="font-size:10px;color:var(--text-muted);">Auto-generate subtasks from task title</div></div>
+          <select id="aim-task_breakdown" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
+          <div><div style="font-size:13px;font-weight:400;">Smart Quick Add</div><div style="font-size:10px;color:var(--text-muted);">AI-parse natural language into structured tasks</div></div>
+          <select id="aim-quick_add" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
+          <div><div style="font-size:13px;font-weight:400;">Weekly Review Summary</div><div style="font-size:10px;color:var(--text-muted);">AI-written narrative of your week</div></div>
+          <select id="aim-review_summary" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
+          <div><div style="font-size:13px;font-weight:400;">Email Tone Adjustment</div><div style="font-size:10px;color:var(--text-muted);">Rewrite emails in different tones</div></div>
+          <select id="aim-email_tone" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
+          <div><div style="font-size:13px;font-weight:400;">Daily Briefing</div><div style="font-size:10px;color:var(--text-muted);">AI summary of your day on the dashboard</div></div>
+          <select id="aim-daily_briefing" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;">
+          <div><div style="font-size:13px;font-weight:400;">Note Auto-Tagging</div><div style="font-size:10px;color:var(--text-muted);">Suggest tags when creating notes</div></div>
+          <select id="aim-note_tagging" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="section">
@@ -2446,8 +2950,19 @@ async function load() {
     ? 'SMTP is configured and ready to send emails.'
     : 'SMTP not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS in .env to enable email sending.';
   document.getElementById('ai-status').textContent = s.ai_configured
-    ? 'Claude AI is configured. Use the "AI Draft" button in the email composer.'
-    : 'Not configured. Set ANTHROPIC_API_KEY in .env to enable AI email drafting.';
+    ? 'Claude AI is configured. Manage model preferences for each feature below.'
+    : 'Not configured. Set ANTHROPIC_API_KEY in .env to enable AI features.';
+  if (s.ai_configured) {
+    document.getElementById('ai-models-section').style.display = 'block';
+    try {
+      var models = await fetch('/api/ai/models').then(r=>r.json());
+      var features = ['email_draft','task_breakdown','quick_add','review_summary','email_tone','daily_briefing','note_tagging'];
+      features.forEach(f => {
+        var el = document.getElementById('aim-'+f);
+        if (el) el.value = models['ai_model_'+f] || 'off';
+      });
+    } catch {}
+  }
   if ('Notification' in window && Notification.permission === 'granted') {
     document.getElementById('notif-btn').textContent = 'Notifications Enabled';
     document.getElementById('notif-btn').disabled = true;
@@ -2486,6 +3001,17 @@ async function exportData(type) {
   a.href = URL.createObjectURL(blob);
   a.download = type+'-export-'+new Date().toISOString().split('T')[0]+'.json';
   a.click();
+}
+
+async function saveAIModels() {
+  var data = {};
+  var features = ['email_draft','task_breakdown','quick_add','review_summary','email_tone','daily_briefing','note_tagging'];
+  features.forEach(f => { data['ai_model_'+f] = document.getElementById('aim-'+f).value; });
+  await fetch('/api/ai/models', {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  var el = document.getElementById('status');
+  el.className = 'status-msg success';
+  el.textContent = 'AI model preferences saved.';
+  setTimeout(()=>{ el.className = 'status-msg'; }, 3000);
 }
 
 async function enableNotifications() {
