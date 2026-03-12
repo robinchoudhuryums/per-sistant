@@ -1,2 +1,163 @@
-# per-sistant
-Personal assistant complementary tool to original personal finance tool (separate tools but linked)
+# Per-sistant
+
+Personal assistant tool for task management, email scheduling, and note-taking. Companion app to **[Perfin](https://github.com/robinchoudhuryums/pers-fin)** (personal finance tracker) — same design system, cross-linked navigation.
+
+## Architecture
+
+```
+┌──────────────────┐     ┌──────────────────┐
+│   Browser (PWA)  │────>│  Express Server  │
+│  Tasks / Emails  │     │  (port 3001)     │
+│  Notes / Contacts│     └────────┬─────────┘
+└──────────────────┘              │
+                         ┌────────┴────────┐
+                         │ Neon PostgreSQL  │
+                         │  (todos, emails, │
+                         │   notes, etc.)   │
+                         └────────┬────────┘
+                                  │
+                         ┌────────┴────────┐     ┌──────────────┐
+                         │    node-cron    │────>│  SMTP Server │
+                         │ (email scheduler)│     │  (Gmail etc) │
+                         └─────────────────┘     └──────────────┘
+```
+
+## Features
+
+### To-Do Lists
+- **Three horizons**: Short-term, medium-term, long-term
+- **Four priorities**: Low, medium, high, urgent
+- **Categories**: Custom labels (work, personal, health, etc.)
+- **Due dates**: With overdue detection and visual indicators
+- **Filters**: By horizon, status (pending/completed), and priority
+
+### Email Drafting & Scheduling
+- **Compose**: Full email editor with recipient, subject, body
+- **Schedule**: Set a specific date/time for automatic sending
+- **Quick Send**: Natural language input — *"Send an email to Mom Tuesday morning at 9AM about dinner plans"*
+- **Contact lookup**: Type a name, auto-fills the email address
+- **SMTP**: Sends via any SMTP provider (Gmail, Outlook, etc.)
+- **Scheduler**: Checks every minute for due scheduled emails
+
+### Notes
+- **Quick notes**: Title + content, color-coded cards
+- **Pin important notes**: Pinned notes stay at the top
+- **Colors**: Default, warm, teal, green, blue
+- **Reminders**: Optional datetime reminders on notes
+
+### Contacts
+- **Name→email mapping**: For quick email addressing
+- **Lookup API**: Used by email composer and Quick Send
+- **Environment contacts**: Set `CONTACTS` env var for static contacts
+
+### Authentication
+Two login modes — set one in your environment variables:
+- **`SESSION_PASSWORD`** — text password, shows a standard password input
+- **`SESSION_PIN`** — numeric PIN, shows a PIN pad with dot indicators
+
+Sessions expire after a configurable timeout (default 15 minutes, adjustable in Settings).
+
+### Dark/Light Theme
+Toggle between Night Mode (default) and Day Mode in Settings. Identical to Perfin's theme system.
+
+### Perfin Integration
+- Set `PERFIN_URL` to add a **Perfin** link in the navigation bar
+- Both apps share the same design language and color palette
+- Can share the same Neon database or use separate databases
+
+### Mobile App (PWA)
+Installable as a home screen icon:
+- **iPhone**: Open in Safari → Share → "Add to Home Screen"
+- **Android**: Chrome → Menu → "Install app"
+
+## Setup
+
+### 1. Environment
+
+```bash
+cp .env.example .env
+# Fill in your Neon DB URL, auth, and SMTP credentials
+```
+
+### 2. Run Locally
+
+```bash
+npm install && node server.js
+# Open http://localhost:3001
+```
+
+The server runs **auto-migration on startup** — all required tables are created automatically.
+
+### 3. Deployment
+
+**Render (free):** See `render.yaml` — set env vars in dashboard.
+
+**Fly.io (~$2/mo):**
+```bash
+fly launch --name per-sistant
+fly secrets set NEON_DATABASE_URL="postgres://..."
+fly secrets set SESSION_PASSWORD="..."
+fly deploy
+```
+
+**Docker:**
+```bash
+docker compose up --build
+```
+
+## Running Tests
+
+```bash
+npm test
+```
+
+28 tests covering time expression parsing, input validation, data structures, sorting, and security logic.
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/` | Dashboard |
+| `GET` | `/todos` | To-do list page |
+| `GET` | `/emails` | Email management page |
+| `GET` | `/notes` | Notes page |
+| `GET` | `/contacts` | Contact management page |
+| `GET` | `/settings` | Settings page |
+| `GET` | `/login` | Authentication |
+| `GET` | `/api/todos` | List todos (query: horizon, priority, completed, category) |
+| `POST` | `/api/todos` | Create todo |
+| `PATCH` | `/api/todos/:id` | Update todo |
+| `DELETE` | `/api/todos/:id` | Delete todo |
+| `GET` | `/api/emails` | List emails (query: status) |
+| `POST` | `/api/emails` | Create email |
+| `PATCH` | `/api/emails/:id` | Update email |
+| `DELETE` | `/api/emails/:id` | Delete email |
+| `POST` | `/api/emails/:id/send` | Send email now |
+| `GET` | `/api/notes` | List notes |
+| `POST` | `/api/notes` | Create note |
+| `PATCH` | `/api/notes/:id` | Update note |
+| `DELETE` | `/api/notes/:id` | Delete note |
+| `GET` | `/api/contacts` | List contacts |
+| `POST` | `/api/contacts` | Add contact |
+| `PATCH` | `/api/contacts/:id` | Update contact |
+| `DELETE` | `/api/contacts/:id` | Delete contact |
+| `GET` | `/api/contacts/lookup/:name` | Lookup contact by name |
+| `GET` | `/api/settings` | Get settings |
+| `PATCH` | `/api/settings` | Update settings |
+| `GET` | `/api/stats` | Dashboard statistics |
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `NEON_DATABASE_URL` | Neon PostgreSQL connection string |
+| `SESSION_PASSWORD` | Text password for login (optional) |
+| `SESSION_PIN` | Numeric PIN for PIN pad login (optional) |
+| `SESSION_SECRET` | Session cookie secret (auto-generated if not set) |
+| `SMTP_HOST` | SMTP server hostname |
+| `SMTP_PORT` | SMTP port (default: 587) |
+| `SMTP_USER` | SMTP username |
+| `SMTP_PASS` | SMTP password |
+| `SMTP_FROM` | From email address |
+| `CONTACTS` | JSON map of name→email |
+| `PERFIN_URL` | URL to linked Perfin instance |
