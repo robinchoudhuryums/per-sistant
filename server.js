@@ -36,6 +36,11 @@ try { nodemailer = require("nodemailer"); } catch { nodemailer = null; }
 let cron;
 try { cron = require("node-cron"); } catch { cron = null; }
 
+let Anthropic;
+try {
+  Anthropic = require("@anthropic-ai/sdk").default || require("@anthropic-ai/sdk");
+} catch { Anthropic = null; }
+
 const SESSION_PASSWORD = process.env.SESSION_PASSWORD;
 const SESSION_PIN = process.env.SESSION_PIN;
 const AUTH_SECRET = SESSION_PASSWORD || SESSION_PIN || null;
@@ -334,6 +339,65 @@ const SHARED_CSS = `
     .filters button:hover { border-color: var(--warm); color: var(--text); }
     .filters button.active { border-color: var(--warm); color: var(--warm); background: rgba(212,165,116,0.08); }
 
+    /* Subtasks */
+    .subtask-list { margin-top: 8px; padding-left: 32px; }
+    .subtask-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+    .subtask-check { width: 16px; height: 16px; border: 1.5px solid var(--border); border-radius: 50%;
+                     cursor: pointer; flex-shrink: 0; transition: all 0.2s;
+                     display: flex; align-items: center; justify-content: center; }
+    .subtask-check:hover { border-color: var(--warm); }
+    .subtask-check.done { border-color: var(--green); background: var(--green); }
+    .subtask-check.done::after { content: '\\2713'; color: var(--bg); font-size: 9px; font-weight: 700; }
+    .subtask-text.done { text-decoration: line-through; opacity: 0.4; }
+    .subtask-add { font-size: 11px; color: var(--text-muted); cursor: pointer; padding: 4px 0; }
+    .subtask-add:hover { color: var(--warm); }
+    .subtask-progress { height: 3px; background: var(--surface-2); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+    .subtask-progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 0.3s; }
+
+    /* Calendar */
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+    .cal-header { text-align: center; font-size: 10px; color: var(--text-muted); text-transform: uppercase;
+                  letter-spacing: 1px; padding: 8px 0; font-weight: 500; }
+    .cal-day { min-height: 80px; padding: 6px; border-radius: 6px; background: var(--surface);
+               border: 1px solid transparent; transition: all 0.2s; cursor: pointer; }
+    .cal-day:hover { border-color: var(--border-hover); }
+    .cal-day.today { border-color: var(--warm); }
+    .cal-day.other-month { opacity: 0.3; }
+    .cal-day-num { font-size: 11px; font-weight: 500; margin-bottom: 4px; }
+    .cal-event { font-size: 9px; padding: 2px 4px; border-radius: 3px; margin-bottom: 2px;
+                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cal-event.todo { background: var(--blue-bg); color: var(--blue); }
+    .cal-event.email { background: var(--yellow-bg); color: var(--yellow); }
+    .cal-event.note { background: var(--green-bg); color: var(--green); }
+
+    /* Search */
+    .search-bar { position: relative; margin-bottom: 24px; }
+    .search-bar input { width: 100%; padding: 12px 16px 12px 40px; font-size: 14px; font-family: inherit;
+                        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+                        color: var(--text); outline: none; transition: border-color 0.2s; }
+    .search-bar input:focus { border-color: var(--warm); }
+    .search-bar .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+                               color: var(--text-muted); font-size: 16px; }
+    .search-results .result-item { padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.04);
+                                   cursor: pointer; transition: background 0.15s; }
+    .search-results .result-item:hover { background: var(--surface); }
+    .search-results .result-type { font-size: 9px; text-transform: uppercase; letter-spacing: 1px;
+                                   color: var(--text-muted); margin-bottom: 4px; }
+
+    /* Drag and drop */
+    .todo-item.dragging { opacity: 0.4; }
+    .todo-item.drag-over { border-top: 2px solid var(--warm); }
+    .drag-handle { cursor: grab; color: var(--text-muted); font-size: 14px; padding: 4px;
+                   user-select: none; flex-shrink: 0; }
+    .drag-handle:active { cursor: grabbing; }
+
+    /* Keyboard shortcut hint */
+    .kbd { display: inline-block; padding: 2px 6px; background: var(--surface-2); border: 1px solid var(--border);
+           border-radius: 4px; font-size: 10px; font-family: monospace; color: var(--text-muted); }
+
+    /* Recurring badge */
+    .badge.recurring { background: rgba(212,165,116,0.1); color: var(--warm); }
+
     @media (max-width: 768px) {
       .topnav { flex-direction: column; gap: 12px; align-items: flex-start; }
       .topnav .nav-links { gap: 16px; flex-wrap: wrap; }
@@ -341,6 +405,8 @@ const SHARED_CSS = `
       .top-cards { grid-template-columns: repeat(2, 1fr); }
       .notes-grid { grid-template-columns: 1fr; }
       .modal { width: 95%; padding: 24px; }
+      .cal-day { min-height: 50px; }
+      .cal-event { font-size: 8px; }
     }
 `;
 
@@ -370,7 +436,9 @@ function navBar(activePage) {
     { href: "/todos", label: "To-Dos" },
     { href: "/emails", label: "Emails" },
     { href: "/notes", label: "Notes" },
+    { href: "/calendar", label: "Calendar" },
     { href: "/contacts", label: "Contacts" },
+    { href: "/review", label: "Review" },
     { href: "/settings", label: "Settings" },
   ];
   const perfinLink = PERFIN_URL ? `<a href="${PERFIN_URL}" target="_blank">Perfin</a>` : "";
@@ -491,11 +559,11 @@ app.get("/api/todos", async (req, res) => {
 
 app.post("/api/todos", async (req, res) => {
   try {
-    const { title, description, priority, horizon, category, due_date } = req.body;
+    const { title, description, priority, horizon, category, due_date, recurring, recurrence_rule } = req.body;
     if (!title) return res.status(400).json({ error: "Title is required." });
     const r = await pool.query(
-      `INSERT INTO todos (title, description, priority, horizon, category, due_date) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [title, description || null, priority || "medium", horizon || "short", category || null, due_date || null]
+      `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [title, description || null, priority || "medium", horizon || "short", category || null, due_date || null, recurring || false, recurrence_rule || null]
     );
     res.json(r.rows[0]);
   } catch (err) {
@@ -505,7 +573,7 @@ app.post("/api/todos", async (req, res) => {
 
 app.patch("/api/todos/:id", async (req, res) => {
   try {
-    const { title, description, priority, horizon, category, due_date, completed, sort_order } = req.body;
+    const { title, description, priority, horizon, category, due_date, completed, sort_order, recurring, recurrence_rule } = req.body;
     const fields = [];
     const params = [];
     let idx = 1;
@@ -516,6 +584,8 @@ app.patch("/api/todos/:id", async (req, res) => {
     if (category !== undefined) { fields.push(`category = $${idx++}`); params.push(category); }
     if (due_date !== undefined) { fields.push(`due_date = $${idx++}`); params.push(due_date || null); }
     if (sort_order !== undefined) { fields.push(`sort_order = $${idx++}`); params.push(sort_order); }
+    if (recurring !== undefined) { fields.push(`recurring = $${idx++}`); params.push(recurring); }
+    if (recurrence_rule !== undefined) { fields.push(`recurrence_rule = $${idx++}`); params.push(recurrence_rule); }
     if (completed !== undefined) {
       fields.push(`completed = $${idx++}`); params.push(completed);
       fields.push(`completed_at = $${idx++}`); params.push(completed ? new Date().toISOString() : null);
@@ -769,6 +839,7 @@ app.get("/api/settings", async (req, res) => {
     const r = await pool.query("SELECT * FROM user_settings WHERE id = 1");
     const settings = r.rows[0] || { theme: "dark", session_timeout_minutes: 15, default_horizon: "short" };
     settings.smtp_configured = !!(process.env.SMTP_HOST && process.env.SMTP_USER);
+    settings.ai_configured = !!(Anthropic && process.env.ANTHROPIC_API_KEY);
     settings.perfin_url = PERFIN_URL || settings.perfin_url || null;
     res.json(settings);
   } catch (err) {
@@ -818,6 +889,277 @@ app.get("/api/stats", async (req, res) => {
 
 
 // ============================================================================
+// API — Subtasks
+// ============================================================================
+app.get("/api/todos/:id/subtasks", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM subtasks WHERE todo_id = $1 ORDER BY sort_order, id", [req.params.id]);
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/todos/:id/subtasks", async (req, res) => {
+  try {
+    const { title } = req.body;
+    if (!title) return res.status(400).json({ error: "Title is required." });
+    const r = await pool.query("INSERT INTO subtasks (todo_id, title) VALUES ($1, $2) RETURNING *", [req.params.id, title]);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch("/api/subtasks/:id", async (req, res) => {
+  try {
+    const { title, completed, sort_order } = req.body;
+    const fields = []; const params = []; let idx = 1;
+    if (title !== undefined) { fields.push(`title = $${idx++}`); params.push(title); }
+    if (completed !== undefined) { fields.push(`completed = $${idx++}`); params.push(completed); }
+    if (sort_order !== undefined) { fields.push(`sort_order = $${idx++}`); params.push(sort_order); }
+    if (!fields.length) return res.status(400).json({ error: "No fields." });
+    params.push(req.params.id);
+    const r = await pool.query(`UPDATE subtasks SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, params);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/subtasks/:id", async (req, res) => {
+  try {
+    const r = await pool.query("DELETE FROM subtasks WHERE id = $1 RETURNING id", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Recurring tasks
+// ============================================================================
+app.post("/api/todos/:id/complete-recurring", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM todos WHERE id = $1", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    const todo = r.rows[0];
+    if (!todo.recurring || !todo.recurrence_rule) {
+      return res.status(400).json({ error: "Not a recurring task." });
+    }
+    // Mark current as completed
+    await pool.query("UPDATE todos SET completed = true, completed_at = now() WHERE id = $1", [todo.id]);
+    // Calculate next due date
+    const rule = todo.recurrence_rule;
+    let nextDue = todo.due_date ? new Date(todo.due_date) : new Date();
+    if (rule === "daily") nextDue.setDate(nextDue.getDate() + 1);
+    else if (rule === "weekdays") {
+      do { nextDue.setDate(nextDue.getDate() + 1); } while (nextDue.getDay() === 0 || nextDue.getDay() === 6);
+    } else if (rule === "weekly") nextDue.setDate(nextDue.getDate() + 7);
+    else if (rule === "monthly") nextDue.setMonth(nextDue.getMonth() + 1);
+    else if (rule === "yearly") nextDue.setFullYear(nextDue.getFullYear() + 1);
+    // Create next instance
+    const n = await pool.query(
+      `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_parent_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [todo.title, todo.description, todo.priority, todo.horizon, todo.category,
+       nextDue.toISOString().split("T")[0], true, rule, todo.recurrence_parent_id || todo.id]
+    );
+    res.json({ completed: todo, next: n.rows[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Email Templates
+// ============================================================================
+app.get("/api/email-templates", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM email_templates ORDER BY name ASC");
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/email-templates", async (req, res) => {
+  try {
+    const { name, subject, body } = req.body;
+    if (!name || !subject || !body) return res.status(400).json({ error: "Name, subject, and body required." });
+    const r = await pool.query("INSERT INTO email_templates (name, subject, body) VALUES ($1,$2,$3) RETURNING *", [name, subject, body]);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch("/api/email-templates/:id", async (req, res) => {
+  try {
+    const { name, subject, body } = req.body;
+    const fields = []; const params = []; let idx = 1;
+    if (name !== undefined) { fields.push(`name = $${idx++}`); params.push(name); }
+    if (subject !== undefined) { fields.push(`subject = $${idx++}`); params.push(subject); }
+    if (body !== undefined) { fields.push(`body = $${idx++}`); params.push(body); }
+    if (!fields.length) return res.status(400).json({ error: "No fields." });
+    params.push(req.params.id);
+    const r = await pool.query(`UPDATE email_templates SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, params);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/email-templates/:id", async (req, res) => {
+  try {
+    const r = await pool.query("DELETE FROM email_templates WHERE id = $1 RETURNING id", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — AI Email Drafting
+// ============================================================================
+app.post("/api/ai/draft-email", async (req, res) => {
+  if (!Anthropic || !process.env.ANTHROPIC_API_KEY) {
+    return res.status(500).json({ error: "AI not configured. Set ANTHROPIC_API_KEY in .env" });
+  }
+  try {
+    const { prompt, recipient_name } = req.body;
+    if (!prompt) return res.status(400).json({ error: "Prompt is required." });
+    const client = new Anthropic();
+    const msg = await client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1024,
+      messages: [{
+        role: "user",
+        content: `Draft a professional email based on this request: "${prompt}"${recipient_name ? ` The recipient's name is ${recipient_name}.` : ""}
+
+Return ONLY a JSON object with these fields:
+- "subject": the email subject line
+- "body": the email body text (plain text, no HTML)
+
+Keep the tone professional but warm. Do not include any other text outside the JSON.`
+      }],
+    });
+    const text = msg.content[0].text.trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
+    const draft = JSON.parse(jsonMatch[0]);
+    res.json(draft);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// API — Global Search
+// ============================================================================
+app.get("/api/search", async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.length < 2) return res.json([]);
+    const pattern = `%${q}%`;
+    const [todos, emails, notes, contacts] = await Promise.all([
+      pool.query("SELECT id, title, description, priority, horizon, 'todo' as type FROM todos WHERE title ILIKE $1 OR description ILIKE $1 LIMIT 10", [pattern]),
+      pool.query("SELECT id, subject as title, recipient_name as description, status as priority, 'email' as type FROM emails WHERE subject ILIKE $1 OR body ILIKE $1 OR recipient_name ILIKE $1 LIMIT 10", [pattern]),
+      pool.query("SELECT id, COALESCE(title, LEFT(content, 50)) as title, LEFT(content, 100) as description, 'note' as type FROM notes WHERE title ILIKE $1 OR content ILIKE $1 LIMIT 10", [pattern]),
+      pool.query("SELECT id, name as title, email as description, 'contact' as type FROM contacts WHERE name ILIKE $1 OR email ILIKE $1 LIMIT 10", [pattern]),
+    ]);
+    res.json([...todos.rows, ...emails.rows, ...notes.rows, ...contacts.rows]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Calendar events
+// ============================================================================
+app.get("/api/calendar", async (req, res) => {
+  try {
+    const { month, year } = req.query;
+    const m = parseInt(month) || new Date().getMonth() + 1;
+    const y = parseInt(year) || new Date().getFullYear();
+    const startDate = `${y}-${String(m).padStart(2,"0")}-01`;
+    const endDate = m === 12 ? `${y+1}-01-01` : `${y}-${String(m+1).padStart(2,"0")}-01`;
+    const [todos, emails, notes] = await Promise.all([
+      pool.query("SELECT id, title, due_date as event_date, priority, 'todo' as type FROM todos WHERE due_date >= $1 AND due_date < $2 AND NOT completed", [startDate, endDate]),
+      pool.query("SELECT id, subject as title, scheduled_at as event_date, status as priority, 'email' as type FROM emails WHERE scheduled_at >= $1 AND scheduled_at < $2", [startDate, endDate]),
+      pool.query("SELECT id, COALESCE(title, LEFT(content,30)) as title, reminder_at as event_date, 'note' as type FROM notes WHERE reminder_at >= $1 AND reminder_at < $2", [startDate, endDate]),
+    ]);
+    res.json([...todos.rows, ...emails.rows, ...notes.rows]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Weekly Review
+// ============================================================================
+app.get("/api/review", async (req, res) => {
+  try {
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    weekStart.setHours(0,0,0,0);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 7);
+    const ws = weekStart.toISOString().split("T")[0];
+    const we = weekEnd.toISOString().split("T")[0];
+    const [completed, created, sent, notesCreated, upcoming, overdue] = await Promise.all([
+      pool.query("SELECT * FROM todos WHERE completed_at >= $1 AND completed_at < $2 ORDER BY completed_at DESC", [ws, we]),
+      pool.query("SELECT count(*) as cnt FROM todos WHERE created_at >= $1 AND created_at < $2", [ws, we]),
+      pool.query("SELECT count(*) as cnt FROM emails WHERE sent_at >= $1 AND sent_at < $2", [ws, we]),
+      pool.query("SELECT count(*) as cnt FROM notes WHERE created_at >= $1 AND created_at < $2", [ws, we]),
+      pool.query("SELECT * FROM todos WHERE due_date >= $1 AND due_date < $2 AND NOT completed ORDER BY due_date", [we, new Date(weekEnd.getTime() + 7*86400000).toISOString().split("T")[0]]),
+      pool.query("SELECT * FROM todos WHERE due_date < $1 AND NOT completed ORDER BY due_date", [ws]),
+    ]);
+    res.json({
+      week_start: ws, week_end: we,
+      tasks_completed: completed.rows,
+      tasks_created_count: parseInt(created.rows[0].cnt),
+      emails_sent_count: parseInt(sent.rows[0].cnt),
+      notes_created_count: parseInt(notesCreated.rows[0].cnt),
+      upcoming_tasks: upcoming.rows,
+      overdue_tasks: overdue.rows,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Perfin integration (proxy)
+// ============================================================================
+app.get("/api/perfin/stats", async (req, res) => {
+  const perfinUrl = PERFIN_URL || (await pool.query("SELECT perfin_url FROM user_settings WHERE id = 1").catch(() => ({rows:[]}))).rows[0]?.perfin_url;
+  if (!perfinUrl) return res.json({ connected: false });
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const r = await fetch(`${perfinUrl}/api/subscriptions?filter=active`, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!r.ok) return res.json({ connected: false });
+    const subs = await r.json();
+    const totalMonthly = subs.filter(s => s.cadence_days <= 31).reduce((sum, s) => sum + parseFloat(s.amount || 0), 0);
+    const upcoming = subs.filter(s => {
+      const next = new Date(s.next_expected);
+      const now = new Date();
+      const diff = (next - now) / 86400000;
+      return diff >= 0 && diff <= 7;
+    });
+    res.json({ connected: true, total_subscriptions: subs.length, monthly_cost: totalMonthly.toFixed(2), upcoming_this_week: upcoming.length, upcoming });
+  } catch {
+    res.json({ connected: false });
+  }
+});
+
+// ============================================================================
+// API — Todo reorder (drag-and-drop)
+// ============================================================================
+app.post("/api/todos/reorder", async (req, res) => {
+  try {
+    const { order } = req.body; // array of {id, sort_order}
+    if (!Array.isArray(order)) return res.status(400).json({ error: "order array required." });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const item of order) {
+        await client.query("UPDATE todos SET sort_order = $1 WHERE id = $2", [item.sort_order, item.id]);
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally { client.release(); }
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
 // Page — Dashboard
 // ============================================================================
 app.get("/", async (req, res) => {
@@ -828,6 +1170,13 @@ ${themeScript()}
   ${navBar("/")}
   <h1>Dashboard</h1>
   <p class="subtitle">Your personal command center</p>
+
+  <!-- Global Search -->
+  <div class="search-bar">
+    <span class="search-icon">&#128269;</span>
+    <input type="text" id="global-search" placeholder="Search todos, emails, notes, contacts... (press /)" oninput="doSearch(this.value)">
+  </div>
+  <div class="section search-results" id="search-results" style="display:none;margin-bottom:24px;"></div>
 
   <div class="top-cards" id="cards"></div>
 
@@ -841,8 +1190,37 @@ ${themeScript()}
       <div id="scheduled-emails"></div>
     </div>
   </div>
+
+  <!-- Perfin Integration -->
+  <div id="perfin-section" style="display:none;margin-top:24px;">
+    <div class="section">
+      <h2>Perfin — Financial Overview</h2>
+      <div id="perfin-data"></div>
+    </div>
+  </div>
+
+  <div style="margin-top:24px;text-align:center;">
+    <p style="font-size:11px;color:var(--text-muted);">Keyboard shortcuts: <span class="kbd">/</span> Search &middot; <span class="kbd">N</span> New task &middot; <span class="kbd">E</span> New email &middot; <span class="kbd">?</span> Show all</p>
+  </div>
 </div>
 <script>
+var searchTimeout = null;
+function doSearch(q) {
+  clearTimeout(searchTimeout);
+  if (!q || q.length < 2) { document.getElementById('search-results').style.display='none'; return; }
+  searchTimeout = setTimeout(async function() {
+    var results = await fetch('/api/search?q='+encodeURIComponent(q)).then(r=>r.json());
+    if (!results.length) { document.getElementById('search-results').innerHTML='<div class="empty-msg">No results</div>'; }
+    else {
+      document.getElementById('search-results').innerHTML = results.map(r => {
+        var href = r.type==='todo'?'/todos':r.type==='email'?'/emails':r.type==='note'?'/notes':'/contacts';
+        return '<a href="'+href+'" class="result-item" style="display:block;text-decoration:none;color:inherit;"><div class="result-type">'+r.type+'</div><div style="font-size:14px;">'+esc(r.title||'')+'</div>'+(r.description?'<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+esc(r.description)+'</div>':'')+'</a>';
+      }).join('');
+    }
+    document.getElementById('search-results').style.display='block';
+  }, 300);
+}
+
 async function load() {
   const stats = await fetch('/api/stats').then(r=>r.json());
   document.getElementById('cards').innerHTML = [
@@ -859,14 +1237,46 @@ async function load() {
   const todos = await fetch('/api/todos?completed=false').then(r=>r.json());
   const upcoming = todos.filter(t=>t.due_date).sort((a,b)=>new Date(a.due_date)-new Date(b.due_date)).slice(0,5);
   document.getElementById('upcoming-tasks').innerHTML = upcoming.length
-    ? upcoming.map(t => '<div class="todo-item"><div class="todo-content"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span>Due: '+new Date(t.due_date).toLocaleDateString()+'</span></div></div></div>').join('')
+    ? upcoming.map(t => '<div class="todo-item"><div class="todo-content"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span>'+(t.recurring?'<span class="badge recurring">recurring</span>':'')+'<span>Due: '+new Date(t.due_date).toLocaleDateString()+'</span></div></div></div>').join('')
     : '<div class="empty-msg">No upcoming tasks with due dates</div>';
 
   const emails = await fetch('/api/emails?status=scheduled').then(r=>r.json());
   document.getElementById('scheduled-emails').innerHTML = emails.length
     ? emails.slice(0,5).map(e => '<div class="todo-item"><div class="todo-content"><div class="todo-title">'+esc(e.subject)+'</div><div class="todo-meta"><span>To: '+esc(e.recipient_name||e.recipient_email)+'</span><span>'+new Date(e.scheduled_at).toLocaleString()+'</span></div></div></div>').join('')
     : '<div class="empty-msg">No scheduled emails</div>';
+
+  // Load Perfin data
+  try {
+    var perfin = await fetch('/api/perfin/stats').then(r=>r.json());
+    if (perfin.connected) {
+      document.getElementById('perfin-section').style.display='block';
+      var html = '<div class="top-cards" style="margin-bottom:0">';
+      html += '<div class="card"><div class="label">Active Subscriptions</div><div class="value teal">'+perfin.total_subscriptions+'</div></div>';
+      html += '<div class="card"><div class="label">Monthly Cost</div><div class="value warm">$'+perfin.monthly_cost+'</div></div>';
+      html += '<div class="card"><div class="label">Renewing This Week</div><div class="value '+(perfin.upcoming_this_week>0?'yellow':'green')+'">'+perfin.upcoming_this_week+'</div></div>';
+      html += '</div>';
+      if (perfin.upcoming && perfin.upcoming.length) {
+        html += '<div style="margin-top:16px;">';
+        perfin.upcoming.forEach(s => {
+          html += '<div class="todo-item"><div class="todo-content"><div class="todo-title">'+esc(s.display_name||s.merchant_key)+'</div><div class="todo-meta"><span>$'+parseFloat(s.amount).toFixed(2)+'</span><span>Due: '+new Date(s.next_expected).toLocaleDateString()+'</span></div></div></div>';
+        });
+        html += '</div>';
+      }
+      document.getElementById('perfin-data').innerHTML = html;
+    }
+  } catch {}
 }
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+  if (e.key === '/') { e.preventDefault(); document.getElementById('global-search').focus(); }
+  else if (e.key === 'n' || e.key === 'N') { location.href = '/todos'; }
+  else if (e.key === 'e' || e.key === 'E') { location.href = '/emails'; }
+  else if (e.key === 'c' || e.key === 'C') { location.href = '/calendar'; }
+  else if (e.key === 'r' || e.key === 'R') { location.href = '/review'; }
+});
+
 function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 load();
 </script>
@@ -887,6 +1297,7 @@ ${themeScript()}
 
   <div class="actions">
     <button class="primary" onclick="openAdd()">+ New Task</button>
+    <button onclick="openQuickTodo()">Quick Add</button>
   </div>
 
   <div class="filters" id="horizon-filters">
@@ -929,6 +1340,25 @@ ${themeScript()}
       <div><label>Due Date</label>
         <input type="date" id="f-due"></div>
     </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div style="margin-top:12px;">
+        <label style="display:inline;cursor:pointer">
+          <input type="checkbox" id="f-recurring" style="width:auto;margin-right:6px;" onchange="document.getElementById('f-recurrence').style.display=this.checked?'block':'none'"> Recurring task
+        </label>
+      </div>
+      <div id="f-recurrence" style="display:none;">
+        <label>Repeat</label>
+        <select id="f-recurrence-rule"><option value="daily">Daily</option><option value="weekdays">Weekdays</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select>
+      </div>
+    </div>
+    <div id="subtasks-section" style="display:none;margin-top:16px;">
+      <label>Subtasks</label>
+      <div id="subtask-list-edit"></div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <input type="text" id="new-subtask" placeholder="Add subtask..." style="flex:1">
+        <button onclick="addSubtask()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
+      </div>
+    </div>
     <div class="modal-actions">
       <button onclick="closeModal()">Cancel</button>
       <button class="primary" onclick="saveTodo()">Save</button>
@@ -937,8 +1367,30 @@ ${themeScript()}
   </div>
 </div>
 
+<!-- Quick Add Modal (natural language) -->
+<div class="modal-overlay" id="quick-todo-modal">
+  <div class="modal">
+    <h2>Quick Add Task</h2>
+    <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">
+      Examples: "Buy groceries tomorrow" &middot; "Call dentist Friday at 2PM" &middot; "Finish report by March 20"
+    </p>
+    <label>What needs to be done?</label>
+    <input type="text" id="qt-input" placeholder="Type a task..." onkeydown="if(event.key==='Enter')parseQuickTodo()">
+    <div id="qt-preview" style="display:none;margin-top:16px;" class="section">
+      <h2>Preview</h2>
+      <div id="qt-preview-content"></div>
+    </div>
+    <div class="modal-actions">
+      <button onclick="closeQuickTodo()">Cancel</button>
+      <button class="primary" onclick="parseQuickTodo()">Parse</button>
+      <button class="primary" id="qt-confirm" style="display:none" onclick="confirmQuickTodo()">Create</button>
+    </div>
+  </div>
+</div>
+
 <script>
 var curHorizon = '', curStatus = 'pending';
+var dragSrcId = null;
 function setHorizon(btn, h) { curHorizon = h; document.querySelectorAll('#horizon-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
 function setStatus(btn, s) { curStatus = s; document.querySelectorAll('#status-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
 
@@ -949,11 +1401,87 @@ async function load() {
   else if (curStatus === 'done') q.push('completed=true');
   var todos = await fetch('/api/todos'+(q.length?'?'+q.join('&'):'')).then(r=>r.json());
   if (!todos.length) { document.getElementById('todo-list').innerHTML = '<div class="empty-msg">No tasks found</div>'; return; }
-  document.getElementById('todo-list').innerHTML = todos.map(t => {
+
+  // Fetch subtasks for all todos
+  var subtaskMap = {};
+  await Promise.all(todos.map(async t => {
+    try { subtaskMap[t.id] = await fetch('/api/todos/'+t.id+'/subtasks').then(r=>r.json()); } catch { subtaskMap[t.id] = []; }
+  }));
+
+  document.getElementById('todo-list').innerHTML = todos.map((t, idx) => {
     var dueTxt = t.due_date ? 'Due: '+new Date(t.due_date).toLocaleDateString() : '';
     var overdue = t.due_date && !t.completed && new Date(t.due_date) <= new Date() ? ' style="color:var(--red)"' : '';
-    return '<div class="todo-item"><div class="todo-check'+(t.completed?' done':'')+'" onclick="toggleTodo('+t.id+','+!t.completed+')"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+'</div><div class="todo-actions"><button onclick="openEdit('+t.id+')">&#9998;</button></div></div>';
+    var subs = subtaskMap[t.id] || [];
+    var subDone = subs.filter(s=>s.completed).length;
+    var subHtml = '';
+    if (subs.length) {
+      subHtml = '<div class="subtask-progress"><div class="subtask-progress-fill" style="width:'+(subDone/subs.length*100)+'%"></div></div>';
+      subHtml += '<div class="subtask-list">'+subs.map(s =>
+        '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" onclick="event.stopPropagation();toggleSubtask('+s.id+','+!s.completed+')"></div><span class="subtask-text'+(s.completed?' done':'')+'">'+esc(s.title)+'</span></div>'
+      ).join('')+'</div>';
+    }
+    return '<div class="todo-item" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" onclick="toggleTodo('+t.id+','+!t.completed+','+!!t.recurring+')"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+(t.recurring?'<span class="badge recurring">'+t.recurrence_rule+'</span>':'')+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions"><button onclick="openEdit('+t.id+')">&#9998;</button></div></div>';
   }).join('');
+}
+
+// Drag and drop
+function dragStart(e) { dragSrcId = e.currentTarget.dataset.id; e.currentTarget.classList.add('dragging'); }
+function dragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+function dragEnd(e) { document.querySelectorAll('.todo-item').forEach(el => { el.classList.remove('dragging','drag-over'); }); }
+async function drop(e) {
+  e.preventDefault(); e.currentTarget.classList.remove('drag-over');
+  var targetId = e.currentTarget.dataset.id;
+  if (dragSrcId === targetId) return;
+  var items = document.querySelectorAll('.todo-item[data-id]');
+  var order = [];
+  items.forEach((el, i) => { order.push({id: parseInt(el.dataset.id), sort_order: i}); });
+  // Swap
+  var srcIdx = order.findIndex(o => o.id === parseInt(dragSrcId));
+  var tgtIdx = order.findIndex(o => o.id === parseInt(targetId));
+  if (srcIdx > -1 && tgtIdx > -1) {
+    var temp = order[srcIdx]; order[srcIdx] = order[tgtIdx]; order[tgtIdx] = temp;
+    order.forEach((o, i) => o.sort_order = i);
+    await fetch('/api/todos/reorder', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order})});
+    load();
+  }
+}
+
+// Subtasks
+async function toggleSubtask(id, completed) {
+  await fetch('/api/subtasks/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({completed})});
+  load();
+}
+
+var editSubtasks = [];
+async function addSubtask() {
+  var input = document.getElementById('new-subtask');
+  var title = input.value.trim();
+  if (!title) return;
+  var todoId = document.getElementById('edit-id').value;
+  if (todoId) {
+    await fetch('/api/todos/'+todoId+'/subtasks', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title})});
+    input.value = '';
+    loadEditSubtasks(todoId);
+  } else {
+    editSubtasks.push({title, completed: false});
+    input.value = '';
+    renderEditSubtasks();
+  }
+}
+function renderEditSubtasks() {
+  document.getElementById('subtask-list-edit').innerHTML = editSubtasks.map((s,i) =>
+    '<div class="subtask-item"><span>'+esc(s.title)+'</span><button onclick="editSubtasks.splice('+i+',1);renderEditSubtasks()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;margin-left:auto;">&#10005;</button></div>'
+  ).join('');
+}
+async function loadEditSubtasks(todoId) {
+  var subs = await fetch('/api/todos/'+todoId+'/subtasks').then(r=>r.json());
+  document.getElementById('subtask-list-edit').innerHTML = subs.map(s =>
+    '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" onclick="toggleSubtask('+s.id+','+!s.completed+');loadEditSubtasks('+todoId+')"></div><span class="subtask-text'+(s.completed?' done':'')+'">'+esc(s.title)+'</span><button onclick="deleteSubtask('+s.id+','+todoId+')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;margin-left:auto;">&#10005;</button></div>'
+  ).join('');
+}
+async function deleteSubtask(id, todoId) {
+  await fetch('/api/subtasks/'+id, {method:'DELETE'});
+  loadEditSubtasks(todoId);
 }
 
 function openAdd() {
@@ -965,7 +1493,13 @@ function openAdd() {
   document.getElementById('f-horizon').value = 'short';
   document.getElementById('f-category').value = '';
   document.getElementById('f-due').value = '';
+  document.getElementById('f-recurring').checked = false;
+  document.getElementById('f-recurrence').style.display = 'none';
+  document.getElementById('f-recurrence-rule').value = 'weekly';
   document.getElementById('delete-btn').style.display = 'none';
+  document.getElementById('subtasks-section').style.display = 'block';
+  editSubtasks = [];
+  renderEditSubtasks();
   document.getElementById('modal').classList.add('active');
 }
 
@@ -981,7 +1515,12 @@ async function openEdit(id) {
   document.getElementById('f-horizon').value = t.horizon;
   document.getElementById('f-category').value = t.category||'';
   document.getElementById('f-due').value = t.due_date?t.due_date.split('T')[0]:'';
+  document.getElementById('f-recurring').checked = t.recurring||false;
+  document.getElementById('f-recurrence').style.display = t.recurring ? 'block' : 'none';
+  document.getElementById('f-recurrence-rule').value = t.recurrence_rule || 'weekly';
   document.getElementById('delete-btn').style.display = 'inline-block';
+  document.getElementById('subtasks-section').style.display = 'block';
+  loadEditSubtasks(id);
   document.getElementById('modal').classList.add('active');
 }
 
@@ -989,6 +1528,7 @@ function closeModal() { document.getElementById('modal').classList.remove('activ
 
 async function saveTodo() {
   var id = document.getElementById('edit-id').value;
+  var isRecurring = document.getElementById('f-recurring').checked;
   var data = {
     title: document.getElementById('f-title').value,
     description: document.getElementById('f-desc').value || null,
@@ -996,15 +1536,31 @@ async function saveTodo() {
     horizon: document.getElementById('f-horizon').value,
     category: document.getElementById('f-category').value || null,
     due_date: document.getElementById('f-due').value || null,
+    recurring: isRecurring,
+    recurrence_rule: isRecurring ? document.getElementById('f-recurrence-rule').value : null,
   };
   if (!data.title) return alert('Title is required');
-  if (id) await fetch('/api/todos/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-  else await fetch('/api/todos', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  var result;
+  if (id) {
+    result = await fetch('/api/todos/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).then(r=>r.json());
+  } else {
+    result = await fetch('/api/todos', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).then(r=>r.json());
+    // Create subtasks for new todo
+    if (result.id && editSubtasks.length) {
+      for (var s of editSubtasks) {
+        await fetch('/api/todos/'+result.id+'/subtasks', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:s.title})});
+      }
+    }
+  }
   closeModal(); load();
 }
 
-async function toggleTodo(id, completed) {
-  await fetch('/api/todos/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({completed})});
+async function toggleTodo(id, completed, isRecurring) {
+  if (completed && isRecurring) {
+    await fetch('/api/todos/'+id+'/complete-recurring', {method:'POST'});
+  } else {
+    await fetch('/api/todos/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({completed})});
+  }
   load();
 }
 
@@ -1014,6 +1570,60 @@ async function deleteTodo() {
   await fetch('/api/todos/'+id, {method:'DELETE'});
   closeModal(); load();
 }
+
+// Quick Add (natural language)
+function openQuickTodo() {
+  document.getElementById('qt-input').value = '';
+  document.getElementById('qt-preview').style.display = 'none';
+  document.getElementById('qt-confirm').style.display = 'none';
+  document.getElementById('quick-todo-modal').classList.add('active');
+  document.getElementById('qt-input').focus();
+}
+function closeQuickTodo() { document.getElementById('quick-todo-modal').classList.remove('active'); }
+
+var parsedTodo = null;
+function parseQuickTodo() {
+  var input = document.getElementById('qt-input').value.trim();
+  if (!input) return;
+  var days = {sunday:0,monday:1,tuesday:2,wednesday:3,thursday:4,friday:5,saturday:6};
+  var dateMatch = input.match(/\b(\d{4}-\d{2}-\d{2})\b/) || input.match(/\b((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}(?:,?\s*\d{4})?)\b/i);
+  var tomorrowMatch = input.match(/\btomorrow\b/i);
+  var dayMatch = input.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
+  var dueDate = null;
+  if (dateMatch) { dueDate = new Date(dateMatch[1]); }
+  else if (tomorrowMatch) { dueDate = new Date(); dueDate.setDate(dueDate.getDate()+1); }
+  else if (dayMatch) {
+    dueDate = new Date();
+    var target = days[dayMatch[1].toLowerCase()];
+    var diff = (target - dueDate.getDay() + 7) % 7;
+    if (diff === 0) diff = 7;
+    dueDate.setDate(dueDate.getDate() + diff);
+  }
+  // Extract priority
+  var priority = 'medium';
+  if (/\burgent\b/i.test(input)) priority = 'urgent';
+  else if (/\bhigh\b|\bimportant\b/i.test(input)) priority = 'high';
+  else if (/\blow\b/i.test(input)) priority = 'low';
+  // Clean title
+  var title = input.replace(/\b(tomorrow|today|urgent|high|low|important)\b/gi, '').replace(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, '').replace(/\b(by|on|at|next|this)\b/gi, '').replace(/\s+/g,' ').trim();
+  parsedTodo = { title: title, priority: priority, due_date: dueDate ? dueDate.toISOString().split('T')[0] : null, horizon: 'short' };
+  document.getElementById('qt-preview-content').innerHTML =
+    '<div style="font-size:13px;"><strong>Task:</strong> '+esc(parsedTodo.title)+'<br><strong>Priority:</strong> '+parsedTodo.priority+'<br><strong>Due:</strong> '+(parsedTodo.due_date||'None')+'</div>';
+  document.getElementById('qt-preview').style.display = 'block';
+  document.getElementById('qt-confirm').style.display = 'inline-block';
+}
+async function confirmQuickTodo() {
+  if (!parsedTodo || !parsedTodo.title) return;
+  await fetch('/api/todos', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(parsedTodo)});
+  closeQuickTodo(); load();
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+  if (e.key === 'n' || e.key === 'N') { e.preventDefault(); openAdd(); }
+  else if (e.key === 'q' || e.key === 'Q') { e.preventDefault(); openQuickTodo(); }
+});
 
 function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 load();
@@ -1037,6 +1647,7 @@ ${themeScript()}
   <div class="actions">
     <button class="primary" onclick="openCompose()">+ Compose</button>
     <button onclick="openQuick()">Quick Send</button>
+    <button onclick="openTemplates()">Templates</button>
   </div>
 
   <div class="filters" id="email-filters">
@@ -1063,7 +1674,7 @@ ${themeScript()}
     <input type="email" id="e-email" placeholder="email@example.com">
     <label>Subject</label>
     <input type="text" id="e-subject" placeholder="Subject line">
-    <label>Body</label>
+    <label>Body <button onclick="aiDraft()" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Draft</button></label>
     <textarea id="e-body" style="min-height:160px" placeholder="Write your email..."></textarea>
     <label>Schedule Send (optional)</label>
     <input type="datetime-local" id="e-schedule">
@@ -1205,6 +1816,62 @@ function getEmailData() {
   if (sched) data.scheduled_at = new Date(sched).toISOString();
   if (!data.recipient_email || !data.subject || !data.body) { alert('Email, subject, and body are required'); return null; }
   return data;
+}
+
+// AI Draft
+async function aiDraft() {
+  var subject = document.getElementById('e-subject').value;
+  var name = document.getElementById('e-name').value;
+  var prompt = subject || document.getElementById('e-body').value;
+  if (!prompt) { prompt = window.prompt('Describe the email you want to write:'); if (!prompt) return; }
+  var btn = event.target; btn.textContent = 'Drafting...'; btn.disabled = true;
+  try {
+    var r = await fetch('/api/ai/draft-email', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt, recipient_name: name})}).then(r=>r.json());
+    if (r.error) { alert(r.error); return; }
+    if (r.subject) document.getElementById('e-subject').value = r.subject;
+    if (r.body) document.getElementById('e-body').value = r.body;
+  } catch (err) { alert('AI draft failed: '+err.message); }
+  finally { btn.textContent = 'AI Draft'; btn.disabled = false; }
+}
+
+// Templates
+async function openTemplates() {
+  var templates = await fetch('/api/email-templates').then(r=>r.json());
+  var html = '<h2>Email Templates</h2>';
+  if (templates.length) {
+    html += templates.map(t => '<div class="todo-item" style="cursor:pointer" onclick="useTemplate('+t.id+')"><div class="todo-content"><div class="todo-title">'+esc(t.name)+'</div><div class="todo-meta"><span>'+esc(t.subject)+'</span></div></div><div class="todo-actions"><button onclick="event.stopPropagation();deleteTemplate('+t.id+')">&#10005;</button></div></div>').join('');
+  } else { html += '<div class="empty-msg">No templates yet</div>'; }
+  html += '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);"><h2 style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">Save Current as Template</h2><input type="text" id="tpl-name" placeholder="Template name" style="width:100%;padding:8px 12px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);margin-bottom:8px;"><button onclick="saveAsTemplate()" class="primary" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save Template</button></div>';
+  var overlay = document.createElement('div'); overlay.className = 'modal-overlay active'; overlay.id = 'tpl-modal';
+  overlay.innerHTML = '<div class="modal">'+html+'<div class="modal-actions"><button onclick="document.getElementById(\\\'tpl-modal\\\').remove()">Close</button></div></div>';
+  document.body.appendChild(overlay);
+}
+async function useTemplate(id) {
+  var templates = await fetch('/api/email-templates').then(r=>r.json());
+  var t = templates.find(x=>x.id===id);
+  if (!t) return;
+  document.getElementById('e-subject').value = t.subject;
+  document.getElementById('e-body').value = t.body;
+  var tplModal = document.getElementById('tpl-modal');
+  if (tplModal) tplModal.remove();
+  openCompose();
+}
+async function saveAsTemplate() {
+  var name = document.getElementById('tpl-name').value;
+  var subject = document.getElementById('e-subject').value || 'Untitled';
+  var body = document.getElementById('e-body').value || '';
+  if (!name) return alert('Template name required');
+  await fetch('/api/email-templates', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,subject,body})});
+  var tplModal = document.getElementById('tpl-modal');
+  if (tplModal) tplModal.remove();
+  openTemplates();
+}
+async function deleteTemplate(id) {
+  if (!confirm('Delete template?')) return;
+  await fetch('/api/email-templates/'+id, {method:'DELETE'});
+  var tplModal = document.getElementById('tpl-modal');
+  if (tplModal) tplModal.remove();
+  openTemplates();
 }
 
 // Quick send — natural language parsing
@@ -1534,6 +2201,145 @@ load();
 
 
 // ============================================================================
+// Page — Calendar
+// ============================================================================
+app.get("/calendar", (req, res) => {
+  res.send(`${pageHead("Calendar")}
+<body>
+${themeScript()}
+<div class="container">
+  ${navBar("/calendar")}
+  <h1>Calendar</h1>
+  <p class="subtitle">Tasks, emails, and reminders at a glance</p>
+
+  <div class="actions">
+    <button onclick="prevMonth()">&larr; Previous</button>
+    <span id="cal-title" style="font-size:18px;font-weight:300;padding:0 16px;"></span>
+    <button onclick="nextMonth()">Next &rarr;</button>
+    <button onclick="goToday()" style="margin-left:auto;">Today</button>
+  </div>
+
+  <div class="section">
+    <div class="cal-grid">
+      <div class="cal-header">Mon</div><div class="cal-header">Tue</div><div class="cal-header">Wed</div>
+      <div class="cal-header">Thu</div><div class="cal-header">Fri</div><div class="cal-header">Sat</div><div class="cal-header">Sun</div>
+    </div>
+    <div class="cal-grid" id="cal-days"></div>
+  </div>
+</div>
+<script>
+var calMonth = new Date().getMonth();
+var calYear = new Date().getFullYear();
+function prevMonth() { calMonth--; if (calMonth<0){calMonth=11;calYear--;} load(); }
+function nextMonth() { calMonth++; if (calMonth>11){calMonth=0;calYear++;} load(); }
+function goToday() { calMonth=new Date().getMonth(); calYear=new Date().getFullYear(); load(); }
+
+async function load() {
+  var months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  document.getElementById('cal-title').textContent = months[calMonth]+' '+calYear;
+  var events = await fetch('/api/calendar?month='+(calMonth+1)+'&year='+calYear).then(r=>r.json());
+  var firstDay = new Date(calYear, calMonth, 1).getDay();
+  var startOffset = firstDay === 0 ? 6 : firstDay - 1; // Monday start
+  var daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
+  var today = new Date(); today.setHours(0,0,0,0);
+  var html = '';
+  // Previous month padding
+  var prevDays = new Date(calYear, calMonth, 0).getDate();
+  for (var i = startOffset-1; i >= 0; i--) {
+    html += '<div class="cal-day other-month"><div class="cal-day-num">'+(prevDays-i)+'</div></div>';
+  }
+  for (var d = 1; d <= daysInMonth; d++) {
+    var date = new Date(calYear, calMonth, d);
+    var isToday = date.getTime() === today.getTime();
+    var dateStr = calYear+'-'+String(calMonth+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+    var dayEvents = events.filter(e => {
+      var ed = new Date(e.event_date);
+      return ed.getFullYear()===calYear && ed.getMonth()===calMonth && ed.getDate()===d;
+    });
+    html += '<div class="cal-day'+(isToday?' today':'')+'"><div class="cal-day-num">'+d+'</div>';
+    dayEvents.slice(0,3).forEach(e => {
+      html += '<div class="cal-event '+e.type+'">'+esc(e.title)+'</div>';
+    });
+    if (dayEvents.length > 3) html += '<div style="font-size:9px;color:var(--text-muted)">+'+(dayEvents.length-3)+' more</div>';
+    html += '</div>';
+  }
+  // Next month padding
+  var totalCells = startOffset + daysInMonth;
+  var remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+  for (var i = 1; i <= remaining; i++) {
+    html += '<div class="cal-day other-month"><div class="cal-day-num">'+i+'</div></div>';
+  }
+  document.getElementById('cal-days').innerHTML = html;
+}
+function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+load();
+</script>
+</body></html>`);
+});
+
+// ============================================================================
+// Page — Weekly Review
+// ============================================================================
+app.get("/review", (req, res) => {
+  res.send(`${pageHead("Weekly Review")}
+<body>
+${themeScript()}
+<div class="container">
+  ${navBar("/review")}
+  <h1>Weekly Review</h1>
+  <p class="subtitle" id="review-period"></p>
+
+  <div class="top-cards" id="review-cards"></div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+    <div class="section">
+      <h2>Completed This Week</h2>
+      <div id="completed-list"></div>
+    </div>
+    <div class="section">
+      <h2>Overdue Tasks</h2>
+      <div id="overdue-list"></div>
+    </div>
+  </div>
+
+  <div class="section" style="margin-top:24px;">
+    <h2>Coming Up Next Week</h2>
+    <div id="next-week-list"></div>
+  </div>
+</div>
+<script>
+async function load() {
+  var data = await fetch('/api/review').then(r=>r.json());
+  document.getElementById('review-period').textContent =
+    'Week of '+new Date(data.week_start).toLocaleDateString()+' — '+new Date(data.week_end).toLocaleDateString();
+
+  document.getElementById('review-cards').innerHTML = [
+    {label:'Tasks Completed',value:data.tasks_completed.length,cls:'green'},
+    {label:'Tasks Created',value:data.tasks_created_count,cls:'warm'},
+    {label:'Emails Sent',value:data.emails_sent_count,cls:'teal'},
+    {label:'Notes Created',value:data.notes_created_count,cls:'blue'},
+    {label:'Overdue',value:data.overdue_tasks.length,cls:data.overdue_tasks.length>0?'red':'green'},
+  ].map(c => '<div class="card"><div class="label">'+c.label+'</div><div class="value '+c.cls+'">'+c.value+'</div></div>').join('');
+
+  document.getElementById('completed-list').innerHTML = data.tasks_completed.length
+    ? data.tasks_completed.map(t => '<div class="todo-item"><div class="todo-check done"></div><div class="todo-content"><div class="todo-title done">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span>'+new Date(t.completed_at).toLocaleDateString()+'</span></div></div></div>').join('')
+    : '<div class="empty-msg">No tasks completed yet this week</div>';
+
+  document.getElementById('overdue-list').innerHTML = data.overdue_tasks.length
+    ? data.overdue_tasks.map(t => '<div class="todo-item"><div class="todo-content"><div class="todo-title" style="color:var(--red)">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span style="color:var(--red)">Due: '+new Date(t.due_date).toLocaleDateString()+'</span></div></div></div>').join('')
+    : '<div class="empty-msg">No overdue tasks!</div>';
+
+  document.getElementById('next-week-list').innerHTML = data.upcoming_tasks.length
+    ? data.upcoming_tasks.map(t => '<div class="todo-item"><div class="todo-content"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span>Due: '+new Date(t.due_date).toLocaleDateString()+'</span></div></div></div>').join('')
+    : '<div class="empty-msg">No tasks scheduled for next week</div>';
+}
+function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+load();
+</script>
+</body></html>`);
+});
+
+// ============================================================================
 // Page — Settings
 // ============================================================================
 app.get("/settings", (req, res) => {
@@ -1586,8 +2392,34 @@ ${themeScript()}
   </div>
 
   <div class="section">
+    <h2>AI Email Drafting</h2>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px;" id="ai-status"></p>
+  </div>
+
+  <div class="section">
     <h2>Email (SMTP)</h2>
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px;" id="smtp-status"></p>
+  </div>
+
+  <div class="section">
+    <h2>Browser Notifications</h2>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Get notified about reminders and overdue tasks</p>
+    <div class="actions" style="margin-bottom:0;">
+      <button onclick="enableNotifications()" id="notif-btn">Enable Notifications</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Keyboard Shortcuts</h2>
+    <div style="font-size:12px;color:var(--text-muted);line-height:2;">
+      <span class="kbd">/</span> Focus search &middot;
+      <span class="kbd">N</span> New task &middot;
+      <span class="kbd">E</span> New email &middot;
+      <span class="kbd">C</span> Calendar &middot;
+      <span class="kbd">R</span> Weekly review &middot;
+      <span class="kbd">Q</span> Quick add (on todos page) &middot;
+      <span class="kbd">Esc</span> Close modals
+    </div>
   </div>
 
   <div class="section">
@@ -1613,6 +2445,13 @@ async function load() {
   document.getElementById('smtp-status').textContent = s.smtp_configured
     ? 'SMTP is configured and ready to send emails.'
     : 'SMTP not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS in .env to enable email sending.';
+  document.getElementById('ai-status').textContent = s.ai_configured
+    ? 'Claude AI is configured. Use the "AI Draft" button in the email composer.'
+    : 'Not configured. Set ANTHROPIC_API_KEY in .env to enable AI email drafting.';
+  if ('Notification' in window && Notification.permission === 'granted') {
+    document.getElementById('notif-btn').textContent = 'Notifications Enabled';
+    document.getElementById('notif-btn').disabled = true;
+  }
 
   // Apply theme
   if (s.theme === 'light') document.documentElement.setAttribute('data-theme','light');
@@ -1647,6 +2486,16 @@ async function exportData(type) {
   a.href = URL.createObjectURL(blob);
   a.download = type+'-export-'+new Date().toISOString().split('T')[0]+'.json';
   a.click();
+}
+
+async function enableNotifications() {
+  if (!('Notification' in window)) return alert('Browser does not support notifications');
+  var perm = await Notification.requestPermission();
+  if (perm === 'granted') {
+    document.getElementById('notif-btn').textContent = 'Notifications Enabled';
+    document.getElementById('notif-btn').disabled = true;
+    new Notification('Per-sistant', { body: 'Notifications enabled! You will be notified about reminders and overdue tasks.' });
+  }
 }
 
 async function logout() {
@@ -1747,6 +2596,38 @@ async function start() {
   if (cron) {
     cron.schedule("* * * * *", processScheduledEmails);
     console.log("Email scheduler started (checks every minute)");
+  }
+
+  // Process recurring tasks — auto-generate next instance for overdue recurring
+  if (cron) {
+    cron.schedule("0 0 * * *", async () => {
+      try {
+        const r = await pool.query("SELECT * FROM todos WHERE recurring = true AND completed = false AND due_date < CURRENT_DATE");
+        for (const todo of r.rows) {
+          // Auto-complete and create next
+          await pool.query("UPDATE todos SET completed = true, completed_at = now() WHERE id = $1", [todo.id]);
+          const rule = todo.recurrence_rule;
+          let nextDue = new Date(todo.due_date);
+          if (rule === "daily") nextDue.setDate(nextDue.getDate() + 1);
+          else if (rule === "weekdays") { do { nextDue.setDate(nextDue.getDate() + 1); } while (nextDue.getDay() === 0 || nextDue.getDay() === 6); }
+          else if (rule === "weekly") nextDue.setDate(nextDue.getDate() + 7);
+          else if (rule === "monthly") nextDue.setMonth(nextDue.getMonth() + 1);
+          else if (rule === "yearly") nextDue.setFullYear(nextDue.getFullYear() + 1);
+          while (nextDue <= new Date()) {
+            if (rule === "daily") nextDue.setDate(nextDue.getDate() + 1);
+            else if (rule === "weekly") nextDue.setDate(nextDue.getDate() + 7);
+            else if (rule === "monthly") nextDue.setMonth(nextDue.getMonth() + 1);
+            else break;
+          }
+          await pool.query(
+            "INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_parent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            [todo.title, todo.description, todo.priority, todo.horizon, todo.category, nextDue.toISOString().split("T")[0], true, rule, todo.recurrence_parent_id || todo.id]
+          );
+        }
+        if (r.rows.length) console.log(`Processed ${r.rows.length} recurring tasks`);
+      } catch (err) { console.error("Recurring task error:", err.message); }
+    });
+    console.log("Recurring task processor started (daily at midnight)");
   }
 
   app.listen(PORT, "0.0.0.0", () => {

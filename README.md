@@ -5,21 +5,21 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 ## Architecture
 
 ```
-┌──────────────────┐     ┌──────────────────┐
-│   Browser (PWA)  │────>│  Express Server  │
-│  Tasks / Emails  │     │  (port 3001)     │
-│  Notes / Contacts│     └────────┬─────────┘
+┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
+│   Browser (PWA)  │────>│  Express Server  │────>│  Claude API      │
+│  Tasks / Emails  │     │  (port 3001)     │     │  (AI drafting)   │
+│  Notes / Calendar│     └────────┬─────────┘     └──────────────────┘
 └──────────────────┘              │
-                         ┌────────┴────────┐
-                         │ Neon PostgreSQL  │
-                         │  (todos, emails, │
-                         │   notes, etc.)   │
-                         └────────┬────────┘
-                                  │
-                         ┌────────┴────────┐     ┌──────────────┐
-                         │    node-cron    │────>│  SMTP Server │
-                         │ (email scheduler)│     │  (Gmail etc) │
-                         └─────────────────┘     └──────────────┘
+                        ┌────────┴────────┐
+                        │ Neon PostgreSQL  │
+                        │  (todos, emails, │
+                        │   notes, etc.)   │
+                        └────────┬────────┘
+                                 │
+                        ┌────────┴────────┐     ┌──────────────┐
+                        │    node-cron    │────>│  SMTP Server │
+                        │ (email + tasks) │     │  (Gmail etc) │
+                        └─────────────────┘     └──────────────┘
 ```
 
 ## Features
@@ -30,11 +30,25 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 - **Categories**: Custom labels (work, personal, health, etc.)
 - **Due dates**: With overdue detection and visual indicators
 - **Filters**: By horizon, status (pending/completed), and priority
+- **Drag-and-drop**: Reorder tasks by dragging
+- **Natural language Quick Add**: Type "Buy groceries tomorrow urgent" and it auto-detects priority, horizon, and due date
+
+### Recurring Tasks
+- **Five recurrence rules**: Daily, weekly, monthly, yearly, weekdays
+- **Auto-generation**: When a recurring task is completed, the next instance is automatically created
+- **Daily processor**: Cron job at midnight handles overdue recurring tasks
+
+### Subtasks
+- **Checklists**: Add subtasks within any todo
+- **Progress tracking**: Visual progress bar showing completion percentage
+- **Inline management**: Add, check off, and delete subtasks without leaving the todo view
 
 ### Email Drafting & Scheduling
 - **Compose**: Full email editor with recipient, subject, body
 - **Schedule**: Set a specific date/time for automatic sending
 - **Quick Send**: Natural language input — *"Send an email to Mom Tuesday morning at 9AM about dinner plans"*
+- **AI Drafting**: Claude-powered email composition — describe what you want and AI writes the email
+- **Email Templates**: Save and reuse common email formats
 - **Contact lookup**: Type a name, auto-fills the email address
 - **SMTP**: Sends via any SMTP provider (Gmail, Outlook, etc.)
 - **Scheduler**: Checks every minute for due scheduled emails
@@ -50,6 +64,24 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 - **Lookup API**: Used by email composer and Quick Send
 - **Environment contacts**: Set `CONTACTS` env var for static contacts
 
+### Dashboard
+- **Overview cards**: Task counts, email stats, note totals
+- **Upcoming tasks**: Next due items at a glance
+- **Scheduled emails**: Pending sends
+- **Global search**: Search across all todos, emails, and notes
+- **Perfin widget**: Shows subscription data from linked Perfin instance
+
+### Calendar View
+- **Monthly calendar**: Visual overview of all events
+- **Color-coded**: Tasks, emails, and notes shown with distinct colors
+- **Navigate**: Browse months with previous/next controls
+
+### Weekly Review
+- **Stats cards**: Tasks completed, created, emails sent, notes added
+- **Completed tasks list**: What you accomplished this week
+- **Overdue items**: Tasks needing attention
+- **Upcoming**: What's coming next week
+
 ### Authentication
 Two login modes — set one in your environment variables:
 - **`SESSION_PASSWORD`** — text password, shows a standard password input
@@ -60,10 +92,21 @@ Sessions expire after a configurable timeout (default 15 minutes, adjustable in 
 ### Dark/Light Theme
 Toggle between Night Mode (default) and Day Mode in Settings. Identical to Perfin's theme system.
 
+### Keyboard Shortcuts
+- **n** — New todo
+- **e** — New email
+- **/** — Focus search
+- **t** — Go to Todos
+- **d** — Go to Dashboard
+- **?** — Show shortcuts reference (in Settings)
+
+### Browser Notifications
+Optional push notifications for task reminders. Enable in Settings.
+
 ### Perfin Integration
 - Set `PERFIN_URL` to add a **Perfin** link in the navigation bar
+- Dashboard widget shows subscription data from Perfin
 - Both apps share the same design language and color palette
-- Can share the same Neon database or use separate databases
 
 ### Mobile App (PWA)
 Installable as a home screen icon:
@@ -111,7 +154,7 @@ docker compose up --build
 npm test
 ```
 
-28 tests covering time expression parsing, input validation, data structures, sorting, and security logic.
+57 tests across 16 suites covering: time parsing, input validation, data structures, sorting, security, recurring tasks, subtasks, email templates, natural language parsing, global search, calendar, weekly review, drag-and-drop, and keyboard shortcuts.
 
 ## API Endpoints
 
@@ -123,11 +166,15 @@ npm test
 | `GET` | `/notes` | Notes page |
 | `GET` | `/contacts` | Contact management page |
 | `GET` | `/settings` | Settings page |
+| `GET` | `/calendar` | Calendar view |
+| `GET` | `/review` | Weekly review page |
 | `GET` | `/login` | Authentication |
 | `GET` | `/api/todos` | List todos (query: horizon, priority, completed, category) |
 | `POST` | `/api/todos` | Create todo |
 | `PATCH` | `/api/todos/:id` | Update todo |
 | `DELETE` | `/api/todos/:id` | Delete todo |
+| `POST` | `/api/todos/reorder` | Reorder todos (drag-and-drop) |
+| `POST` | `/api/todos/:id/complete-recurring` | Complete recurring task & create next |
 | `GET` | `/api/emails` | List emails (query: status) |
 | `POST` | `/api/emails` | Create email |
 | `PATCH` | `/api/emails/:id` | Update email |
@@ -145,6 +192,19 @@ npm test
 | `GET` | `/api/settings` | Get settings |
 | `PATCH` | `/api/settings` | Update settings |
 | `GET` | `/api/stats` | Dashboard statistics |
+| `GET` | `/api/subtasks/:todoId` | List subtasks for a todo |
+| `POST` | `/api/subtasks/:todoId` | Create subtask |
+| `PATCH` | `/api/subtasks/:id` | Update subtask |
+| `DELETE` | `/api/subtasks/:id` | Delete subtask |
+| `GET` | `/api/email-templates` | List email templates |
+| `POST` | `/api/email-templates` | Create template |
+| `PUT` | `/api/email-templates/:id` | Update template |
+| `DELETE` | `/api/email-templates/:id` | Delete template |
+| `POST` | `/api/ai/draft-email` | AI-powered email drafting |
+| `GET` | `/api/search` | Global search (query: q) |
+| `GET` | `/api/calendar/:year/:month` | Calendar events for month |
+| `GET` | `/api/review` | Weekly review stats |
+| `GET` | `/api/perfin/subscriptions` | Proxy to Perfin API |
 
 ## Environment Variables
 
@@ -160,4 +220,5 @@ npm test
 | `SMTP_PASS` | SMTP password |
 | `SMTP_FROM` | From email address |
 | `CONTACTS` | JSON map of name→email |
+| `ANTHROPIC_API_KEY` | Claude API key for AI email drafting (optional) |
 | `PERFIN_URL` | URL to linked Perfin instance |

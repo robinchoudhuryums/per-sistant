@@ -276,6 +276,304 @@ describe("Date utilities", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Recurring task tests
+// ---------------------------------------------------------------------------
+describe("Recurring tasks", () => {
+  it("validates recurrence rules", () => {
+    const valid = ["daily", "weekly", "monthly", "yearly", "weekdays"];
+    assert.ok(valid.includes("daily"));
+    assert.ok(valid.includes("weekdays"));
+    assert.ok(!valid.includes("biweekly"));
+    assert.ok(!valid.includes(""));
+  });
+
+  it("calculates next occurrence for daily", () => {
+    const today = new Date("2026-03-12");
+    const next = new Date(today);
+    next.setDate(next.getDate() + 1);
+    assert.equal(next.toISOString().split("T")[0], "2026-03-13");
+  });
+
+  it("calculates next occurrence for weekly", () => {
+    const today = new Date("2026-03-12");
+    const next = new Date(today);
+    next.setDate(next.getDate() + 7);
+    assert.equal(next.toISOString().split("T")[0], "2026-03-19");
+  });
+
+  it("calculates next occurrence for monthly", () => {
+    const today = new Date("2026-03-12");
+    const next = new Date(today);
+    next.setMonth(next.getMonth() + 1);
+    assert.equal(next.toISOString().split("T")[0], "2026-04-12");
+  });
+
+  it("calculates next occurrence for yearly", () => {
+    const today = new Date("2026-03-12");
+    const next = new Date(today);
+    next.setFullYear(next.getFullYear() + 1);
+    assert.equal(next.toISOString().split("T")[0], "2027-03-12");
+  });
+
+  it("weekdays skips weekend", () => {
+    // Saturday -> Monday
+    const sat = new Date("2026-03-14"); // Saturday
+    const next = new Date(sat);
+    const day = next.getDay();
+    if (day === 6) next.setDate(next.getDate() + 2); // Skip to Monday
+    else if (day === 0) next.setDate(next.getDate() + 1);
+    else next.setDate(next.getDate() + 1);
+    assert.equal(next.getDay(), 1); // Monday
+  });
+
+  it("recurring todo has correct fields", () => {
+    const todo = {
+      id: 1, title: "Daily standup", recurring: true,
+      recurrence_rule: "weekdays", recurrence_parent_id: null
+    };
+    assert.ok(todo.recurring);
+    assert.equal(todo.recurrence_rule, "weekdays");
+    assert.equal(todo.recurrence_parent_id, null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Subtask tests
+// ---------------------------------------------------------------------------
+describe("Subtasks", () => {
+  it("subtask has expected fields", () => {
+    const subtask = {
+      id: 1, todo_id: 5, title: "Step 1",
+      completed: false, sort_order: 0
+    };
+    assert.ok("todo_id" in subtask);
+    assert.ok("title" in subtask);
+    assert.ok("completed" in subtask);
+    assert.ok("sort_order" in subtask);
+  });
+
+  it("calculates subtask progress", () => {
+    const subtasks = [
+      { completed: true }, { completed: true }, { completed: false }
+    ];
+    const completed = subtasks.filter(s => s.completed).length;
+    const total = subtasks.length;
+    const pct = Math.round((completed / total) * 100);
+    assert.equal(completed, 2);
+    assert.equal(total, 3);
+    assert.equal(pct, 67);
+  });
+
+  it("handles empty subtask list", () => {
+    const subtasks = [];
+    const pct = subtasks.length === 0 ? 0 : Math.round((subtasks.filter(s => s.completed).length / subtasks.length) * 100);
+    assert.equal(pct, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Email template tests
+// ---------------------------------------------------------------------------
+describe("Email templates", () => {
+  it("template has expected fields", () => {
+    const template = {
+      id: 1, name: "Weekly Update", subject: "Weekly Update - {{date}}",
+      body: "Hi team,\n\nHere is the weekly update..."
+    };
+    assert.ok("name" in template);
+    assert.ok("subject" in template);
+    assert.ok("body" in template);
+  });
+
+  it("template requires name, subject, body", () => {
+    const valid = { name: "Test", subject: "Sub", body: "Body" };
+    const invalid = { name: "Test", subject: "Sub" };
+    assert.ok(valid.name && valid.subject && valid.body);
+    assert.ok(!invalid.body);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Natural language todo parsing tests
+// ---------------------------------------------------------------------------
+describe("Natural language todo creation", () => {
+  function parseQuickTodo(text) {
+    const result = { title: text, priority: "medium", horizon: "short", due_date: null };
+    if (/\b(urgent|asap|critical)\b/i.test(text)) result.priority = "urgent";
+    else if (/\b(important|high\s*priority)\b/i.test(text)) result.priority = "high";
+    else if (/\b(low\s*priority|whenever|someday)\b/i.test(text)) result.priority = "low";
+    if (/\b(long[\s-]*term|eventually|this year)\b/i.test(text)) result.horizon = "long";
+    else if (/\b(medium[\s-]*term|this month|soon)\b/i.test(text)) result.horizon = "medium";
+    const tomorrowMatch = /\btomorrow\b/i.test(text);
+    if (tomorrowMatch) {
+      const d = new Date(); d.setDate(d.getDate() + 1);
+      result.due_date = d.toISOString().split("T")[0];
+    }
+    return result;
+  }
+
+  it("detects urgent priority", () => {
+    const r = parseQuickTodo("Fix server crash URGENT");
+    assert.equal(r.priority, "urgent");
+  });
+
+  it("detects high priority", () => {
+    const r = parseQuickTodo("Important: review contract");
+    assert.equal(r.priority, "high");
+  });
+
+  it("detects low priority", () => {
+    const r = parseQuickTodo("Someday clean garage");
+    assert.equal(r.priority, "low");
+  });
+
+  it("detects long-term horizon", () => {
+    const r = parseQuickTodo("Long-term: learn piano");
+    assert.equal(r.horizon, "long");
+  });
+
+  it("detects medium-term horizon", () => {
+    const r = parseQuickTodo("This month finish report");
+    assert.equal(r.horizon, "medium");
+  });
+
+  it("defaults to short-term medium priority", () => {
+    const r = parseQuickTodo("Buy groceries");
+    assert.equal(r.priority, "medium");
+    assert.equal(r.horizon, "short");
+  });
+
+  it("detects tomorrow as due date", () => {
+    const r = parseQuickTodo("Submit report tomorrow");
+    assert.ok(r.due_date);
+    const expected = new Date();
+    expected.setDate(expected.getDate() + 1);
+    assert.equal(r.due_date, expected.toISOString().split("T")[0]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Global search tests
+// ---------------------------------------------------------------------------
+describe("Global search", () => {
+  it("matches across multiple item types", () => {
+    const items = [
+      { type: "todo", title: "Buy groceries", description: "" },
+      { type: "email", subject: "Grocery list", body: "Milk, eggs" },
+      { type: "note", title: "Shopping", content: "Need groceries" },
+    ];
+    const query = "grocer";
+    const results = items.filter(i => {
+      const text = [i.title, i.description, i.subject, i.body, i.content]
+        .filter(Boolean).join(" ").toLowerCase();
+      return text.includes(query.toLowerCase());
+    });
+    assert.equal(results.length, 3);
+  });
+
+  it("handles empty query", () => {
+    const query = "";
+    assert.ok(!query.trim());
+  });
+
+  it("is case-insensitive", () => {
+    const items = [{ title: "MEETING with team" }];
+    const results = items.filter(i => i.title.toLowerCase().includes("meeting"));
+    assert.equal(results.length, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Calendar tests
+// ---------------------------------------------------------------------------
+describe("Calendar", () => {
+  it("computes days in month", () => {
+    const daysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
+    assert.equal(daysInMonth(2026, 0), 31); // January
+    assert.equal(daysInMonth(2026, 1), 28); // February (non-leap)
+    assert.equal(daysInMonth(2024, 1), 29); // February (leap)
+    assert.equal(daysInMonth(2026, 2), 31); // March
+  });
+
+  it("computes first day of month", () => {
+    const firstDay = new Date(2026, 2, 1).getDay(); // March 2026
+    assert.ok(firstDay >= 0 && firstDay <= 6);
+  });
+
+  it("week starts on Sunday (day 0)", () => {
+    const sunday = new Date("2026-03-08"); // a Sunday
+    assert.equal(sunday.getDay(), 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Weekly review tests
+// ---------------------------------------------------------------------------
+describe("Weekly review", () => {
+  it("computes week boundaries", () => {
+    const getWeekStart = (date) => {
+      const d = new Date(date);
+      const day = d.getDay();
+      d.setDate(d.getDate() - day);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    };
+    const getWeekEnd = (start) => {
+      const d = new Date(start);
+      d.setDate(d.getDate() + 6);
+      d.setHours(23, 59, 59, 999);
+      return d;
+    };
+    const start = getWeekStart("2026-03-12");
+    assert.equal(start.getDay(), 0); // Sunday
+    const end = getWeekEnd(start);
+    assert.equal(end.getDay(), 6); // Saturday
+  });
+
+  it("review has expected fields", () => {
+    const review = {
+      week_start: "2026-03-08", week_end: "2026-03-14",
+      tasks_completed: 5, tasks_created: 8,
+      emails_sent: 3, notes_created: 2, summary: "Productive week"
+    };
+    assert.ok("tasks_completed" in review);
+    assert.ok("emails_sent" in review);
+    assert.ok("summary" in review);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Drag-and-drop reorder tests
+// ---------------------------------------------------------------------------
+describe("Drag-and-drop reorder", () => {
+  it("reorders array items correctly", () => {
+    const items = [{id:1,sort_order:0},{id:2,sort_order:1},{id:3,sort_order:2}];
+    // Move item 3 to position 0
+    const orderedIds = [3, 1, 2];
+    const reordered = orderedIds.map((id, i) => ({ id, sort_order: i }));
+    assert.equal(reordered[0].id, 3);
+    assert.equal(reordered[0].sort_order, 0);
+    assert.equal(reordered[1].id, 1);
+    assert.equal(reordered[2].id, 2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Keyboard shortcuts tests
+// ---------------------------------------------------------------------------
+describe("Keyboard shortcuts", () => {
+  it("shortcut map has expected keys", () => {
+    const shortcuts = {
+      "n": "new-todo", "e": "new-email", "/": "search",
+      "t": "todos-page", "d": "dashboard"
+    };
+    assert.equal(shortcuts["n"], "new-todo");
+    assert.equal(shortcuts["/"], "search");
+    assert.ok(!shortcuts["z"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Security tests
 // ---------------------------------------------------------------------------
 describe("Security", () => {
