@@ -165,29 +165,29 @@ const generalLimiter = rateLimit({
 app.use("/api/", generalLimiter);
 
 // ---------------------------------------------------------------------------
-// Shared CSS — matches Perfin design system exactly
+// Shared CSS — companion to Perfin (indigo/lavender palette vs Perfin's warm/amber)
 // ---------------------------------------------------------------------------
 const SHARED_CSS = `
     :root {
-      --bg: #080b12; --surface: rgba(255,255,255,0.04); --surface-2: rgba(255,255,255,0.07);
+      --bg: #0a0b14; --surface: rgba(255,255,255,0.04); --surface-2: rgba(255,255,255,0.07);
       --border: rgba(255,255,255,0.08); --border-hover: rgba(255,255,255,0.18);
-      --text: #f0ebe3; --text-muted: rgba(240,235,227,0.5);
-      --warm: #d4a574; --warm-glow: #c8856c; --teal: #5a8f8f;
+      --text: #e8e6f0; --text-muted: rgba(232,230,240,0.5);
+      --warm: #a08cd4; --warm-glow: #8b7bc8; --teal: #6b9f9f;
       --green: #6fcf97; --green-bg: rgba(111,207,151,0.1);
       --red: #eb6b6b; --red-bg: rgba(235,107,107,0.1);
-      --yellow: #f0c36d; --yellow-bg: rgba(240,195,109,0.1);
-      --blue: #7fb5e6; --blue-bg: rgba(127,181,230,0.1);
+      --yellow: #e8c86d; --yellow-bg: rgba(232,200,109,0.1);
+      --blue: #7fa8e6; --blue-bg: rgba(127,168,230,0.1);
       --radius: 12px;
     }
     [data-theme="light"] {
-      --bg: #f5f2ed; --surface: rgba(0,0,0,0.03); --surface-2: rgba(0,0,0,0.06);
+      --bg: #f0eef5; --surface: rgba(0,0,0,0.03); --surface-2: rgba(0,0,0,0.06);
       --border: rgba(0,0,0,0.10); --border-hover: rgba(0,0,0,0.20);
       --text: #1a1a2e; --text-muted: rgba(26,26,46,0.5);
-      --warm: #b07a4a; --warm-glow: #a0684c; --teal: #3d7272;
+      --warm: #6b5ba0; --warm-glow: #5c4d90; --teal: #4a7a7a;
       --green: #2d9f5f; --green-bg: rgba(45,159,95,0.1);
       --red: #c94444; --red-bg: rgba(201,68,68,0.1);
-      --yellow: #c49a2a; --yellow-bg: rgba(196,154,42,0.1);
-      --blue: #4a8abf; --blue-bg: rgba(74,138,191,0.1);
+      --yellow: #b89820; --yellow-bg: rgba(184,152,32,0.1);
+      --blue: #4a78bf; --blue-bg: rgba(74,120,191,0.1);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -196,19 +196,19 @@ const SHARED_CSS = `
     }
     body::before {
       content: ''; position: fixed; top: -30%; right: -20%; width: 90vw; height: 90vh;
-      background: radial-gradient(ellipse at 50% 30%, rgba(200,133,108,0.28) 0%, rgba(180,120,100,0.15) 25%, rgba(90,143,143,0.12) 50%, transparent 75%);
+      background: radial-gradient(ellipse at 50% 30%, rgba(139,123,200,0.25) 0%, rgba(107,93,180,0.15) 25%, rgba(107,159,159,0.10) 50%, transparent 75%);
       pointer-events: none; z-index: 0; filter: blur(50px);
     }
     body::after {
       content: ''; position: fixed; bottom: -20%; left: -15%; width: 80vw; height: 70vh;
-      background: radial-gradient(ellipse at 40% 60%, rgba(90,143,143,0.20) 0%, rgba(212,165,116,0.10) 35%, rgba(160,100,80,0.05) 60%, transparent 80%);
+      background: radial-gradient(ellipse at 40% 60%, rgba(107,159,159,0.18) 0%, rgba(160,140,212,0.10) 35%, rgba(120,100,170,0.05) 60%, transparent 80%);
       pointer-events: none; z-index: 0; filter: blur(60px);
     }
     [data-theme="light"] body::before {
-      background: radial-gradient(ellipse at 50% 30%, rgba(200,133,108,0.12) 0%, rgba(90,143,143,0.06) 50%, transparent 75%);
+      background: radial-gradient(ellipse at 50% 30%, rgba(107,91,160,0.12) 0%, rgba(74,122,122,0.06) 50%, transparent 75%);
     }
     [data-theme="light"] body::after {
-      background: radial-gradient(ellipse at 40% 60%, rgba(90,143,143,0.10) 0%, rgba(212,165,116,0.05) 35%, transparent 80%);
+      background: radial-gradient(ellipse at 40% 60%, rgba(74,122,122,0.10) 0%, rgba(107,91,160,0.05) 35%, transparent 80%);
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .btn-loading { position: relative; color: transparent !important; pointer-events: none; }
@@ -327,19 +327,24 @@ const SHARED_CSS = `
     .todo-item { display: flex; align-items: flex-start; gap: 12px; padding: 14px 0;
                  border-bottom: 1px solid rgba(255,255,255,0.04); }
     .todo-item:last-child { border-bottom: none; }
-    .todo-check { width: 20px; height: 20px; border: 2px solid var(--border); border-radius: 50%;
+    .todo-check { width: 28px; height: 28px; min-width: 28px; border: 2px solid var(--border); border-radius: 50%;
                   cursor: pointer; flex-shrink: 0; margin-top: 2px; transition: all 0.2s;
-                  display: flex; align-items: center; justify-content: center; }
+                  display: flex; align-items: center; justify-content: center;
+                  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+                  padding: 8px; box-sizing: content-box; }
     .todo-check:hover { border-color: var(--warm); }
+    .todo-check:active { transform: scale(0.9); }
     .todo-check.done { border-color: var(--green); background: var(--green); }
-    .todo-check.done::after { content: '\\2713'; color: var(--bg); font-size: 12px; font-weight: 700; }
+    .todo-check.done::after { content: '\\2713'; color: var(--bg); font-size: 14px; font-weight: 700; }
     .todo-content { flex: 1; min-width: 0; }
     .todo-title { font-size: 14px; font-weight: 400; }
     .todo-title.done { text-decoration: line-through; opacity: 0.4; }
     .todo-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; display: flex; gap: 12px; flex-wrap: wrap; }
     .todo-actions { display: flex; gap: 6px; flex-shrink: 0; }
     .todo-actions button { background: none; border: none; color: var(--text-muted); cursor: pointer;
-                           font-size: 14px; padding: 4px; transition: color 0.2s; }
+                           font-size: 14px; padding: 10px; transition: color 0.2s;
+                           -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+                           min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
     .todo-actions button:hover { color: var(--text); }
     .todo-actions button.delete:hover { color: var(--red); }
 
@@ -367,14 +372,23 @@ const SHARED_CSS = `
     /* Subtasks */
     .subtask-list { margin-top: 8px; padding-left: 32px; }
     .subtask-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
-    .subtask-check { width: 16px; height: 16px; border: 1.5px solid var(--border); border-radius: 50%;
+    .subtask-check { width: 20px; height: 20px; min-width: 20px; border: 1.5px solid var(--border); border-radius: 50%;
                      cursor: pointer; flex-shrink: 0; transition: all 0.2s;
-                     display: flex; align-items: center; justify-content: center; }
+                     display: flex; align-items: center; justify-content: center;
+                     -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+                     padding: 10px; box-sizing: content-box; }
     .subtask-check:hover { border-color: var(--warm); }
+    .subtask-check:active { transform: scale(0.9); }
     .subtask-check.done { border-color: var(--green); background: var(--green); }
-    .subtask-check.done::after { content: '\\2713'; color: var(--bg); font-size: 9px; font-weight: 700; }
+    .subtask-check.done::after { content: '\\2713'; color: var(--bg); font-size: 10px; font-weight: 700; }
+    .subtask-text { flex: 1; min-width: 0; }
     .subtask-text.done { text-decoration: line-through; opacity: 0.4; }
-    .subtask-add { font-size: 11px; color: var(--text-muted); cursor: pointer; padding: 4px 0; }
+    .subtask-edit-btn { background: none; border: none; color: var(--text-muted); cursor: pointer;
+                        font-size: 12px; padding: 8px; -webkit-tap-highlight-color: transparent;
+                        touch-action: manipulation; transition: color 0.2s; }
+    .subtask-edit-btn:hover { color: var(--warm); }
+    .subtask-add { font-size: 11px; color: var(--text-muted); cursor: pointer; padding: 8px 0;
+                   -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
     .subtask-add:hover { color: var(--warm); }
     .subtask-progress { height: 3px; background: var(--surface-2); border-radius: 2px; margin-top: 6px; overflow: hidden; }
     .subtask-progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 0.3s; }
@@ -432,6 +446,31 @@ const SHARED_CSS = `
       .modal { width: 95%; padding: 24px; }
       .cal-day { min-height: 50px; }
       .cal-event { font-size: 8px; }
+      .container { padding: 16px 12px; }
+      .todo-item { padding: 14px; }
+      .filters button { padding: 8px 16px; font-size: 12px; }
+      .subtask-list { padding-left: 16px; }
+      .drag-handle { display: none; }
+    }
+    @media (max-width: 480px) {
+      .topnav .nav-links { gap: 12px; font-size: 12px; }
+      .topnav .nav-links a { padding: 6px 0; }
+      h1 { font-size: 22px; }
+      .top-cards { grid-template-columns: 1fr; }
+      .modal { width: 98%; padding: 16px; }
+      .section { padding: 16px; }
+      .todo-meta { gap: 8px; }
+      .badge { font-size: 9px; padding: 2px 6px; }
+      .filters { gap: 6px; }
+      .filters button { padding: 6px 12px; font-size: 11px; }
+      .cal-grid { font-size: 10px; }
+      .cal-day { min-height: 40px; padding: 3px; }
+    }
+    @media (max-width: 360px) {
+      .container { padding: 12px 8px; }
+      h1 { font-size: 20px; }
+      .topnav .nav-links { gap: 10px; font-size: 11px; }
+      .modal { padding: 12px; }
     }
 `;
 
@@ -448,7 +487,7 @@ function pageHead(title) {
   <link rel="manifest" href="/manifest.json">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#080b12">
+  <meta name="theme-color" content="#0a0b14">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>${SHARED_CSS}</style>
@@ -504,9 +543,9 @@ ${themeScript()}
       <div id="error" class="status-msg" style="margin-top:12px;"></div>
       ${isPIN ? `
       <div id="dots" style="display:flex;gap:10px;justify-content:center;margin:24px 0;"></div>
-      <div style="display:grid;grid-template-columns:repeat(3,60px);gap:10px;justify-content:center;">
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(60px,72px));gap:12px;justify-content:center;max-width:260px;margin:0 auto;">
         ${[1,2,3,4,5,6,7,8,9,'',0,'<'].map(k => k === '' ? '<div></div>' :
-          `<button onclick="${k === '<' ? 'pinDel()' : 'pinAdd('+k+')'}" style="width:60px;height:60px;border-radius:50%;border:1px solid var(--border);background:transparent;color:var(--text);font-size:22px;font-weight:300;cursor:pointer;font-family:inherit;transition:all 0.2s;">${k === '<' ? '&#9003;' : k}</button>`
+          `<button onclick="${k === '<' ? 'pinDel()' : 'pinAdd('+k+')'}" style="width:100%;aspect-ratio:1;border-radius:50%;border:1px solid var(--border);background:transparent;color:var(--text);font-size:22px;font-weight:300;cursor:pointer;font-family:inherit;transition:all 0.2s;-webkit-tap-highlight-color:transparent;touch-action:manipulation;">${k === '<' ? '&#9003;' : k}</button>`
         ).join('')}
       </div>
       <script>
@@ -1747,7 +1786,7 @@ async function load() {
     if (subs.length) {
       subHtml = '<div class="subtask-progress"><div class="subtask-progress-fill" style="width:'+(subDone/subs.length*100)+'%"></div></div>';
       subHtml += '<div class="subtask-list">'+subs.map(s =>
-        '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" onclick="event.stopPropagation();toggleSubtask('+s.id+','+!s.completed+')"></div><span class="subtask-text'+(s.completed?' done':'')+'">'+esc(s.title)+'</span></div>'
+        '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" onclick="event.stopPropagation();toggleSubtask('+s.id+','+!s.completed+')"></div><span class="subtask-text'+(s.completed?' done':'')+'" ondblclick="event.stopPropagation();inlineEditSubtask(this,'+s.id+')">'+esc(s.title)+'</span><button class="subtask-edit-btn" onclick="event.stopPropagation();inlineEditSubtask(this.previousElementSibling,'+s.id+')">&#9998;</button></div>'
       ).join('')+'</div>';
     }
     return '<div class="todo-item" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" onclick="toggleTodo('+t.id+','+!t.completed+','+!!t.recurring+')"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+(t.recurring?'<span class="badge recurring">'+t.recurrence_rule+'</span>':'')+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions"><button onclick="openEdit('+t.id+')">&#9998;</button></div></div>';
@@ -1800,18 +1839,55 @@ async function addSubtask() {
 }
 function renderEditSubtasks() {
   document.getElementById('subtask-list-edit').innerHTML = editSubtasks.map((s,i) =>
-    '<div class="subtask-item"><span>'+esc(s.title)+'</span><button onclick="editSubtasks.splice('+i+',1);renderEditSubtasks()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;margin-left:auto;">&#10005;</button></div>'
+    '<div class="subtask-item"><span class="subtask-text" ondblclick="inlineEditNewSubtask(this,'+i+')">'+esc(s.title)+'</span><button class="subtask-edit-btn" onclick="inlineEditNewSubtask(this.previousElementSibling,'+i+')" title="Edit">&#9998;</button><button onclick="editSubtasks.splice('+i+',1);renderEditSubtasks()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:8px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;">&#10005;</button></div>'
   ).join('');
 }
 async function loadEditSubtasks(todoId) {
   var subs = await fetch('/api/todos/'+todoId+'/subtasks').then(r=>r.json());
   document.getElementById('subtask-list-edit').innerHTML = subs.map(s =>
-    '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" onclick="toggleSubtask('+s.id+','+!s.completed+');loadEditSubtasks('+todoId+')"></div><span class="subtask-text'+(s.completed?' done':'')+'">'+esc(s.title)+'</span><button onclick="deleteSubtask('+s.id+','+todoId+')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;margin-left:auto;">&#10005;</button></div>'
+    '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" onclick="toggleSubtask('+s.id+','+!s.completed+');loadEditSubtasks('+todoId+')"></div><span class="subtask-text'+(s.completed?' done':'')+'" ondblclick="inlineEditSubtask(this,'+s.id+','+todoId+')">'+esc(s.title)+'</span><button class="subtask-edit-btn" onclick="inlineEditSubtask(this.previousElementSibling,'+s.id+','+todoId+')" title="Edit">&#9998;</button><button onclick="deleteSubtask('+s.id+','+todoId+')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:8px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;">&#10005;</button></div>'
   ).join('');
 }
 async function deleteSubtask(id, todoId) {
   await fetch('/api/subtasks/'+id, {method:'DELETE'});
   loadEditSubtasks(todoId);
+}
+function inlineEditSubtask(span, id, todoId) {
+  if (span.querySelector('input')) return;
+  var old = span.textContent;
+  var input = document.createElement('input');
+  input.type = 'text'; input.value = old;
+  input.style.cssText = 'font-size:12px;font-family:inherit;background:var(--surface-2);color:var(--text);border:1px solid var(--warm);border-radius:4px;padding:2px 6px;width:100%;';
+  span.textContent = '';
+  span.appendChild(input);
+  input.focus(); input.select();
+  function save() {
+    var val = input.value.trim();
+    if (val && val !== old) {
+      fetch('/api/subtasks/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:val})}).then(function(){ if(todoId) loadEditSubtasks(todoId); else load(); });
+    } else {
+      span.textContent = old;
+    }
+  }
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', function(e) { if(e.key==='Enter'){e.preventDefault();input.blur();} if(e.key==='Escape'){input.value=old;input.blur();} });
+}
+function inlineEditNewSubtask(span, idx) {
+  if (span.querySelector('input')) return;
+  var old = span.textContent;
+  var input = document.createElement('input');
+  input.type = 'text'; input.value = old;
+  input.style.cssText = 'font-size:12px;font-family:inherit;background:var(--surface-2);color:var(--text);border:1px solid var(--warm);border-radius:4px;padding:2px 6px;width:100%;';
+  span.textContent = '';
+  span.appendChild(input);
+  input.focus(); input.select();
+  function save() {
+    var val = input.value.trim();
+    if (val) { editSubtasks[idx].title = val; }
+    renderEditSubtasks();
+  }
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', function(e) { if(e.key==='Enter'){e.preventDefault();input.blur();} if(e.key==='Escape'){input.value=old;input.blur();} });
 }
 
 function openAdd() {
@@ -3044,8 +3120,8 @@ app.get("/manifest.json", (req, res) => {
     description: "Personal assistant — tasks, emails, notes",
     start_url: "/",
     display: "standalone",
-    background_color: "#080b12",
-    theme_color: "#080b12",
+    background_color: "#0a0b14",
+    theme_color: "#0a0b14",
     icons: [
       { src: "/icon-192.svg", sizes: "192x192", type: "image/svg+xml" },
       { src: "/icon-512.svg", sizes: "512x512", type: "image/svg+xml" },
@@ -3064,8 +3140,8 @@ app.get("/sw.js", (req, res) => {
 
 // SVG icon
 const SVG_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="64" fill="#080b12"/>
-  <text x="256" y="340" font-family="Inter,sans-serif" font-size="280" font-weight="300" fill="#d4a574" text-anchor="middle">P</text>
+  <rect width="512" height="512" rx="64" fill="#0a0b14"/>
+  <text x="256" y="340" font-family="Inter,sans-serif" font-size="280" font-weight="300" fill="#a08cd4" text-anchor="middle">P</text>
 </svg>`;
 
 app.get("/icon-192.svg", (req, res) => res.type("image/svg+xml").send(SVG_ICON));
