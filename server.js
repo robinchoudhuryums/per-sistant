@@ -59,9 +59,12 @@ async function callAI(model, prompt, maxTokens = 1024) {
   return msg.content[0].text.trim();
 }
 
+const VALID_AI_FEATURES = ["email_draft", "task_breakdown", "smart_quick_add", "weekly_review", "email_tone", "daily_briefing", "note_tags"];
 async function getAIModelForFeature(feature) {
+  if (!VALID_AI_FEATURES.includes(feature)) return "off";
   try {
-    const r = await pool.query(`SELECT ai_model_${feature} as model FROM user_settings WHERE id = 1`);
+    const col = "ai_model_" + feature;
+    const r = await pool.query(`SELECT ${col} as model FROM user_settings WHERE id = 1`);
     return r.rows[0]?.model || "off";
   } catch { return "off"; }
 }
@@ -72,6 +75,35 @@ const AUTH_SECRET = SESSION_PASSWORD || SESSION_PIN || null;
 const AUTH_MODE = SESSION_PIN ? "pin" : (SESSION_PASSWORD ? "password" : null);
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const PERFIN_URL = process.env.PERFIN_URL || null;
+
+// Timing-safe string comparison for auth
+function safeCompare(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    crypto.timingSafeEqual(bufA, bufA); // constant-time even on length mismatch
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+// Sanitize error for client (never leak internal details)
+function safeError(err) {
+  console.error("Server error:", err.message);
+  return { error: "An internal error occurred." };
+}
+
+// Email format validation
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+// Enum validators
+const VALID_PRIORITIES = ["low", "medium", "high", "urgent"];
+const VALID_HORIZONS = ["short", "medium", "long"];
+const VALID_EMAIL_STATUSES = ["draft", "scheduled", "sent", "failed"];
+const VALID_NOTE_COLORS = ["default", "red", "orange", "yellow", "green", "blue", "purple"];
 
 // Contacts from env (name→email map)
 let envContacts = {};
@@ -119,7 +151,7 @@ app.use(session({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    sameSite: "strict",
   },
 }));
 
@@ -163,6 +195,14 @@ const generalLimiter = rateLimit({
   message: { error: "Too many requests, please try again later." },
 });
 app.use("/api/", generalLimiter);
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: "Too many login attempts. Please try again later." },
+  skipSuccessfulRequests: true,
+});
+app.use("/api/login", loginLimiter);
 
 // ---------------------------------------------------------------------------
 // Shared CSS — companion to Perfin (indigo/lavender palette vs Perfin's warm/amber)
@@ -437,6 +477,111 @@ const SHARED_CSS = `
     /* Recurring badge */
     .badge.recurring { background: rgba(212,165,116,0.1); color: var(--warm); }
 
+    /* ===== Animations ===== */
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes scaleIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    @keyframes modalIn {
+      from { opacity: 0; transform: scale(0.9) translateY(20px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    @keyframes overlayIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes checkPop {
+      0% { transform: scale(1); }
+      40% { transform: scale(1.25); }
+      100% { transform: scale(1); }
+    }
+    @keyframes strikethrough {
+      from { text-decoration-color: transparent; }
+      to { text-decoration-color: currentColor; }
+    }
+    @keyframes shimmer {
+      0% { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
+
+    /* Page content fade-in */
+    .container { animation: fadeIn 0.3s ease-out; }
+
+    /* Section cards stagger */
+    .section { animation: fadeInUp 0.4s ease-out both; }
+    .section:nth-child(2) { animation-delay: 0.05s; }
+    .section:nth-child(3) { animation-delay: 0.1s; }
+    .section:nth-child(4) { animation-delay: 0.15s; }
+
+    /* Dashboard stat cards */
+    .top-cards .card { animation: scaleIn 0.35s ease-out both; }
+    .top-cards .card:nth-child(1) { animation-delay: 0.05s; }
+    .top-cards .card:nth-child(2) { animation-delay: 0.1s; }
+    .top-cards .card:nth-child(3) { animation-delay: 0.15s; }
+    .top-cards .card:nth-child(4) { animation-delay: 0.2s; }
+
+    /* Todo items stagger */
+    .todo-item { animation: fadeInUp 0.3s ease-out both; }
+    .todo-item:nth-child(n+2) { animation-delay: calc(0.03s * var(--item-index, 0)); }
+
+    /* Note cards */
+    .note-card { animation: scaleIn 0.3s ease-out both; }
+
+    /* Modal overlay + content */
+    .modal-overlay { animation: overlayIn 0.2s ease-out; }
+    .modal { animation: modalIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+    /* Checkbox completion animation */
+    .todo-check.done { animation: checkPop 0.3s ease-out; }
+    .subtask-check.done { animation: checkPop 0.25s ease-out; }
+    .todo-title.done { animation: strikethrough 0.3s ease-out forwards; }
+
+    /* Nav links hover underline */
+    .topnav .nav-links a { position: relative; }
+    .topnav .nav-links a::after { content: ''; position: absolute; bottom: -2px; left: 0; width: 0;
+                                   height: 1.5px; background: var(--warm); transition: width 0.25s ease-out; }
+    .topnav .nav-links a:hover::after, .topnav .nav-links a.active::after { width: 100%; }
+
+    /* Button press feedback */
+    .filters button { transition: all 0.2s, transform 0.1s; }
+    .filters button:active { transform: scale(0.95); }
+
+    /* Card hover lift */
+    .note-card { transition: all 0.3s, transform 0.2s; }
+    .note-card:hover { transform: translateY(-2px); }
+
+    /* Search results slide */
+    .search-results .result-item { animation: slideDown 0.2s ease-out both; }
+
+    /* Subtask progress bar */
+    .subtask-progress-fill { transition: width 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+
+    /* Badge hover glow */
+    .badge { transition: all 0.2s; }
+    .badge:hover { filter: brightness(1.15); }
+
+    /* Loading shimmer for AI features */
+    .loading-shimmer { background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 50%, var(--surface) 75%);
+                       background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: var(--radius); }
+
+    /* Reduce motion for accessibility */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; animation-delay: 0ms !important;
+                               transition-duration: 0.01ms !important; }
+    }
+
     @media (max-width: 768px) {
       .topnav { flex-direction: column; gap: 12px; align-items: flex-start; }
       .topnav .nav-links { gap: 16px; flex-wrap: wrap; }
@@ -548,17 +693,19 @@ ${themeScript()}
           `<button onclick="${k === '<' ? 'pinDel()' : 'pinAdd('+k+')'}" style="width:100%;aspect-ratio:1;border-radius:50%;border:1px solid var(--border);background:transparent;color:var(--text);font-size:22px;font-weight:300;cursor:pointer;font-family:inherit;transition:all 0.2s;-webkit-tap-highlight-color:transparent;touch-action:manipulation;">${k === '<' ? '&#9003;' : k}</button>`
         ).join('')}
       </div>
+      <button onclick="submit()" style="margin-top:20px;width:100%;max-width:260px;padding:12px;font-size:13px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;-webkit-tap-highlight-color:transparent;touch-action:manipulation;">Submit</button>
       <script>
         var pin = '';
-        function pinAdd(d) { pin += d; renderDots(); if (pin.length >= ${SESSION_PIN ? SESSION_PIN.length : 4}) submit(); }
+        function pinAdd(d) { pin += d; renderDots(); }
         function pinDel() { pin = pin.slice(0,-1); renderDots(); }
         function renderDots() {
           var h = ''; for (var i = 0; i < pin.length; i++) h += '<div style="width:12px;height:12px;border-radius:50%;background:var(--warm);"></div>';
           document.getElementById('dots').innerHTML = h;
         }
         function submit() {
+          if (!pin) return;
           fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:pin}) })
-            .then(r => r.json()).then(d => { if (d.ok) location.href='/'; else { pin=''; renderDots(); document.getElementById('error').className='status-msg error'; document.getElementById('error').textContent=d.error||'Invalid PIN'; } });
+            .then(r => r.json()).then(d => { if (d.ok) location.href='/'; else { pin=''; renderDots(); document.getElementById('error').className='status-msg error'; document.getElementById('error').textContent=d.error||'Invalid credentials'; } });
         }
       </script>
       ` : `
@@ -582,7 +729,7 @@ ${themeScript()}
 app.post("/api/login", async (req, res) => {
   const { password } = req.body;
   if (!AUTH_SECRET) return res.json({ ok: true });
-  if (password === AUTH_SECRET) {
+  if (safeCompare(password, AUTH_SECRET)) {
     let timeout = 15;
     try {
       const r = await pool.query("SELECT session_timeout_minutes FROM user_settings WHERE id = 1");
@@ -617,7 +764,7 @@ app.get("/api/todos", async (req, res) => {
     const r = await pool.query(`SELECT * FROM todos ${clause} ORDER BY completed ASC, sort_order ASC, CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at DESC`, params);
     res.json(r.rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -625,13 +772,15 @@ app.post("/api/todos", async (req, res) => {
   try {
     const { title, description, priority, horizon, category, due_date, recurring, recurrence_rule } = req.body;
     if (!title) return res.status(400).json({ error: "Title is required." });
+    if (priority && !VALID_PRIORITIES.includes(priority)) return res.status(400).json({ error: "Invalid priority." });
+    if (horizon && !VALID_HORIZONS.includes(horizon)) return res.status(400).json({ error: "Invalid horizon." });
     const r = await pool.query(
       `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
       [title, description || null, priority || "medium", horizon || "short", category || null, due_date || null, recurring || false, recurrence_rule || null]
     );
     res.json(r.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -660,7 +809,7 @@ app.patch("/api/todos/:id", async (req, res) => {
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json(r.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -670,7 +819,7 @@ app.delete("/api/todos/:id", async (req, res) => {
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -685,7 +834,7 @@ app.get("/api/emails", async (req, res) => {
     const r = await pool.query(`SELECT * FROM emails ${where} ORDER BY CASE status WHEN 'scheduled' THEN 0 WHEN 'draft' THEN 1 WHEN 'sent' THEN 2 ELSE 3 END, created_at DESC`, params);
     res.json(r.rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -695,6 +844,9 @@ app.post("/api/emails", async (req, res) => {
     if (!recipient_email || !subject || !body) {
       return res.status(400).json({ error: "Recipient email, subject, and body are required." });
     }
+    if (!isValidEmail(recipient_email)) {
+      return res.status(400).json({ error: "Invalid email address format." });
+    }
     const status = scheduled_at ? "scheduled" : "draft";
     const r = await pool.query(
       `INSERT INTO emails (recipient_name, recipient_email, subject, body, status, scheduled_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
@@ -702,7 +854,7 @@ app.post("/api/emails", async (req, res) => {
     );
     res.json(r.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -724,7 +876,7 @@ app.patch("/api/emails/:id", async (req, res) => {
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json(r.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -734,7 +886,7 @@ app.delete("/api/emails/:id", async (req, res) => {
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -762,7 +914,7 @@ app.post("/api/emails/:id/send", async (req, res) => {
     res.json({ ok: true, message: "Email sent successfully." });
   } catch (err) {
     await pool.query("UPDATE emails SET status = 'failed', error_message = $1 WHERE id = $2", [err.message, req.params.id]);
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -774,7 +926,7 @@ app.get("/api/notes", async (req, res) => {
     const r = await pool.query("SELECT * FROM notes ORDER BY pinned DESC, updated_at DESC");
     res.json(r.rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -788,7 +940,7 @@ app.post("/api/notes", async (req, res) => {
     );
     res.json(r.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -810,7 +962,7 @@ app.patch("/api/notes/:id", async (req, res) => {
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json(r.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -820,7 +972,7 @@ app.delete("/api/notes/:id", async (req, res) => {
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -832,7 +984,7 @@ app.get("/api/contacts", async (req, res) => {
     const r = await pool.query("SELECT * FROM contacts ORDER BY name ASC");
     res.json(r.rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -847,7 +999,7 @@ app.post("/api/contacts", async (req, res) => {
     res.json(r.rows[0]);
   } catch (err) {
     if (err.code === "23505") return res.status(409).json({ error: "Contact with that name already exists." });
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -865,7 +1017,7 @@ app.patch("/api/contacts/:id", async (req, res) => {
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json(r.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -875,7 +1027,7 @@ app.delete("/api/contacts/:id", async (req, res) => {
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -892,7 +1044,7 @@ app.get("/api/contacts/lookup/:name", async (req, res) => {
     }
     res.status(404).json({ error: "Contact not found." });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -908,7 +1060,7 @@ app.get("/api/settings", async (req, res) => {
     settings.perfin_url = PERFIN_URL || settings.perfin_url || null;
     res.json(settings);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -928,7 +1080,7 @@ app.patch("/api/settings", async (req, res) => {
     if (session_timeout_minutes && req.session) req.session.timeoutMinutes = session_timeout_minutes;
     res.json(r.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -948,7 +1100,7 @@ app.get("/api/stats", async (req, res) => {
       notes: notes.rows[0],
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -960,7 +1112,7 @@ app.get("/api/todos/:id/subtasks", async (req, res) => {
   try {
     const r = await pool.query("SELECT * FROM subtasks WHERE todo_id = $1 ORDER BY sort_order, id", [req.params.id]);
     res.json(r.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json(safeError(err)); }
 });
 
 app.post("/api/todos/:id/subtasks", async (req, res) => {
@@ -969,7 +1121,7 @@ app.post("/api/todos/:id/subtasks", async (req, res) => {
     if (!title) return res.status(400).json({ error: "Title is required." });
     const r = await pool.query("INSERT INTO subtasks (todo_id, title) VALUES ($1, $2) RETURNING *", [req.params.id, title]);
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json(safeError(err)); }
 });
 
 app.patch("/api/subtasks/:id", async (req, res) => {
@@ -984,7 +1136,7 @@ app.patch("/api/subtasks/:id", async (req, res) => {
     const r = await pool.query(`UPDATE subtasks SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, params);
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json(safeError(err)); }
 });
 
 app.delete("/api/subtasks/:id", async (req, res) => {
@@ -992,7 +1144,7 @@ app.delete("/api/subtasks/:id", async (req, res) => {
     const r = await pool.query("DELETE FROM subtasks WHERE id = $1 RETURNING id", [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json(safeError(err)); }
 });
 
 // ============================================================================
@@ -1025,7 +1177,7 @@ app.post("/api/todos/:id/complete-recurring", async (req, res) => {
        nextDue.toISOString().split("T")[0], true, rule, todo.recurrence_parent_id || todo.id]
     );
     res.json({ completed: todo, next: n.rows[0] });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json(safeError(err)); }
 });
 
 // ============================================================================
@@ -1035,7 +1187,7 @@ app.get("/api/email-templates", async (req, res) => {
   try {
     const r = await pool.query("SELECT * FROM email_templates ORDER BY name ASC");
     res.json(r.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json(safeError(err)); }
 });
 
 app.post("/api/email-templates", async (req, res) => {
@@ -1044,7 +1196,7 @@ app.post("/api/email-templates", async (req, res) => {
     if (!name || !subject || !body) return res.status(400).json({ error: "Name, subject, and body required." });
     const r = await pool.query("INSERT INTO email_templates (name, subject, body) VALUES ($1,$2,$3) RETURNING *", [name, subject, body]);
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json(safeError(err)); }
 });
 
 app.patch("/api/email-templates/:id", async (req, res) => {
@@ -1059,7 +1211,7 @@ app.patch("/api/email-templates/:id", async (req, res) => {
     const r = await pool.query(`UPDATE email_templates SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, params);
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json(safeError(err)); }
 });
 
 app.delete("/api/email-templates/:id", async (req, res) => {
@@ -1067,7 +1219,7 @@ app.delete("/api/email-templates/:id", async (req, res) => {
     const r = await pool.query("DELETE FROM email_templates WHERE id = $1 RETURNING id", [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json(safeError(err)); }
 });
 
 // ============================================================================
@@ -1091,7 +1243,7 @@ Keep the tone professional but warm. Do not include any other text outside the J
     const draft = JSON.parse(jsonMatch[0]);
     res.json(draft);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -1115,7 +1267,7 @@ Example: ["Research options", "Compare prices", "Make decision"]`, 512);
     const subtasks = JSON.parse(jsonMatch[0]);
     res.json({ subtasks });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -1146,7 +1298,7 @@ Be smart about inferring: "ASAP" = urgent, "someday" = low priority long-term, "
     const parsed = JSON.parse(jsonMatch[0]);
     res.json(parsed);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -1171,7 +1323,7 @@ app.post("/api/ai/review-summary", async (req, res) => {
 Be conversational and motivating. Highlight accomplishments. If there are overdue tasks, gently remind. Don't use emojis.`, 256);
     res.json({ summary: text });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -1193,7 +1345,7 @@ Return ONLY the rewritten email body text (plain text, no JSON wrapping, no quot
 Valid tones: more formal, more casual, shorter, friendlier, more direct.`, 1024);
     res.json({ body: text });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -1222,7 +1374,7 @@ Top priorities: ${pending.rows.slice(0, 5).map(t => `${t.title} (${t.priority})`
 Summarize what needs attention today. Don't use emojis.`, 300);
     res.json({ briefing: text });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -1247,7 +1399,7 @@ Example: ["meeting-notes", "project-alpha", "action-items"]`, 128);
     const tags = JSON.parse(jsonMatch[0]);
     res.json({ tags });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeError(err));
   }
 });
 
@@ -1260,7 +1412,7 @@ app.get("/api/ai/models", async (req, res) => {
     const models = r.rows[0] || {};
     models.available = !!(Anthropic && process.env.ANTHROPIC_API_KEY);
     res.json(models);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json(safeError(err)); }
 });
 
 app.patch("/api/ai/models", async (req, res) => {
@@ -1278,7 +1430,7 @@ app.patch("/api/ai/models", async (req, res) => {
     if (!fields.length) return res.status(400).json({ error: "No fields to update." });
     const r = await pool.query(`UPDATE user_settings SET ${fields.join(", ")} WHERE id = 1 RETURNING *`, params);
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json(safeError(err)); }
 });
 
 // ============================================================================
@@ -1291,7 +1443,7 @@ app.get("/api/todo-categories", async (req, res) => {
     const dbCats = r.rows.map(row => row.category);
     const all = [...new Set([...defaults, ...dbCats])].sort();
     res.json(all);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json(safeError(err)); }
 });
 
 // ============================================================================
@@ -1309,7 +1461,7 @@ app.get("/api/search", async (req, res) => {
       pool.query("SELECT id, name as title, email as description, 'contact' as type FROM contacts WHERE name ILIKE $1 OR email ILIKE $1 LIMIT 10", [pattern]),
     ]);
     res.json([...todos.rows, ...emails.rows, ...notes.rows, ...contacts.rows]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json(safeError(err)); }
 });
 
 // ============================================================================
@@ -1328,7 +1480,7 @@ app.get("/api/calendar", async (req, res) => {
       pool.query("SELECT id, COALESCE(title, LEFT(content,30)) as title, reminder_at as event_date, 'note' as type FROM notes WHERE reminder_at >= $1 AND reminder_at < $2", [startDate, endDate]),
     ]);
     res.json([...todos.rows, ...emails.rows, ...notes.rows]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json(safeError(err)); }
 });
 
 // ============================================================================
@@ -1362,7 +1514,7 @@ app.get("/api/review", async (req, res) => {
       upcoming_tasks: upcoming.rows,
       overdue_tasks: overdue.rows,
     });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json(safeError(err)); }
 });
 
 // ============================================================================
@@ -1410,7 +1562,7 @@ app.post("/api/todos/reorder", async (req, res) => {
       throw err;
     } finally { client.release(); }
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json(safeError(err)); }
 });
 
 // ============================================================================
