@@ -9,7 +9,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **Database**: Neon PostgreSQL (schema in `db/`)
 - **Email**: nodemailer (SMTP) with scheduled sending via node-cron
 - **AI**: Anthropic Claude API — 7 AI features with per-feature model selection (Haiku/Sonnet/Off)
-- **Tests**: `tests/` (node:test runner, run with `npm test`, 79 tests)
+- **Tests**: `tests/` (node:test runner, run with `npm test`, 88 tests)
 - **Deployment**: `Dockerfile`, `fly.toml` (Fly.io), `render.yaml` (Render)
 
 ## Current State (as of March 2026)
@@ -43,6 +43,11 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **PWA**: Installable as home screen app
 - **Auto-migration**: Server runs all DB migrations on startup
 - **Perfin Integration**: Dashboard widget showing subscription data, cross-link navigation
+- **Trash/Undo**: Soft-delete with undo toast, restore from Settings trash, 30-day retention
+- **Dashboard Inline Actions**: Complete tasks and send emails directly from dashboard
+- **Bulk Actions**: Multi-select mode on todos, emails, and notes for batch operations
+- **System Theme Auto-Detection**: Auto option follows OS dark/light preference via prefers-color-scheme
+- **Backend Validation**: Server-side enum validation for priority, horizon, recurrence rules, note colors, email format
 
 ## Key Files
 - `.env` — all secrets (never commit)
@@ -51,7 +56,8 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - `db/001_schema.sql` — database schema (todos, emails, notes, contacts, settings)
 - `db/002_features.sql` — enhancement migration (recurring, subtasks, templates, reviews)
 - `db/003_ai_features.sql` — AI model preferences & note tags migration
-- `tests/api.test.js` — test suite (79 tests, 22 suites)
+- `db/004_soft_delete.sql` — soft delete columns for trash/undo
+- `tests/api.test.js` — test suite (88 tests, 27 suites)
 - `Dockerfile` / `docker-compose.yml` — container deployment
 - `fly.toml` — Fly.io config
 - `render.yaml` — Render blueprint
@@ -61,7 +67,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 # Install & run locally
 npm install && node server.js
 
-# Run tests (79 tests)
+# Run tests (88 tests)
 npm test
 
 # Pages
@@ -94,6 +100,15 @@ GET    /api/notes           # List notes (includes tags)
 POST   /api/notes           # Create note (with optional tags array)
 PATCH  /api/notes/:id       # Update note
 DELETE /api/notes/:id       # Delete note
+
+GET    /api/trash            # List all trashed items
+POST   /api/trash/:type/:id/restore  # Restore item from trash
+DELETE /api/trash/:type/:id  # Permanently delete trashed item
+POST   /api/trash/empty      # Empty all trash
+
+POST   /api/bulk/todos       # Bulk action on todos (complete, delete, set_priority, set_horizon)
+POST   /api/bulk/emails      # Bulk action on emails (delete)
+POST   /api/bulk/notes       # Bulk action on notes (delete)
 
 GET    /api/contacts        # List contacts
 POST   /api/contacts        # Add contact

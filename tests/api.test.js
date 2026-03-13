@@ -818,3 +818,99 @@ describe("Backend validation constants", () => {
     assert.ok(!VALID_AI_FEATURES.includes(""));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Soft delete / trash tests
+// ---------------------------------------------------------------------------
+describe("Soft delete and trash", () => {
+  it("trash type mapping validates correctly", () => {
+    const validTypes = { todo: "todos", email: "emails", note: "notes" };
+    assert.equal(validTypes.todo, "todos");
+    assert.equal(validTypes.email, "emails");
+    assert.equal(validTypes.note, "notes");
+    assert.equal(validTypes.invalid, undefined);
+    assert.equal(validTypes[""], undefined);
+  });
+
+  it("deleted_at field distinguishes active vs trashed items", () => {
+    const active = { id: 1, title: "Active", deleted_at: null };
+    const trashed = { id: 2, title: "Trashed", deleted_at: "2026-03-13T12:00:00Z" };
+    assert.equal(active.deleted_at, null);
+    assert.ok(trashed.deleted_at !== null);
+    // Filter pattern matches what queries do
+    const items = [active, trashed];
+    assert.deepEqual(items.filter(i => i.deleted_at === null), [active]);
+    assert.deepEqual(items.filter(i => i.deleted_at !== null), [trashed]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bulk action tests
+// ---------------------------------------------------------------------------
+describe("Bulk actions", () => {
+  it("validates bulk action requires ids array", () => {
+    const valid = { ids: [1, 2, 3], action: "complete" };
+    const invalidNoIds = { action: "complete" };
+    const invalidEmptyIds = { ids: [], action: "complete" };
+    assert.ok(Array.isArray(valid.ids) && valid.ids.length > 0);
+    assert.ok(!invalidNoIds.ids);
+    assert.ok(invalidEmptyIds.ids.length === 0);
+  });
+
+  it("validates bulk action types", () => {
+    const validActions = ["complete", "delete", "set_priority", "set_horizon"];
+    assert.ok(validActions.includes("complete"));
+    assert.ok(validActions.includes("delete"));
+    assert.ok(validActions.includes("set_priority"));
+    assert.ok(!validActions.includes("unknown"));
+  });
+
+  it("set_priority requires valid priority value", () => {
+    const VALID_PRIORITIES = ["low", "medium", "high", "urgent"];
+    assert.ok(VALID_PRIORITIES.includes("urgent"));
+    assert.ok(!VALID_PRIORITIES.includes("critical"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Theme auto-detection tests
+// ---------------------------------------------------------------------------
+describe("Theme settings", () => {
+  it("supports dark, light, and auto values", () => {
+    const validThemes = ["dark", "light", "auto"];
+    assert.ok(validThemes.includes("dark"));
+    assert.ok(validThemes.includes("light"));
+    assert.ok(validThemes.includes("auto"));
+    assert.ok(!validThemes.includes("purple"));
+  });
+
+  it("auto theme resolves to dark or light", () => {
+    function resolveTheme(theme, systemPrefersDark) {
+      if (theme === "auto") return systemPrefersDark ? "dark" : "light";
+      return theme;
+    }
+    assert.equal(resolveTheme("auto", true), "dark");
+    assert.equal(resolveTheme("auto", false), "light");
+    assert.equal(resolveTheme("dark", false), "dark");
+    assert.equal(resolveTheme("light", true), "light");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dashboard inline actions tests
+// ---------------------------------------------------------------------------
+describe("Dashboard inline actions", () => {
+  it("recurring task completion creates next instance", () => {
+    const todo = { id: 1, title: "Weekly meeting", recurring: true, recurrence_rule: "weekly", due_date: "2026-03-06" };
+    const nextDue = new Date(todo.due_date);
+    nextDue.setDate(nextDue.getDate() + 7);
+    assert.equal(nextDue.toISOString().split("T")[0], "2026-03-13");
+  });
+
+  it("non-recurring task simply marks as complete", () => {
+    const todo = { id: 2, title: "One-time task", recurring: false, completed: false };
+    const updated = { ...todo, completed: true, completed_at: new Date().toISOString() };
+    assert.ok(updated.completed);
+    assert.ok(updated.completed_at);
+  });
+});

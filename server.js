@@ -495,7 +495,21 @@ const SHARED_CSS = `
 // Shared JS utilities (included in all pages via pageHead)
 // ---------------------------------------------------------------------------
 const SHARED_JS = `
-
+function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+var _undoTimer=null;
+function showUndo(msg,type,id){
+  clearTimeout(_undoTimer);
+  var el=document.getElementById('undo-toast');
+  if(!el){el=document.createElement('div');el.id='undo-toast';el.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface-2);border:1px solid var(--border);padding:12px 20px;border-radius:12px;display:flex;align-items:center;gap:12px;z-index:9999;backdrop-filter:blur(20px);font-size:14px;color:var(--text);box-shadow:0 8px 32px rgba(0,0,0,0.3);';document.body.appendChild(el);}
+  el.innerHTML=esc(msg)+' <button onclick="undoDelete(\\''+type+'\\','+id+')" style="background:var(--warm);color:#fff;border:none;padding:4px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;">Undo</button>';
+  el.style.display='flex';
+  _undoTimer=setTimeout(function(){el.style.display='none';},6000);
+}
+async function undoDelete(type,id){
+  await fetch('/api/trash/'+type+'/'+id+'/restore',{method:'POST'});
+  var el=document.getElementById('undo-toast');if(el)el.style.display='none';
+  if(typeof load==='function')load();
+}
 `;
 
 // ---------------------------------------------------------------------------
@@ -544,7 +558,13 @@ function themeScript() {
   return `<script>
     (function(){
       var t = localStorage.getItem('theme') || 'dark';
-      if (t === 'light') document.documentElement.setAttribute('data-theme','light');
+      var effective = t;
+      if (t === 'auto') effective = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      if (effective === 'light') document.documentElement.setAttribute('data-theme','light');
+      if (t === 'auto') window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function(e) {
+        if (e.matches) document.documentElement.setAttribute('data-theme','light');
+        else document.documentElement.removeAttribute('data-theme');
+      });
     })();
   </script>`;
 }
@@ -631,14 +651,14 @@ app.post("/api/logout", (req, res) => {
 app.get("/api/todos", async (req, res) => {
   try {
     const { horizon, priority, completed, category, limit } = req.query;
-    let where = [];
+    let where = ["deleted_at IS NULL"];
     let params = [];
     let idx = 1;
     if (horizon) { where.push(`horizon = $${idx++}`); params.push(horizon); }
     if (priority) { where.push(`priority = $${idx++}`); params.push(priority); }
     if (completed !== undefined) { where.push(`completed = $${idx++}`); params.push(completed === "true"); }
     if (category) { where.push(`category = $${idx++}`); params.push(category); }
-    const clause = where.length ? "WHERE " + where.join(" AND ") : "";
+    const clause = "WHERE " + where.join(" AND ");
     const limitClause = limit ? ` LIMIT $${idx++}` : "";
     if (limit) params.push(parseInt(limit, 10));
     const r = await pool.query(`SELECT * FROM todos ${clause} ORDER BY completed ASC, sort_order ASC, CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at DESC${limitClause}`, params);
@@ -699,7 +719,7 @@ app.patch("/api/todos/:id", async (req, res) => {
 
 app.delete("/api/todos/:id", async (req, res) => {
   try {
-    const r = await pool.query("DELETE FROM todos WHERE id = $1 RETURNING id", [req.params.id]);
+    const r = await pool.query("UPDATE todos SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL RETURNING id", [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json({ ok: true });
   } catch (err) {
@@ -713,7 +733,7 @@ app.delete("/api/todos/:id", async (req, res) => {
 app.get("/api/emails", async (req, res) => {
   try {
     const { status } = req.query;
-    const where = status ? "WHERE status = $1" : "";
+    const where = status ? "WHERE deleted_at IS NULL AND status = $1" : "WHERE deleted_at IS NULL";
     const params = status ? [status] : [];
     const r = await pool.query(`SELECT * FROM emails ${where} ORDER BY CASE status WHEN 'scheduled' THEN 0 WHEN 'draft' THEN 1 WHEN 'sent' THEN 2 ELSE 3 END, created_at DESC`, params);
     res.json(r.rows);
@@ -766,7 +786,7 @@ app.patch("/api/emails/:id", async (req, res) => {
 
 app.delete("/api/emails/:id", async (req, res) => {
   try {
-    const r = await pool.query("DELETE FROM emails WHERE id = $1 RETURNING id", [req.params.id]);
+    const r = await pool.query("UPDATE emails SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL RETURNING id", [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json({ ok: true });
   } catch (err) {
@@ -810,7 +830,7 @@ app.post("/api/emails/:id/send", async (req, res) => {
 // ============================================================================
 app.get("/api/notes", async (req, res) => {
   try {
-    const r = await pool.query("SELECT * FROM notes ORDER BY pinned DESC, updated_at DESC");
+    const r = await pool.query("SELECT * FROM notes WHERE deleted_at IS NULL ORDER BY pinned DESC, updated_at DESC");
     res.json(r.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -859,12 +879,61 @@ app.patch("/api/notes/:id", async (req, res) => {
 
 app.delete("/api/notes/:id", async (req, res) => {
   try {
-    const r = await pool.query("DELETE FROM notes WHERE id = $1 RETURNING id", [req.params.id]);
+    const r = await pool.query("UPDATE notes SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL RETURNING id", [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ============================================================================
+// API — Bulk Actions
+// ============================================================================
+app.post("/api/bulk/todos", async (req, res) => {
+  try {
+    const { ids, action, data } = req.body;
+    if (!ids || !Array.isArray(ids) || !ids.length) return res.status(400).json({ error: "ids array is required." });
+    if (!action) return res.status(400).json({ error: "action is required." });
+    if (action === "complete") {
+      await pool.query("UPDATE todos SET completed = true, completed_at = now() WHERE id = ANY($1) AND deleted_at IS NULL", [ids]);
+    } else if (action === "delete") {
+      await pool.query("UPDATE todos SET deleted_at = now() WHERE id = ANY($1) AND deleted_at IS NULL", [ids]);
+    } else if (action === "set_priority" && data?.priority && VALID_PRIORITIES.includes(data.priority)) {
+      await pool.query("UPDATE todos SET priority = $1 WHERE id = ANY($2) AND deleted_at IS NULL", [data.priority, ids]);
+    } else if (action === "set_horizon" && data?.horizon && VALID_HORIZONS.includes(data.horizon)) {
+      await pool.query("UPDATE todos SET horizon = $1 WHERE id = ANY($2) AND deleted_at IS NULL", [data.horizon, ids]);
+    } else {
+      return res.status(400).json({ error: "Invalid action." });
+    }
+    res.json({ ok: true, count: ids.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/bulk/emails", async (req, res) => {
+  try {
+    const { ids, action } = req.body;
+    if (!ids || !Array.isArray(ids) || !ids.length) return res.status(400).json({ error: "ids array is required." });
+    if (action === "delete") {
+      await pool.query("UPDATE emails SET deleted_at = now() WHERE id = ANY($1) AND deleted_at IS NULL", [ids]);
+    } else {
+      return res.status(400).json({ error: "Invalid action." });
+    }
+    res.json({ ok: true, count: ids.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/bulk/notes", async (req, res) => {
+  try {
+    const { ids, action } = req.body;
+    if (!ids || !Array.isArray(ids) || !ids.length) return res.status(400).json({ error: "ids array is required." });
+    if (action === "delete") {
+      await pool.query("UPDATE notes SET deleted_at = now() WHERE id = ANY($1) AND deleted_at IS NULL", [ids]);
+    } else {
+      return res.status(400).json({ error: "Invalid action." });
+    }
+    res.json({ ok: true, count: ids.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ============================================================================
@@ -981,9 +1050,9 @@ app.patch("/api/settings", async (req, res) => {
 app.get("/api/stats", async (req, res) => {
   try {
     const [todos, emails, notes] = await Promise.all([
-      pool.query("SELECT count(*) FILTER (WHERE NOT completed) as pending, count(*) FILTER (WHERE completed) as done, count(*) FILTER (WHERE NOT completed AND priority = 'urgent') as urgent, count(*) FILTER (WHERE NOT completed AND due_date <= CURRENT_DATE) as overdue FROM todos"),
-      pool.query("SELECT count(*) FILTER (WHERE status = 'draft') as drafts, count(*) FILTER (WHERE status = 'scheduled') as scheduled, count(*) FILTER (WHERE status = 'sent') as sent FROM emails"),
-      pool.query("SELECT count(*) as total FROM notes"),
+      pool.query("SELECT count(*) FILTER (WHERE NOT completed) as pending, count(*) FILTER (WHERE completed) as done, count(*) FILTER (WHERE NOT completed AND priority = 'urgent') as urgent, count(*) FILTER (WHERE NOT completed AND due_date <= CURRENT_DATE) as overdue FROM todos WHERE deleted_at IS NULL"),
+      pool.query("SELECT count(*) FILTER (WHERE status = 'draft') as drafts, count(*) FILTER (WHERE status = 'scheduled') as scheduled, count(*) FILTER (WHERE status = 'sent') as sent FROM emails WHERE deleted_at IS NULL"),
+      pool.query("SELECT count(*) as total FROM notes WHERE deleted_at IS NULL"),
     ]);
     res.json({
       todos: todos.rows[0],
@@ -1068,6 +1137,53 @@ app.post("/api/todos/:id/complete-recurring", async (req, res) => {
        nextDue.toISOString().split("T")[0], true, rule, todo.recurrence_parent_id || todo.id]
     );
     res.json({ completed: todo, next: n.rows[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Trash (soft-deleted items)
+// ============================================================================
+app.get("/api/trash", async (req, res) => {
+  try {
+    const [todos, emails, notes] = await Promise.all([
+      pool.query("SELECT id, title, priority, horizon, deleted_at, 'todo' as type FROM todos WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"),
+      pool.query("SELECT id, subject as title, recipient_name, status, deleted_at, 'email' as type FROM emails WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"),
+      pool.query("SELECT id, COALESCE(title, LEFT(content, 50)) as title, deleted_at, 'note' as type FROM notes WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"),
+    ]);
+    res.json([...todos.rows, ...emails.rows, ...notes.rows].sort((a, b) => new Date(b.deleted_at) - new Date(a.deleted_at)));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/trash/:type/:id/restore", async (req, res) => {
+  try {
+    const { type, id } = req.params;
+    const table = { todo: "todos", email: "emails", note: "notes" }[type];
+    if (!table) return res.status(400).json({ error: "Invalid type. Must be: todo, email, or note" });
+    const r = await pool.query(`UPDATE ${table} SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL RETURNING id`, [id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found in trash." });
+    res.json({ ok: true, message: "Item restored." });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/trash/:type/:id", async (req, res) => {
+  try {
+    const { type, id } = req.params;
+    const table = { todo: "todos", email: "emails", note: "notes" }[type];
+    if (!table) return res.status(400).json({ error: "Invalid type. Must be: todo, email, or note" });
+    const r = await pool.query(`DELETE FROM ${table} WHERE id = $1 AND deleted_at IS NOT NULL RETURNING id`, [id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found in trash." });
+    res.json({ ok: true, message: "Permanently deleted." });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/trash/empty", async (req, res) => {
+  try {
+    await Promise.all([
+      pool.query("DELETE FROM todos WHERE deleted_at IS NOT NULL"),
+      pool.query("DELETE FROM emails WHERE deleted_at IS NOT NULL"),
+      pool.query("DELETE FROM notes WHERE deleted_at IS NOT NULL"),
+    ]);
+    res.json({ ok: true, message: "Trash emptied." });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1249,10 +1365,10 @@ app.get("/api/ai/daily-briefing", async (req, res) => {
     if (model === "off") return res.status(400).json({ error: "AI daily briefing is disabled." });
     const today = new Date().toISOString().split("T")[0];
     const [pending, overdue, scheduled, upcoming] = await Promise.all([
-      pool.query("SELECT title, priority, category, due_date FROM todos WHERE NOT completed ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END LIMIT 15"),
-      pool.query("SELECT title, due_date FROM todos WHERE NOT completed AND due_date < $1", [today]),
-      pool.query("SELECT subject, recipient_name, scheduled_at FROM emails WHERE status = 'scheduled' AND DATE(scheduled_at) = $1", [today]),
-      pool.query("SELECT title, due_date FROM todos WHERE NOT completed AND due_date = $1", [today]),
+      pool.query("SELECT title, priority, category, due_date FROM todos WHERE deleted_at IS NULL AND NOT completed ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END LIMIT 15"),
+      pool.query("SELECT title, due_date FROM todos WHERE deleted_at IS NULL AND NOT completed AND due_date < $1", [today]),
+      pool.query("SELECT subject, recipient_name, scheduled_at FROM emails WHERE deleted_at IS NULL AND status = 'scheduled' AND DATE(scheduled_at) = $1", [today]),
+      pool.query("SELECT title, due_date FROM todos WHERE deleted_at IS NULL AND NOT completed AND due_date = $1", [today]),
     ]);
     const text = await callAI(model, `Generate a brief, helpful daily briefing (3-5 sentences) for today (${today}). Be conversational and actionable.
 
@@ -1329,7 +1445,7 @@ app.patch("/api/ai/models", async (req, res) => {
 // ============================================================================
 app.get("/api/todo-categories", async (req, res) => {
   try {
-    const r = await pool.query("SELECT DISTINCT category FROM todos WHERE category IS NOT NULL AND category != '' ORDER BY category");
+    const r = await pool.query("SELECT DISTINCT category FROM todos WHERE deleted_at IS NULL AND category IS NOT NULL AND category != '' ORDER BY category");
     const defaults = ["work", "personal", "health", "finance", "errands", "home", "learning"];
     const dbCats = r.rows.map(row => row.category);
     const all = [...new Set([...defaults, ...dbCats])].sort();
@@ -1346,9 +1462,9 @@ app.get("/api/search", async (req, res) => {
     if (!q || q.length < 2) return res.json([]);
     const pattern = `%${q}%`;
     const [todos, emails, notes, contacts] = await Promise.all([
-      pool.query("SELECT id, title, description, priority, horizon, 'todo' as type FROM todos WHERE title ILIKE $1 OR description ILIKE $1 LIMIT 10", [pattern]),
-      pool.query("SELECT id, subject as title, recipient_name as description, status as priority, 'email' as type FROM emails WHERE subject ILIKE $1 OR body ILIKE $1 OR recipient_name ILIKE $1 LIMIT 10", [pattern]),
-      pool.query("SELECT id, COALESCE(title, LEFT(content, 50)) as title, LEFT(content, 100) as description, 'note' as type FROM notes WHERE title ILIKE $1 OR content ILIKE $1 LIMIT 10", [pattern]),
+      pool.query("SELECT id, title, description, priority, horizon, 'todo' as type FROM todos WHERE deleted_at IS NULL AND (title ILIKE $1 OR description ILIKE $1) LIMIT 10", [pattern]),
+      pool.query("SELECT id, subject as title, recipient_name as description, status as priority, 'email' as type FROM emails WHERE deleted_at IS NULL AND (subject ILIKE $1 OR body ILIKE $1 OR recipient_name ILIKE $1) LIMIT 10", [pattern]),
+      pool.query("SELECT id, COALESCE(title, LEFT(content, 50)) as title, LEFT(content, 100) as description, 'note' as type FROM notes WHERE deleted_at IS NULL AND (title ILIKE $1 OR content ILIKE $1) LIMIT 10", [pattern]),
       pool.query("SELECT id, name as title, email as description, 'contact' as type FROM contacts WHERE name ILIKE $1 OR email ILIKE $1 LIMIT 10", [pattern]),
     ]);
     res.json([...todos.rows, ...emails.rows, ...notes.rows, ...contacts.rows]);
@@ -1366,9 +1482,9 @@ app.get("/api/calendar", async (req, res) => {
     const startDate = `${y}-${String(m).padStart(2,"0")}-01`;
     const endDate = m === 12 ? `${y+1}-01-01` : `${y}-${String(m+1).padStart(2,"0")}-01`;
     const [todos, emails, notes] = await Promise.all([
-      pool.query("SELECT id, title, due_date as event_date, priority, 'todo' as type FROM todos WHERE due_date >= $1 AND due_date < $2 AND NOT completed", [startDate, endDate]),
-      pool.query("SELECT id, subject as title, scheduled_at as event_date, status as priority, 'email' as type FROM emails WHERE scheduled_at >= $1 AND scheduled_at < $2", [startDate, endDate]),
-      pool.query("SELECT id, COALESCE(title, LEFT(content,30)) as title, reminder_at as event_date, 'note' as type FROM notes WHERE reminder_at >= $1 AND reminder_at < $2", [startDate, endDate]),
+      pool.query("SELECT id, title, due_date as event_date, priority, 'todo' as type FROM todos WHERE deleted_at IS NULL AND due_date >= $1 AND due_date < $2 AND NOT completed", [startDate, endDate]),
+      pool.query("SELECT id, subject as title, scheduled_at as event_date, status as priority, 'email' as type FROM emails WHERE deleted_at IS NULL AND scheduled_at >= $1 AND scheduled_at < $2", [startDate, endDate]),
+      pool.query("SELECT id, COALESCE(title, LEFT(content,30)) as title, reminder_at as event_date, 'note' as type FROM notes WHERE deleted_at IS NULL AND reminder_at >= $1 AND reminder_at < $2", [startDate, endDate]),
     ]);
     res.json([...todos.rows, ...emails.rows, ...notes.rows]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1389,12 +1505,12 @@ app.get("/api/review", async (req, res) => {
     const ws = weekStart.toISOString().split("T")[0];
     const we = weekEnd.toISOString().split("T")[0];
     const [completed, created, sent, notesCreated, upcoming, overdue] = await Promise.all([
-      pool.query("SELECT * FROM todos WHERE completed_at >= $1 AND completed_at < $2 ORDER BY completed_at DESC", [ws, we]),
-      pool.query("SELECT count(*) as cnt FROM todos WHERE created_at >= $1 AND created_at < $2", [ws, we]),
-      pool.query("SELECT count(*) as cnt FROM emails WHERE sent_at >= $1 AND sent_at < $2", [ws, we]),
-      pool.query("SELECT count(*) as cnt FROM notes WHERE created_at >= $1 AND created_at < $2", [ws, we]),
-      pool.query("SELECT * FROM todos WHERE due_date >= $1 AND due_date < $2 AND NOT completed ORDER BY due_date", [we, new Date(weekEnd.getTime() + 7*86400000).toISOString().split("T")[0]]),
-      pool.query("SELECT * FROM todos WHERE due_date < $1 AND NOT completed ORDER BY due_date", [ws]),
+      pool.query("SELECT * FROM todos WHERE deleted_at IS NULL AND completed_at >= $1 AND completed_at < $2 ORDER BY completed_at DESC", [ws, we]),
+      pool.query("SELECT count(*) as cnt FROM todos WHERE deleted_at IS NULL AND created_at >= $1 AND created_at < $2", [ws, we]),
+      pool.query("SELECT count(*) as cnt FROM emails WHERE deleted_at IS NULL AND sent_at >= $1 AND sent_at < $2", [ws, we]),
+      pool.query("SELECT count(*) as cnt FROM notes WHERE deleted_at IS NULL AND created_at >= $1 AND created_at < $2", [ws, we]),
+      pool.query("SELECT * FROM todos WHERE deleted_at IS NULL AND due_date >= $1 AND due_date < $2 AND NOT completed ORDER BY due_date", [we, new Date(weekEnd.getTime() + 7*86400000).toISOString().split("T")[0]]),
+      pool.query("SELECT * FROM todos WHERE deleted_at IS NULL AND due_date < $1 AND NOT completed ORDER BY due_date", [ws]),
     ]);
     res.json({
       week_start: ws, week_end: we,
@@ -1579,7 +1695,27 @@ function renderDashTasks() {
 
 function renderDashTodo(t) {
   var overdue = t.due_date && new Date(t.due_date) <= new Date() ? ' style="color:var(--red)"' : '';
-  return '<div class="todo-item"><div class="todo-content"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span>'+(t.category?'<span>'+esc(t.category)+'</span>':'')+(t.due_date?'<span'+overdue+'>Due: '+new Date(t.due_date).toLocaleDateString()+'</span>':'')+(t.recurring?'<span class="badge recurring">recurring</span>':'')+'</div></div></div>';
+  var completeBtn = t.recurring
+    ? '<button onclick="event.stopPropagation();dashCompleteRecurring('+t.id+')" title="Complete & create next" style="background:none;border:1px solid var(--green);color:var(--green);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">&#10003;</button>'
+    : '<button onclick="event.stopPropagation();dashComplete('+t.id+')" title="Mark complete" style="background:none;border:1px solid var(--green);color:var(--green);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">&#10003;</button>';
+  return '<div class="todo-item" style="display:flex;align-items:center;gap:10px;">'+completeBtn+'<div class="todo-content" style="flex:1;"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span>'+(t.category?'<span>'+esc(t.category)+'</span>':'')+(t.due_date?'<span'+overdue+'>Due: '+new Date(t.due_date).toLocaleDateString()+'</span>':'')+(t.recurring?'<span class="badge recurring">recurring</span>':'')+'</div></div></div>';
+}
+
+async function dashComplete(id) {
+  await fetch('/api/todos/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({completed:true})});
+  allTodos = allTodos.filter(t=>t.id!==id);
+  renderDashTasks();
+}
+
+async function dashCompleteRecurring(id) {
+  await fetch('/api/todos/'+id+'/complete-recurring', {method:'POST'});
+  allTodos = await fetch('/api/todos?completed=false&limit=50').then(r=>r.json());
+  renderDashTasks();
+}
+
+async function dashSendEmail(id) {
+  var r = await fetch('/api/emails/'+id+'/send', {method:'POST'}).then(r=>r.json());
+  if (r.ok) { load(); } else { alert('Failed: '+(r.error||'Unknown error')); }
 }
 
 async function load() {
@@ -1605,7 +1741,7 @@ async function load() {
 
   const emails = await fetch('/api/emails?status=scheduled').then(r=>r.json());
   document.getElementById('scheduled-emails').innerHTML = emails.length
-    ? emails.slice(0,5).map(e => '<div class="todo-item"><div class="todo-content"><div class="todo-title">'+esc(e.subject)+'</div><div class="todo-meta"><span>To: '+esc(e.recipient_name||e.recipient_email)+'</span><span>'+new Date(e.scheduled_at).toLocaleString()+'</span></div></div></div>').join('')
+    ? emails.slice(0,5).map(e => '<div class="todo-item" style="display:flex;align-items:center;gap:10px;"><button onclick="event.stopPropagation();dashSendEmail('+e.id+')" title="Send now" style="background:none;border:1px solid var(--blue);color:var(--blue);padding:2px 8px;border-radius:6px;cursor:pointer;font-size:11px;flex-shrink:0;font-family:inherit;">Send</button><div class="todo-content" style="flex:1;"><div class="todo-title">'+esc(e.subject)+'</div><div class="todo-meta"><span>To: '+esc(e.recipient_name||e.recipient_email)+'</span><span>'+new Date(e.scheduled_at).toLocaleString()+'</span></div></div></div>').join('')
     : '<div class="empty-msg">No scheduled emails</div>';
 
   // Load Perfin data
@@ -1669,6 +1805,16 @@ ${themeScript()}
   <div class="actions">
     <button class="primary" onclick="openAdd()">+ New Task</button>
     <button onclick="openQuickTodo()">Quick Add</button>
+    <button id="select-toggle" onclick="toggleSelectMode()">Select</button>
+  </div>
+  <div id="bulk-bar" style="display:none;padding:10px 16px;margin-bottom:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);display:none;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;">
+    <span id="bulk-count">0 selected</span>
+    <button onclick="bulkAction('complete')" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Complete</button>
+    <button onclick="bulkAction('delete')" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
+    <select id="bulk-priority" onchange="if(this.value)bulkAction('set_priority',{priority:this.value});this.value='';" style="padding:4px 8px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);">
+      <option value="">Set Priority...</option><option value="urgent">Urgent</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option>
+    </select>
+    <button onclick="selectAll()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
   </div>
 
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;font-weight:500;">
@@ -1780,6 +1926,31 @@ ${themeScript()}
 <script>
 var curHorizon = '', curStatus = 'pending', curPriority = '', curCategory = '';
 var dragSrcId = null;
+var selectMode = false, selectedIds = new Set();
+
+function toggleSelectMode() {
+  selectMode = !selectMode;
+  selectedIds.clear();
+  document.getElementById('select-toggle').textContent = selectMode ? 'Cancel' : 'Select';
+  document.getElementById('bulk-bar').style.display = selectMode ? 'flex' : 'none';
+  document.querySelectorAll('.bulk-check').forEach(el => { el.style.display = selectMode ? 'inline-block' : 'none'; el.checked = false; });
+  updateBulkCount();
+}
+function toggleBulkItem(id, checked) {
+  if (checked) selectedIds.add(id); else selectedIds.delete(id);
+  updateBulkCount();
+}
+function updateBulkCount() {
+  document.getElementById('bulk-count').textContent = selectedIds.size + ' selected';
+}
+function selectAll() {
+  document.querySelectorAll('.bulk-check').forEach(el => { el.checked = true; toggleBulkItem(parseInt(el.dataset.id,10), true); });
+}
+async function bulkAction(action, data) {
+  if (!selectedIds.size) return;
+  await fetch('/api/bulk/todos', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:Array.from(selectedIds),action:action,data:data||{}})});
+  selectedIds.clear(); updateBulkCount(); load();
+}
 function setHorizon(btn, h) { curHorizon = h; document.querySelectorAll('#horizon-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
 function setStatus(btn, s) { curStatus = s; document.querySelectorAll('#status-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
 function setPriority(btn, p) { curPriority = p; document.querySelectorAll('#priority-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
@@ -1832,7 +2003,7 @@ async function load() {
         '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" onclick="event.stopPropagation();toggleSubtask('+s.id+','+!s.completed+')"></div><span class="subtask-text'+(s.completed?' done':'')+'" ondblclick="event.stopPropagation();inlineEditSubtask(this,'+s.id+')">'+esc(s.title)+'</span><button class="subtask-edit-btn" onclick="event.stopPropagation();inlineEditSubtask(this.previousElementSibling,'+s.id+')">&#9998;</button></div>'
       ).join('')+'</div>';
     }
-    return '<div class="todo-item" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" onclick="toggleTodo('+t.id+','+!t.completed+','+!!t.recurring+')"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+(t.recurring?'<span class="badge recurring">'+t.recurrence_rule+'</span>':'')+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions"><button onclick="openEdit('+t.id+')">&#9998;</button></div></div>';
+    return '<div class="todo-item" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><input type="checkbox" class="bulk-check" data-id="'+t.id+'" style="display:'+(selectMode?'inline-block':'none')+';accent-color:var(--warm);margin-right:4px;cursor:pointer;" onchange="toggleBulkItem('+t.id+',this.checked)"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" onclick="toggleTodo('+t.id+','+!t.completed+','+!!t.recurring+')"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+(t.recurring?'<span class="badge recurring">'+t.recurrence_rule+'</span>':'')+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions"><button onclick="openEdit('+t.id+')">&#9998;</button></div></div>';
   }).join('');
 }
 
@@ -2027,9 +2198,9 @@ async function toggleTodo(id, completed, isRecurring) {
 
 async function deleteTodo() {
   var id = document.getElementById('edit-id').value;
-  if (!confirm('Delete this task?')) return;
   await fetch('/api/todos/'+id, {method:'DELETE'});
   closeModal(); load();
+  showUndo('Task moved to trash','todo',id);
 }
 
 // Quick Add (natural language)
@@ -2151,6 +2322,12 @@ ${themeScript()}
     <button class="primary" onclick="openCompose()">+ Compose</button>
     <button onclick="openQuick()">Quick Send</button>
     <button onclick="openTemplates()">Templates</button>
+    <button id="email-select-toggle" onclick="toggleEmailSelect()">Select</button>
+  </div>
+  <div id="email-bulk-bar" style="display:none;padding:10px 16px;margin-bottom:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);align-items:center;gap:8px;font-size:13px;">
+    <span id="email-bulk-count">0 selected</span>
+    <button onclick="emailBulkAction('delete')" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
+    <button onclick="emailSelectAll()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
   </div>
 
   <div class="filters" id="email-filters">
@@ -2224,14 +2401,31 @@ ${themeScript()}
 
 <script>
 var curFilter = '';
+var emailSelectMode = false, emailSelectedIds = new Set();
 function setFilter(btn, f) { curFilter = f; document.querySelectorAll('#email-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
+
+function toggleEmailSelect() {
+  emailSelectMode = !emailSelectMode; emailSelectedIds.clear();
+  document.getElementById('email-select-toggle').textContent = emailSelectMode ? 'Cancel' : 'Select';
+  document.getElementById('email-bulk-bar').style.display = emailSelectMode ? 'flex' : 'none';
+  document.querySelectorAll('.email-bulk-check').forEach(el => { el.style.display = emailSelectMode ? 'inline-block' : 'none'; el.checked = false; });
+  updateEmailBulkCount();
+}
+function toggleEmailBulkItem(id, checked) { if (checked) emailSelectedIds.add(id); else emailSelectedIds.delete(id); updateEmailBulkCount(); }
+function updateEmailBulkCount() { document.getElementById('email-bulk-count').textContent = emailSelectedIds.size + ' selected'; }
+function emailSelectAll() { document.querySelectorAll('.email-bulk-check').forEach(el => { el.checked = true; toggleEmailBulkItem(parseInt(el.dataset.id,10), true); }); }
+async function emailBulkAction(action) {
+  if (!emailSelectedIds.size) return;
+  await fetch('/api/bulk/emails', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:Array.from(emailSelectedIds),action:action})});
+  emailSelectedIds.clear(); updateEmailBulkCount(); load();
+}
 
 async function load() {
   var q = curFilter ? '?status='+curFilter : '';
   var emails = await fetch('/api/emails'+q).then(r=>r.json());
   if (!emails.length) { document.getElementById('email-list').innerHTML = '<div class="empty-msg">No emails found</div>'; return; }
-  document.getElementById('email-list').innerHTML = '<table><thead><tr><th>Status</th><th>To</th><th>Subject</th><th>Scheduled</th><th>Actions</th></tr></thead><tbody>' +
-    emails.map(e => '<tr><td><span class="badge '+e.status+'">'+e.status+'</span></td><td>'+esc(e.recipient_name||e.recipient_email)+'</td><td>'+esc(e.subject)+'</td><td>'+(e.scheduled_at?new Date(e.scheduled_at).toLocaleString():'—')+'</td><td><div class="todo-actions"><button onclick="openEditEmail('+e.id+')">&#9998;</button><button class="delete" onclick="deleteEmailDirect('+e.id+')">&#10005;</button></div></td></tr>'
+  document.getElementById('email-list').innerHTML = '<table><thead><tr><th style="width:30px;"></th><th>Status</th><th>To</th><th>Subject</th><th>Scheduled</th><th>Actions</th></tr></thead><tbody>' +
+    emails.map(e => '<tr><td><input type="checkbox" class="email-bulk-check" data-id="'+e.id+'" style="display:'+(emailSelectMode?'inline-block':'none')+';accent-color:var(--warm);cursor:pointer;" onchange="toggleEmailBulkItem('+e.id+',this.checked)"></td><td><span class="badge '+e.status+'">'+e.status+'</span></td><td>'+esc(e.recipient_name||e.recipient_email)+'</td><td>'+esc(e.subject)+'</td><td>'+(e.scheduled_at?new Date(e.scheduled_at).toLocaleString():'—')+'</td><td><div class="todo-actions"><button onclick="openEditEmail('+e.id+')">&#9998;</button><button class="delete" onclick="deleteEmailDirect('+e.id+')">&#10005;</button></div></td></tr>'
     ).join('') + '</tbody></table>';
 }
 
@@ -2305,15 +2499,15 @@ async function sendNow() {
 
 async function deleteEmail() {
   var id = document.getElementById('e-id').value;
-  if (!confirm('Delete this email?')) return;
   await fetch('/api/emails/'+id, {method:'DELETE'});
   closeCompose(); load();
+  showUndo('Email moved to trash','email',id);
 }
 
 async function deleteEmailDirect(id) {
-  if (!confirm('Delete this email?')) return;
   await fetch('/api/emails/'+id, {method:'DELETE'});
   load();
+  showUndo('Email moved to trash','email',id);
 }
 
 function getEmailData() {
@@ -2514,6 +2708,12 @@ ${themeScript()}
 
   <div class="actions">
     <button class="primary" onclick="openNote()">+ New Note</button>
+    <button id="note-select-toggle" onclick="toggleNoteSelect()">Select</button>
+  </div>
+  <div id="note-bulk-bar" style="display:none;padding:10px 16px;margin-bottom:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);align-items:center;gap:8px;font-size:13px;">
+    <span id="note-bulk-count">0 selected</span>
+    <button onclick="noteBulkAction('delete')" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
+    <button onclick="noteSelectAll()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
   </div>
 
   <div class="notes-grid" id="notes-grid"></div>
@@ -2559,6 +2759,22 @@ ${themeScript()}
 <script>
 var colorMap = {warm:'var(--warm)',teal:'var(--teal)',green:'var(--green)',blue:'var(--blue)',default:'var(--border)'};
 var currentTags = [];
+var noteSelectMode = false, noteSelectedIds = new Set();
+function toggleNoteSelect() {
+  noteSelectMode = !noteSelectMode; noteSelectedIds.clear();
+  document.getElementById('note-select-toggle').textContent = noteSelectMode ? 'Cancel' : 'Select';
+  document.getElementById('note-bulk-bar').style.display = noteSelectMode ? 'flex' : 'none';
+  document.querySelectorAll('.note-bulk-check').forEach(el => { el.style.display = noteSelectMode ? 'block' : 'none'; el.checked = false; });
+  updateNoteBulkCount();
+}
+function toggleNoteBulkItem(id, checked, ev) { ev.stopPropagation(); if (checked) noteSelectedIds.add(id); else noteSelectedIds.delete(id); updateNoteBulkCount(); }
+function updateNoteBulkCount() { document.getElementById('note-bulk-count').textContent = noteSelectedIds.size + ' selected'; }
+function noteSelectAll() { document.querySelectorAll('.note-bulk-check').forEach(el => { el.checked = true; toggleNoteBulkItem(parseInt(el.dataset.id,10), true, {stopPropagation:function(){}}); }); }
+async function noteBulkAction(action) {
+  if (!noteSelectedIds.size) return;
+  await fetch('/api/bulk/notes', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:Array.from(noteSelectedIds),action:action})});
+  noteSelectedIds.clear(); updateNoteBulkCount(); load();
+}
 
 function renderTags() {
   document.getElementById('n-tags-list').innerHTML = currentTags.map((t,i) =>
@@ -2594,7 +2810,8 @@ async function load() {
   document.getElementById('notes-grid').innerHTML = notes.map(n => {
     var borderStyle = n.pinned ? 'border-color:'+(colorMap[n.color]||'var(--warm)') : (n.color!=='default'?'border-color:'+colorMap[n.color]:'');
     var tagsHtml = n.tags && n.tags.length ? '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px;">'+n.tags.map(t=>'<span style="padding:2px 8px;border-radius:12px;font-size:9px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-muted);">'+esc(t)+'</span>').join('')+'</div>' : '';
-    return '<div class="note-card'+(n.pinned?' pinned':'')+'" style="'+borderStyle+'" onclick="openEditNote('+n.id+')">'+
+    return '<div class="note-card'+(n.pinned?' pinned':'')+'" style="position:relative;'+borderStyle+'" onclick="openEditNote('+n.id+')">'+
+      '<input type="checkbox" class="note-bulk-check" data-id="'+n.id+'" style="display:'+(noteSelectMode?'block':'none')+';position:absolute;top:10px;right:10px;accent-color:var(--warm);cursor:pointer;z-index:2;" onclick="event.stopPropagation()" onchange="toggleNoteBulkItem('+n.id+',this.checked,event)">'+
       (n.pinned?'<div style="font-size:10px;color:var(--warm);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">&#128204; Pinned</div>':'')+
       (n.title?'<div class="note-title">'+esc(n.title)+'</div>':'')+
       '<div class="note-preview">'+esc(n.content)+'</div>'+
@@ -2654,9 +2871,9 @@ async function saveNote() {
 
 async function deleteNote() {
   var id = document.getElementById('n-id').value;
-  if (!confirm('Delete this note?')) return;
   await fetch('/api/notes/'+id, {method:'DELETE'});
   closeNote(); load();
+  showUndo('Note moved to trash','note',id);
 }
 
 
@@ -2950,6 +3167,7 @@ ${themeScript()}
       <select id="s-theme" onchange="saveSettings()" style="width:auto;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
         <option value="dark">Night Mode</option>
         <option value="light">Day Mode</option>
+        <option value="auto">Auto (System)</option>
       </select>
     </div>
   </div>
@@ -3055,10 +3273,27 @@ ${themeScript()}
     </div>
   </div>
 
+  <div class="section">
+    <h2>Trash</h2>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Deleted items are kept for 30 days before permanent removal.</p>
+    <div id="trash-list" style="margin-bottom:10px;"></div>
+    <div class="actions" style="margin-bottom:0;">
+      <button onclick="loadTrash()">View Trash</button>
+      <button class="danger" style="border-color:var(--red);color:var(--red);" onclick="emptyTrash()">Empty Trash</button>
+    </div>
+  </div>
+
   ${AUTH_SECRET ? '<div class="section"><h2>Session</h2><div class="actions" style="margin-bottom:0;"><button class="danger" style="border-color:var(--red);color:var(--red);" onclick="logout()">Log Out</button></div></div>' : ''}
 </div>
 
 <script>
+function applyTheme(t) {
+  var effective = t;
+  if (t === 'auto') effective = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  if (effective === 'light') document.documentElement.setAttribute('data-theme','light');
+  else document.documentElement.removeAttribute('data-theme');
+  localStorage.setItem('theme', t);
+}
 async function load() {
   var s = await fetch('/api/settings').then(r=>r.json());
   document.getElementById('s-theme').value = s.theme || 'dark';
@@ -3088,9 +3323,7 @@ async function load() {
   }
 
   // Apply theme
-  if (s.theme === 'light') document.documentElement.setAttribute('data-theme','light');
-  else document.documentElement.removeAttribute('data-theme');
-  localStorage.setItem('theme', s.theme || 'dark');
+  applyTheme(s.theme || 'dark');
 }
 
 async function saveSettings() {
@@ -3103,9 +3336,7 @@ async function saveSettings() {
   await fetch('/api/settings', {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
 
   // Apply theme immediately
-  if (data.theme === 'light') document.documentElement.setAttribute('data-theme','light');
-  else document.documentElement.removeAttribute('data-theme');
-  localStorage.setItem('theme', data.theme);
+  applyTheme(data.theme);
 
   var el = document.getElementById('status');
   el.className = 'status-msg success';
@@ -3141,6 +3372,44 @@ async function enableNotifications() {
     document.getElementById('notif-btn').disabled = true;
     new Notification('Per-sistant', { body: 'Notifications enabled! You will be notified about reminders and overdue tasks.' });
   }
+}
+
+async function loadTrash() {
+  var items = await fetch('/api/trash').then(r=>r.json());
+  var el = document.getElementById('trash-list');
+  if (!items.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Trash is empty.</div>'; return; }
+  el.innerHTML = items.map(function(item) {
+    var d = new Date(item.deleted_at).toLocaleDateString();
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;">'
+      +'<div><span style="color:var(--text-muted);font-size:11px;margin-right:8px;">'+item.type+'</span>'+esc(item.title||'Untitled')+'<span style="color:var(--text-muted);font-size:11px;margin-left:8px;">deleted '+d+'</span></div>'
+      +'<div style="display:flex;gap:6px;">'
+      +'<button onclick="restoreItem(\''+item.type+'\','+item.id+')" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Restore</button>'
+      +'<button onclick="permanentDelete(\''+item.type+'\','+item.id+')" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Delete</button>'
+      +'</div></div>';
+  }).join('');
+}
+
+async function restoreItem(type, id) {
+  await fetch('/api/trash/'+type+'/'+id+'/restore', {method:'POST'});
+  loadTrash();
+  var el = document.getElementById('status');
+  el.className = 'status-msg success'; el.textContent = 'Item restored.';
+  setTimeout(function(){ el.className = 'status-msg'; }, 3000);
+}
+
+async function permanentDelete(type, id) {
+  if (!confirm('Permanently delete this item? This cannot be undone.')) return;
+  await fetch('/api/trash/'+type+'/'+id, {method:'DELETE'});
+  loadTrash();
+}
+
+async function emptyTrash() {
+  if (!confirm('Permanently delete all items in trash? This cannot be undone.')) return;
+  await fetch('/api/trash/empty', {method:'POST'});
+  loadTrash();
+  var el = document.getElementById('status');
+  el.className = 'status-msg success'; el.textContent = 'Trash emptied.';
+  setTimeout(function(){ el.className = 'status-msg'; }, 3000);
 }
 
 async function logout() {
@@ -3197,7 +3466,7 @@ async function processScheduledEmails() {
   if (!nodemailer || !process.env.SMTP_HOST) return;
   try {
     const r = await pool.query(
-      "SELECT * FROM emails WHERE status = 'scheduled' AND scheduled_at <= now()"
+      "SELECT * FROM emails WHERE deleted_at IS NULL AND status = 'scheduled' AND scheduled_at <= now()"
     );
     for (const email of r.rows) {
       try {
@@ -3247,7 +3516,7 @@ async function start() {
   if (cron) {
     cron.schedule("0 0 * * *", async () => {
       try {
-        const r = await pool.query("SELECT * FROM todos WHERE recurring = true AND completed = false AND due_date < CURRENT_DATE");
+        const r = await pool.query("SELECT * FROM todos WHERE deleted_at IS NULL AND recurring = true AND completed = false AND due_date < CURRENT_DATE");
         for (const todo of r.rows) {
           // Auto-complete and create next
           await pool.query("UPDATE todos SET completed = true, completed_at = now() WHERE id = $1", [todo.id]);
