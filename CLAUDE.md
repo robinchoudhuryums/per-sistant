@@ -8,8 +8,8 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **Server**: `server.js` (Express, port 3001, bound to 0.0.0.0)
 - **Database**: Neon PostgreSQL (schema in `db/`)
 - **Email**: nodemailer (SMTP) with scheduled sending via node-cron
-- **AI**: Anthropic Claude API — 7 AI features with per-feature model selection (Haiku/Sonnet/Off)
-- **Tests**: `tests/` (node:test runner, run with `npm test`, 73 tests)
+- **AI**: Anthropic Claude API — 8 AI features with per-feature model selection (Haiku/Sonnet/Off)
+- **Tests**: `tests/` (node:test runner, run with `npm test`, 84 tests)
 - **Deployment**: `Dockerfile`, `fly.toml` (Fly.io), `render.yaml` (Render)
 
 ## Current State (as of March 2026)
@@ -29,7 +29,9 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **AI Daily Briefing**: Dashboard summary of your day's priorities
 - **AI Weekly Review Summary**: Narrative summary of your week's accomplishments
 - **AI Note Auto-Tagging**: Suggest tags for notes based on content
+- **AI Task Suggestions**: Smart recurring task detection from history — accept, reject, or snooze suggestions on dashboard
 - **AI Model Selection**: Per-feature choice of Haiku (fast/cheap), Sonnet (smarter), or Off — configurable in Settings
+- **Todo Booking URLs**: Optional URL field on todos renders as quick-link button (for booking pages, references, etc.)
 - **Email Templates**: Save and reuse common email formats
 - **Notes**: Color-coded, pinnable, with optional reminders and tags
 - **Contacts**: Name→email lookup for quick email addressing
@@ -51,7 +53,8 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - `db/001_schema.sql` — database schema (todos, emails, notes, contacts, settings)
 - `db/002_features.sql` — enhancement migration (recurring, subtasks, templates, reviews)
 - `db/003_ai_features.sql` — AI model preferences & note tags migration
-- `tests/api.test.js` — test suite (73 tests, 22 suites)
+- `db/004_suggestions.sql` — Todo URL field & task suggestions table
+- `tests/api.test.js` — test suite (84 tests, 24 suites)
 - `Dockerfile` / `docker-compose.yml` — container deployment
 - `fly.toml` — Fly.io config
 - `render.yaml` — Render blueprint
@@ -61,7 +64,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 # Install & run locally
 npm install && node server.js
 
-# Run tests (73 tests)
+# Run tests (84 tests)
 npm test
 
 # Pages
@@ -129,6 +132,13 @@ POST   /api/ai/review-summary      # Generate weekly review narrative
 POST   /api/ai/adjust-tone         # Rewrite email in different tone
 GET    /api/ai/daily-briefing      # Generate daily task briefing
 POST   /api/ai/suggest-tags        # Suggest tags for note content
+
+GET    /api/suggestions            # List pending task suggestions
+POST   /api/suggestions/generate   # AI-generate suggestions from task history
+POST   /api/suggestions/:id/accept # Accept suggestion (creates todo)
+POST   /api/suggestions/:id/reject # Dismiss suggestion
+POST   /api/suggestions/:id/snooze # Snooze suggestion (default 7 days)
+DELETE /api/suggestions/:id        # Delete suggestion
 GET    /api/ai/models              # Get per-feature model preferences
 PATCH  /api/ai/models              # Update per-feature model preferences
 
@@ -155,12 +165,12 @@ GET    /sw.js               # Service worker
 ## Database
 - Auto-migration runs on server startup — no manual SQL execution needed
 - `user_settings` table: single-row pattern (CHECK id = 1), includes ai_model_* columns
-- Tables: `todos`, `emails`, `notes`, `contacts`, `user_settings`, `subtasks`, `email_templates`, `weekly_reviews`
+- Tables: `todos`, `emails`, `notes`, `contacts`, `user_settings`, `subtasks`, `email_templates`, `weekly_reviews`, `task_suggestions`
 
 ## AI Features & Models
-- 7 AI features, each independently configurable: Haiku (fast/cheap), Sonnet (smarter), or Off
+- 8 AI features, each independently configurable: Haiku (fast/cheap), Sonnet (smarter), or Off
 - Models: `claude-haiku-4-5-20251001`, `claude-sonnet-4-6-20250415`
-- Features: email drafting, task breakdown, smart quick add, weekly review summary, email tone adjustment, daily briefing, note auto-tagging
+- Features: email drafting, task breakdown, smart quick add, weekly review summary, email tone adjustment, daily briefing, note auto-tagging, task suggestions
 - Configuration stored in `user_settings` table (ai_model_* columns)
 - Settings page provides per-feature dropdowns
 

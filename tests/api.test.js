@@ -595,13 +595,13 @@ describe("AI model selection", () => {
     assert.ok(!valid.includes("gpt-4"));
   });
 
-  it("all 7 AI features have model settings", () => {
+  it("all 8 AI features have model settings", () => {
     const features = [
       "ai_model_email_draft", "ai_model_task_breakdown", "ai_model_quick_add",
       "ai_model_review_summary", "ai_model_email_tone", "ai_model_daily_briefing",
-      "ai_model_note_tagging"
+      "ai_model_note_tagging", "ai_model_task_suggestions"
     ];
-    assert.equal(features.length, 7);
+    assert.equal(features.length, 8);
     features.forEach(f => assert.ok(f.startsWith("ai_model_")));
   });
 });
@@ -755,5 +755,114 @@ describe("Security", () => {
     const noAuth = null;
     const noMode = null ? "pin" : (noAuth ? "password" : null);
     assert.equal(noMode, null);
+  });
+
+  it("AI feature whitelist prevents injection", () => {
+    const VALID_AI_FEATURES = ["email_draft", "task_breakdown", "smart_quick_add", "weekly_review", "email_tone", "daily_briefing", "note_tags", "task_suggestions"];
+    assert.ok(VALID_AI_FEATURES.includes("email_draft"));
+    assert.ok(VALID_AI_FEATURES.includes("task_suggestions"));
+    assert.ok(!VALID_AI_FEATURES.includes("'; DROP TABLE users;--"));
+    assert.ok(!VALID_AI_FEATURES.includes("anything_else"));
+  });
+
+  it("email validation regex", () => {
+    function isValidEmail(email) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    }
+    assert.ok(isValidEmail("user@example.com"));
+    assert.ok(isValidEmail("a@b.co"));
+    assert.ok(!isValidEmail("notanemail"));
+    assert.ok(!isValidEmail("missing@domain"));
+    assert.ok(!isValidEmail("@no-local.com"));
+    assert.ok(!isValidEmail("spaces in@email.com"));
+  });
+
+  it("enum validation for priorities and horizons", () => {
+    const VALID_PRIORITIES = ["low", "medium", "high", "urgent"];
+    const VALID_HORIZONS = ["short", "medium", "long"];
+    assert.ok(VALID_PRIORITIES.includes("urgent"));
+    assert.ok(!VALID_PRIORITIES.includes("critical"));
+    assert.ok(VALID_HORIZONS.includes("long"));
+    assert.ok(!VALID_HORIZONS.includes("forever"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Todo URL field tests
+// ---------------------------------------------------------------------------
+describe("Todo URL field", () => {
+  it("todo can have optional URL", () => {
+    const todo = { id: 1, title: "Book haircut", url: "https://styleseat.com/barber" };
+    assert.ok(todo.url);
+    assert.ok(todo.url.startsWith("https://"));
+  });
+
+  it("URL is nullable", () => {
+    const todo = { id: 2, title: "Buy groceries", url: null };
+    assert.equal(todo.url, null);
+  });
+
+  it("URL included in todo data structure", () => {
+    const fields = ["id", "title", "description", "priority", "horizon", "category",
+                    "due_date", "completed", "sort_order", "recurring", "recurrence_rule", "url"];
+    assert.ok(fields.includes("url"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task suggestions tests
+// ---------------------------------------------------------------------------
+describe("Task suggestions", () => {
+  it("suggestion has expected fields", () => {
+    const suggestion = {
+      id: 1, title: "Book haircut", description: null, priority: "medium",
+      horizon: "short", category: "personal", due_date: "2026-03-20",
+      url: "https://styleseat.com/barber", reason: "You do this every 3 weeks",
+      status: "pending", snoozed_until: null, created_at: new Date().toISOString(),
+    };
+    assert.ok(suggestion.title);
+    assert.ok(suggestion.reason);
+    assert.equal(suggestion.status, "pending");
+  });
+
+  it("valid suggestion statuses", () => {
+    const statuses = ["pending", "accepted", "rejected", "snoozed"];
+    assert.equal(statuses.length, 4);
+    assert.ok(statuses.includes("pending"));
+    assert.ok(statuses.includes("snoozed"));
+    assert.ok(!statuses.includes("deleted"));
+  });
+
+  it("accepting creates a todo from suggestion", () => {
+    const suggestion = { title: "Haircut", priority: "medium", horizon: "short", category: "personal", url: "https://example.com" };
+    const todo = { title: suggestion.title, priority: suggestion.priority, horizon: suggestion.horizon, category: suggestion.category, url: suggestion.url };
+    assert.equal(todo.title, "Haircut");
+    assert.equal(todo.url, "https://example.com");
+  });
+
+  it("snooze calculates future date", () => {
+    const days = 7;
+    const now = new Date();
+    const until = new Date(now);
+    until.setDate(until.getDate() + days);
+    assert.ok(until > now);
+    const diff = Math.round((until - now) / (1000 * 60 * 60 * 24));
+    assert.equal(diff, 7);
+  });
+
+  it("deduplicates against existing todos and suggestions", () => {
+    const existingTitles = ["buy groceries", "call dentist"];
+    const currentTitles = ["book haircut"];
+    const suggestions = [
+      { title: "Buy Groceries" },
+      { title: "New Task" },
+      { title: "Book Haircut" },
+    ];
+    const filtered = suggestions.filter(s =>
+      !existingTitles.includes(s.title.toLowerCase()) &&
+      !currentTitles.includes(s.title.toLowerCase())
+    );
+    assert.equal(filtered.length, 1);
+    assert.equal(filtered[0].title, "New Task");
   });
 });

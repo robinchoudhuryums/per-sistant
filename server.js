@@ -59,7 +59,7 @@ async function callAI(model, prompt, maxTokens = 1024) {
   return msg.content[0].text.trim();
 }
 
-const VALID_AI_FEATURES = ["email_draft", "task_breakdown", "smart_quick_add", "weekly_review", "email_tone", "daily_briefing", "note_tags"];
+const VALID_AI_FEATURES = ["email_draft", "task_breakdown", "smart_quick_add", "weekly_review", "email_tone", "daily_briefing", "note_tags", "task_suggestions"];
 async function getAIModelForFeature(feature) {
   if (!VALID_AI_FEATURES.includes(feature)) return "off";
   try {
@@ -477,6 +477,27 @@ const SHARED_CSS = `
     /* Recurring badge */
     .badge.recurring { background: rgba(212,165,116,0.1); color: var(--warm); }
 
+    /* Todo URL button */
+    .todo-url-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
+                    border-radius: 6px; background: rgba(127,168,230,0.1); color: var(--blue); text-decoration: none;
+                    font-size: 14px; flex-shrink: 0; transition: all 0.2s; border: 1px solid transparent; }
+    .todo-url-btn:hover { background: rgba(127,168,230,0.2); border-color: var(--blue); transform: scale(1.1); }
+
+    /* Suggestion card */
+    .suggestion-item { padding: 14px; border-radius: var(--radius); background: var(--surface);
+                       border: 1px solid var(--border); margin-bottom: 8px; animation: fadeInUp 0.3s ease-out both; }
+    .suggestion-reason { font-size: 11px; color: var(--text-muted); font-weight: 300; margin-top: 6px; font-style: italic; }
+    .suggestion-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .suggestion-actions button { padding: 4px 12px; font-size: 11px; border-radius: 6px; cursor: pointer;
+                                  font-family: inherit; border: 1px solid var(--border); background: transparent;
+                                  color: var(--text-muted); transition: all 0.2s; }
+    .suggestion-actions button.accept { border-color: var(--green); color: var(--green); }
+    .suggestion-actions button.accept:hover { background: var(--green-bg); }
+    .suggestion-actions button.snooze { border-color: var(--yellow); color: var(--yellow); }
+    .suggestion-actions button.snooze:hover { background: var(--yellow-bg); }
+    .suggestion-actions button.reject { border-color: var(--red); color: var(--red); }
+    .suggestion-actions button.reject:hover { background: var(--red-bg); }
+
     /* ===== Animations ===== */
     @keyframes fadeInUp {
       from { opacity: 0; transform: translateY(12px); }
@@ -770,13 +791,13 @@ app.get("/api/todos", async (req, res) => {
 
 app.post("/api/todos", async (req, res) => {
   try {
-    const { title, description, priority, horizon, category, due_date, recurring, recurrence_rule } = req.body;
+    const { title, description, priority, horizon, category, due_date, recurring, recurrence_rule, url } = req.body;
     if (!title) return res.status(400).json({ error: "Title is required." });
     if (priority && !VALID_PRIORITIES.includes(priority)) return res.status(400).json({ error: "Invalid priority." });
     if (horizon && !VALID_HORIZONS.includes(horizon)) return res.status(400).json({ error: "Invalid horizon." });
     const r = await pool.query(
-      `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [title, description || null, priority || "medium", horizon || "short", category || null, due_date || null, recurring || false, recurrence_rule || null]
+      `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, url) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [title, description || null, priority || "medium", horizon || "short", category || null, due_date || null, recurring || false, recurrence_rule || null, url || null]
     );
     res.json(r.rows[0]);
   } catch (err) {
@@ -786,7 +807,7 @@ app.post("/api/todos", async (req, res) => {
 
 app.patch("/api/todos/:id", async (req, res) => {
   try {
-    const { title, description, priority, horizon, category, due_date, completed, sort_order, recurring, recurrence_rule } = req.body;
+    const { title, description, priority, horizon, category, due_date, completed, sort_order, recurring, recurrence_rule, url } = req.body;
     const fields = [];
     const params = [];
     let idx = 1;
@@ -799,6 +820,7 @@ app.patch("/api/todos/:id", async (req, res) => {
     if (sort_order !== undefined) { fields.push(`sort_order = $${idx++}`); params.push(sort_order); }
     if (recurring !== undefined) { fields.push(`recurring = $${idx++}`); params.push(recurring); }
     if (recurrence_rule !== undefined) { fields.push(`recurrence_rule = $${idx++}`); params.push(recurrence_rule); }
+    if (url !== undefined) { fields.push(`url = $${idx++}`); params.push(url || null); }
     if (completed !== undefined) {
       fields.push(`completed = $${idx++}`); params.push(completed);
       fields.push(`completed_at = $${idx++}`); params.push(completed ? new Date().toISOString() : null);
@@ -1408,7 +1430,7 @@ Example: ["meeting-notes", "project-alpha", "action-items"]`, 128);
 // ============================================================================
 app.get("/api/ai/models", async (req, res) => {
   try {
-    const r = await pool.query("SELECT ai_model_email_draft, ai_model_task_breakdown, ai_model_quick_add, ai_model_review_summary, ai_model_email_tone, ai_model_daily_briefing, ai_model_note_tagging FROM user_settings WHERE id = 1");
+    const r = await pool.query("SELECT ai_model_email_draft, ai_model_task_breakdown, ai_model_quick_add, ai_model_review_summary, ai_model_email_tone, ai_model_daily_briefing, ai_model_note_tagging, ai_model_task_suggestions FROM user_settings WHERE id = 1");
     const models = r.rows[0] || {};
     models.available = !!(Anthropic && process.env.ANTHROPIC_API_KEY);
     res.json(models);
@@ -1417,7 +1439,7 @@ app.get("/api/ai/models", async (req, res) => {
 
 app.patch("/api/ai/models", async (req, res) => {
   try {
-    const allowed = ["ai_model_email_draft", "ai_model_task_breakdown", "ai_model_quick_add", "ai_model_review_summary", "ai_model_email_tone", "ai_model_daily_briefing", "ai_model_note_tagging"];
+    const allowed = ["ai_model_email_draft", "ai_model_task_breakdown", "ai_model_quick_add", "ai_model_review_summary", "ai_model_email_tone", "ai_model_daily_briefing", "ai_model_note_tagging", "ai_model_task_suggestions"];
     const validValues = ["haiku", "sonnet", "off"];
     const fields = []; const params = []; let idx = 1;
     for (const key of allowed) {
@@ -1430,6 +1452,148 @@ app.patch("/api/ai/models", async (req, res) => {
     if (!fields.length) return res.status(400).json({ error: "No fields to update." });
     const r = await pool.query(`UPDATE user_settings SET ${fields.join(", ")} WHERE id = 1 RETURNING *`, params);
     res.json(r.rows[0]);
+  } catch (err) { res.status(500).json(safeError(err)); }
+});
+
+// ============================================================================
+// API — Task Suggestions
+// ============================================================================
+app.get("/api/suggestions", async (req, res) => {
+  try {
+    const { status } = req.query;
+    let where = "WHERE status = 'pending'";
+    if (status === "all") where = "";
+    else if (status) where = "WHERE status = $1";
+    const params = (status && status !== "all" && status !== "pending") ? [status] : [];
+    if (status === "pending" || !status) {
+      // Also show snoozed items whose snooze has expired
+      where = "WHERE (status = 'pending' OR (status = 'snoozed' AND snoozed_until <= CURRENT_DATE))";
+    }
+    const r = await pool.query(`SELECT * FROM task_suggestions ${where} ORDER BY created_at DESC`, params);
+    res.json(r.rows);
+  } catch (err) { res.status(500).json(safeError(err)); }
+});
+
+app.post("/api/suggestions/:id/accept", async (req, res) => {
+  try {
+    const s = await pool.query("SELECT * FROM task_suggestions WHERE id = $1", [req.params.id]);
+    if (!s.rows.length) return res.status(404).json({ error: "Not found." });
+    const sug = s.rows[0];
+    // Create a real todo from the suggestion
+    const r = await pool.query(
+      `INSERT INTO todos (title, description, priority, horizon, category, due_date, url) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [sug.title, sug.description, sug.priority, sug.horizon, sug.category, sug.due_date, sug.url]
+    );
+    await pool.query("UPDATE task_suggestions SET status = 'accepted' WHERE id = $1", [req.params.id]);
+    res.json({ suggestion: { ...sug, status: "accepted" }, todo: r.rows[0] });
+  } catch (err) { res.status(500).json(safeError(err)); }
+});
+
+app.post("/api/suggestions/:id/reject", async (req, res) => {
+  try {
+    const r = await pool.query("UPDATE task_suggestions SET status = 'rejected' WHERE id = $1 RETURNING *", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json(safeError(err)); }
+});
+
+app.post("/api/suggestions/:id/snooze", async (req, res) => {
+  try {
+    const days = parseInt(req.body.days) || 7;
+    const until = new Date();
+    until.setDate(until.getDate() + days);
+    const r = await pool.query("UPDATE task_suggestions SET status = 'snoozed', snoozed_until = $1 WHERE id = $2 RETURNING *", [until.toISOString().split("T")[0], req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json(safeError(err)); }
+});
+
+app.post("/api/suggestions/generate", async (req, res) => {
+  try {
+    const model = await getAIModelForFeature("task_suggestions");
+    if (model === "off") return res.status(400).json({ error: "Task suggestions AI is disabled. Enable it in Settings." });
+    // Get completed tasks from the last 90 days for pattern analysis
+    const completed = await pool.query(
+      `SELECT title, category, priority, horizon, due_date, completed_at, recurring, recurrence_rule, url
+       FROM todos WHERE completed = true AND completed_at >= NOW() - INTERVAL '90 days'
+       ORDER BY completed_at DESC LIMIT 100`
+    );
+    if (completed.rows.length < 3) {
+      return res.status(400).json({ error: "Not enough task history yet. Complete a few more tasks first." });
+    }
+    // Get existing pending suggestions to avoid duplicates
+    const existing = await pool.query("SELECT title FROM task_suggestions WHERE status IN ('pending', 'snoozed')");
+    const existingTitles = existing.rows.map(r => r.title.toLowerCase());
+    // Get current pending todos to avoid suggesting what's already on the list
+    const currentTodos = await pool.query("SELECT title FROM todos WHERE completed = false");
+    const currentTitles = currentTodos.rows.map(r => r.title.toLowerCase());
+
+    const today = new Date().toISOString().split("T")[0];
+    const tasksJson = JSON.stringify(completed.rows.map(t => ({
+      title: t.title,
+      category: t.category,
+      priority: t.priority,
+      due_date: t.due_date,
+      completed_at: t.completed_at,
+      recurring: t.recurring,
+      url: t.url,
+    })));
+
+    const text = await callAI(model, `You are analyzing a user's completed task history to suggest tasks they likely need to do again soon. Today is ${today}.
+
+Completed tasks (last 90 days):
+${tasksJson}
+
+Already on their list or suggested: ${JSON.stringify([...existingTitles, ...currentTitles])}
+
+Look for patterns:
+- Tasks done regularly (haircuts, grooming, groceries, cleaning, bills, etc.)
+- Tasks that seem to recur on a rough schedule (even if not exactly periodic)
+- Seasonal or time-appropriate tasks
+
+For each suggestion, explain WHY you're suggesting it (the pattern you noticed).
+If a completed task had a URL, include it in the suggestion so the user can easily re-book/re-visit.
+
+Return ONLY a JSON array of objects (max 5 suggestions, 0 if none are appropriate):
+[{
+  "title": "task title",
+  "description": "optional brief description",
+  "priority": "low|medium|high|urgent",
+  "horizon": "short|medium|long",
+  "category": "category or null",
+  "due_date": "YYYY-MM-DD or null",
+  "url": "URL from previous task if applicable, or null",
+  "reason": "Why you're suggesting this (e.g. 'You do this roughly every 3 weeks')"
+}]
+
+Do NOT suggest tasks already on the list. Only suggest tasks where you see a clear pattern or logical need.`, 1024);
+
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return res.json({ suggestions: [], message: "No patterns detected yet." });
+    const suggestions = JSON.parse(jsonMatch[0]);
+
+    // Filter out duplicates and insert
+    const inserted = [];
+    for (const s of suggestions) {
+      if (existingTitles.includes(s.title.toLowerCase()) || currentTitles.includes(s.title.toLowerCase())) continue;
+      if (!VALID_PRIORITIES.includes(s.priority)) s.priority = "medium";
+      if (!VALID_HORIZONS.includes(s.horizon)) s.horizon = "short";
+      const r = await pool.query(
+        `INSERT INTO task_suggestions (title, description, priority, horizon, category, due_date, url, reason)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+        [s.title, s.description || null, s.priority, s.horizon, s.category || null, s.due_date || null, s.url || null, s.reason || null]
+      );
+      inserted.push(r.rows[0]);
+    }
+    res.json({ suggestions: inserted });
+  } catch (err) { res.status(500).json(safeError(err)); }
+});
+
+app.delete("/api/suggestions/:id", async (req, res) => {
+  try {
+    const r = await pool.query("DELETE FROM task_suggestions WHERE id = $1 RETURNING id", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json({ ok: true });
   } catch (err) { res.status(500).json(safeError(err)); }
 });
 
@@ -1627,6 +1791,18 @@ ${themeScript()}
     </div>
   </div>
 
+  <!-- Task Suggestions -->
+  <div id="suggestions-section" style="display:none;margin-top:24px;">
+    <div class="section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <h2 style="margin-bottom:0;">Suggested Tasks</h2>
+        <button onclick="generateSuggestions()" id="gen-suggestions-btn" style="padding:6px 14px;font-size:11px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;transition:all 0.2s;">Refresh</button>
+      </div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;font-weight:300;">Based on your task history — accept to add to your list, snooze to revisit later, or dismiss.</p>
+      <div id="suggestions-list"></div>
+    </div>
+  </div>
+
   <div style="margin-top:24px;text-align:center;">
     <p style="font-size:11px;color:var(--text-muted);">Keyboard shortcuts: <span class="kbd">/</span> Search &middot; <span class="kbd">N</span> New task &middot; <span class="kbd">E</span> New email &middot; <span class="kbd">?</span> Show all</p>
   </div>
@@ -1688,7 +1864,7 @@ function renderDashTasks() {
 
 function renderDashTodo(t) {
   var overdue = t.due_date && new Date(t.due_date) <= new Date() ? ' style="color:var(--red)"' : '';
-  return '<div class="todo-item"><div class="todo-content"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span>'+(t.category?'<span>'+esc(t.category)+'</span>':'')+(t.due_date?'<span'+overdue+'>Due: '+new Date(t.due_date).toLocaleDateString()+'</span>':'')+(t.recurring?'<span class="badge recurring">recurring</span>':'')+'</div></div></div>';
+  return '<div class="todo-item"><div class="todo-content"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span>'+(t.category?'<span>'+esc(t.category)+'</span>':'')+(t.due_date?'<span'+overdue+'>Due: '+new Date(t.due_date).toLocaleDateString()+'</span>':'')+(t.recurring?'<span class="badge recurring">recurring</span>':'')+'</div></div>'+(t.url?'<a href="'+esc(t.url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="todo-url-btn" title="Open link">&#8599;</a>':'')+'</div>';
 }
 
 async function load() {
@@ -1745,6 +1921,82 @@ async function load() {
       document.getElementById('briefing-section').style.display = 'block';
     }
   }).catch(function(){});
+
+  // Load task suggestions
+  loadSuggestions();
+}
+
+async function loadSuggestions() {
+  try {
+    var suggestions = await fetch('/api/suggestions').then(r=>r.json());
+    if (suggestions.length) {
+      document.getElementById('suggestions-section').style.display='block';
+      renderSuggestions(suggestions);
+    } else {
+      document.getElementById('suggestions-section').style.display='none';
+    }
+  } catch {}
+}
+
+function renderSuggestions(suggestions) {
+  document.getElementById('suggestions-list').innerHTML = suggestions.length
+    ? suggestions.map(function(s) {
+        return '<div class="suggestion-item" id="sug-'+s.id+'">'
+          +'<div style="display:flex;align-items:flex-start;justify-content:space-between;">'
+          +'<div><div class="todo-title">'+esc(s.title)+'</div>'
+          +'<div class="todo-meta" style="margin-top:4px;"><span class="badge '+s.priority+'">'+s.priority+'</span>'
+          +(s.category?'<span>'+esc(s.category)+'</span>':'')
+          +(s.due_date?'<span>Due: '+new Date(s.due_date).toLocaleDateString()+'</span>':'')
+          +'</div></div>'
+          +(s.url?'<a href="'+esc(s.url)+'" target="_blank" rel="noopener" class="todo-url-btn" title="Open link" style="margin-left:8px;">&#8599;</a>':'')
+          +'</div>'
+          +(s.reason?'<div class="suggestion-reason">'+esc(s.reason)+'</div>':'')
+          +'<div class="suggestion-actions">'
+          +'<button class="accept" onclick="acceptSuggestion('+s.id+')">&#10003; Accept</button>'
+          +'<button class="snooze" onclick="snoozeSuggestion('+s.id+')">&#9716; Snooze 1 week</button>'
+          +'<button class="reject" onclick="rejectSuggestion('+s.id+')">&#10005; Dismiss</button>'
+          +'</div></div>';
+      }).join('')
+    : '<div class="empty-msg">No suggestions right now</div>';
+}
+
+async function acceptSuggestion(id) {
+  var el = document.getElementById('sug-'+id);
+  if (el) el.style.opacity='0.5';
+  await fetch('/api/suggestions/'+id+'/accept',{method:'POST',headers:{'Content-Type':'application/json'}});
+  if (el) el.remove();
+  // Check if any suggestions remain
+  var remaining = document.querySelectorAll('.suggestion-item');
+  if (!remaining.length) document.getElementById('suggestions-section').style.display='none';
+}
+
+async function rejectSuggestion(id) {
+  var el = document.getElementById('sug-'+id);
+  if (el) el.style.opacity='0.5';
+  await fetch('/api/suggestions/'+id+'/reject',{method:'POST',headers:{'Content-Type':'application/json'}});
+  if (el) el.remove();
+  var remaining = document.querySelectorAll('.suggestion-item');
+  if (!remaining.length) document.getElementById('suggestions-section').style.display='none';
+}
+
+async function snoozeSuggestion(id) {
+  var el = document.getElementById('sug-'+id);
+  if (el) el.style.opacity='0.5';
+  await fetch('/api/suggestions/'+id+'/snooze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days:7})});
+  if (el) el.remove();
+  var remaining = document.querySelectorAll('.suggestion-item');
+  if (!remaining.length) document.getElementById('suggestions-section').style.display='none';
+}
+
+async function generateSuggestions() {
+  var btn = document.getElementById('gen-suggestions-btn');
+  btn.textContent = 'Analyzing...'; btn.disabled = true;
+  try {
+    var r = await fetch('/api/suggestions/generate',{method:'POST',headers:{'Content-Type':'application/json'}}).then(r=>r.json());
+    if (r.error) { alert(r.error); }
+    else { await loadSuggestions(); }
+  } catch (e) { alert('Failed to generate suggestions'); }
+  btn.textContent = 'Refresh'; btn.disabled = false;
 }
 
 // Keyboard shortcuts
@@ -1849,6 +2101,10 @@ ${themeScript()}
         <select id="f-recurrence-rule"><option value="daily">Daily</option><option value="weekdays">Weekdays</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select>
       </div>
     </div>
+    <div style="margin-top:12px;">
+      <label>Link / Booking URL <span style="font-weight:300;color:var(--text-muted)">(optional)</span></label>
+      <input type="url" id="f-url" placeholder="https://...">
+    </div>
     <div id="subtasks-section" style="display:none;margin-top:16px;">
       <label>Subtasks <button onclick="aiBreakdown()" id="ai-breakdown-btn" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Breakdown</button></label>
       <div id="subtask-list-edit"></div>
@@ -1941,7 +2197,7 @@ async function load() {
         '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" onclick="event.stopPropagation();toggleSubtask('+s.id+','+!s.completed+')"></div><span class="subtask-text'+(s.completed?' done':'')+'" ondblclick="event.stopPropagation();inlineEditSubtask(this,'+s.id+')">'+esc(s.title)+'</span><button class="subtask-edit-btn" onclick="event.stopPropagation();inlineEditSubtask(this.previousElementSibling,'+s.id+')">&#9998;</button></div>'
       ).join('')+'</div>';
     }
-    return '<div class="todo-item" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" onclick="toggleTodo('+t.id+','+!t.completed+','+!!t.recurring+')"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+(t.recurring?'<span class="badge recurring">'+t.recurrence_rule+'</span>':'')+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions"><button onclick="openEdit('+t.id+')">&#9998;</button></div></div>';
+    return '<div class="todo-item" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" onclick="toggleTodo('+t.id+','+!t.completed+','+!!t.recurring+')"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+(t.recurring?'<span class="badge recurring">'+t.recurrence_rule+'</span>':'')+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div>'+(t.url?'<a href="'+esc(t.url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="todo-url-btn" title="Open link">&#8599;</a>':'')+'<div class="todo-actions"><button onclick="openEdit('+t.id+')">&#9998;</button></div></div>';
   }).join('');
 }
 
@@ -2056,6 +2312,7 @@ function openAdd() {
   document.getElementById('f-recurring').checked = false;
   document.getElementById('f-recurrence').style.display = 'none';
   document.getElementById('f-recurrence-rule').value = 'weekly';
+  document.getElementById('f-url').value = '';
   document.getElementById('delete-btn').style.display = 'none';
   document.getElementById('subtasks-section').style.display = 'block';
   editSubtasks = [];
@@ -2088,6 +2345,7 @@ async function openEdit(id) {
   document.getElementById('f-recurring').checked = t.recurring||false;
   document.getElementById('f-recurrence').style.display = t.recurring ? 'block' : 'none';
   document.getElementById('f-recurrence-rule').value = t.recurrence_rule || 'weekly';
+  document.getElementById('f-url').value = t.url || '';
   document.getElementById('delete-btn').style.display = 'inline-block';
   document.getElementById('subtasks-section').style.display = 'block';
   loadEditSubtasks(id);
@@ -2108,6 +2366,7 @@ async function saveTodo() {
     due_date: document.getElementById('f-due').value || null,
     recurring: isRecurring,
     recurrence_rule: isRecurring ? document.getElementById('f-recurrence-rule').value : null,
+    url: document.getElementById('f-url').value || null,
   };
   if (!data.title) return alert('Title is required');
   var result;
@@ -3124,6 +3383,10 @@ ${themeScript()}
           <div><div style="font-size:13px;font-weight:400;">Note Auto-Tagging</div><div style="font-size:10px;color:var(--text-muted);">Suggest tags when creating notes</div></div>
           <select id="aim-note_tagging" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
         </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;">
+          <div><div style="font-size:13px;font-weight:400;">Task Suggestions</div><div style="font-size:10px;color:var(--text-muted);">Suggest recurring tasks based on history</div></div>
+          <select id="aim-task_suggestions" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+        </div>
       </div>
     </div>
   </div>
@@ -3184,7 +3447,7 @@ async function load() {
     document.getElementById('ai-models-section').style.display = 'block';
     try {
       var models = await fetch('/api/ai/models').then(r=>r.json());
-      var features = ['email_draft','task_breakdown','quick_add','review_summary','email_tone','daily_briefing','note_tagging'];
+      var features = ['email_draft','task_breakdown','quick_add','review_summary','email_tone','daily_briefing','note_tagging','task_suggestions'];
       features.forEach(f => {
         var el = document.getElementById('aim-'+f);
         if (el) el.value = models['ai_model_'+f] || 'off';
@@ -3233,7 +3496,7 @@ async function exportData(type) {
 
 async function saveAIModels() {
   var data = {};
-  var features = ['email_draft','task_breakdown','quick_add','review_summary','email_tone','daily_briefing','note_tagging'];
+  var features = ['email_draft','task_breakdown','quick_add','review_summary','email_tone','daily_briefing','note_tagging','task_suggestions'];
   features.forEach(f => { data['ai_model_'+f] = document.getElementById('aim-'+f).value; });
   await fetch('/api/ai/models', {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   var el = document.getElementById('status');
@@ -3382,6 +3645,58 @@ async function start() {
       } catch (err) { console.error("Recurring task error:", err.message); }
     });
     console.log("Recurring task processor started (daily at midnight)");
+  }
+
+  // Auto-generate task suggestions — weekly on Mondays at 8am
+  if (cron) {
+    cron.schedule("0 8 * * 1", async () => {
+      try {
+        const model = await getAIModelForFeature("task_suggestions");
+        if (model === "off") return;
+        // Clean up old rejected suggestions (>30 days)
+        await pool.query("DELETE FROM task_suggestions WHERE status = 'rejected' AND created_at < NOW() - INTERVAL '30 days'");
+        // Reactivate expired snoozes
+        await pool.query("UPDATE task_suggestions SET status = 'pending' WHERE status = 'snoozed' AND snoozed_until <= CURRENT_DATE");
+        // Get completed tasks for pattern analysis
+        const completed = await pool.query(
+          `SELECT title, category, priority, horizon, due_date, completed_at, recurring, recurrence_rule, url
+           FROM todos WHERE completed = true AND completed_at >= NOW() - INTERVAL '90 days'
+           ORDER BY completed_at DESC LIMIT 100`
+        );
+        if (completed.rows.length < 3) return;
+        const existing = await pool.query("SELECT title FROM task_suggestions WHERE status IN ('pending', 'snoozed')");
+        const existingTitles = existing.rows.map(r => r.title.toLowerCase());
+        const currentTodos = await pool.query("SELECT title FROM todos WHERE completed = false");
+        const currentTitles = currentTodos.rows.map(r => r.title.toLowerCase());
+        const today = new Date().toISOString().split("T")[0];
+        const tasksJson = JSON.stringify(completed.rows.map(t => ({
+          title: t.title, category: t.category, priority: t.priority,
+          due_date: t.due_date, completed_at: t.completed_at, url: t.url,
+        })));
+        const text = await callAI(model, `Analyze completed task history and suggest tasks the user likely needs to do again. Today is ${today}.
+
+Completed tasks (last 90 days): ${tasksJson}
+Already on their list: ${JSON.stringify([...existingTitles, ...currentTitles])}
+
+Return ONLY a JSON array (max 5, or [] if none). Each: {"title":"...","priority":"low|medium|high|urgent","horizon":"short|medium|long","category":"...or null","due_date":"YYYY-MM-DD or null","url":"from previous task or null","reason":"pattern explanation"}`, 1024);
+        const jsonMatch = text.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) return;
+        const suggestions = JSON.parse(jsonMatch[0]);
+        let count = 0;
+        for (const s of suggestions) {
+          if (existingTitles.includes(s.title.toLowerCase()) || currentTitles.includes(s.title.toLowerCase())) continue;
+          if (!VALID_PRIORITIES.includes(s.priority)) s.priority = "medium";
+          if (!VALID_HORIZONS.includes(s.horizon)) s.horizon = "short";
+          await pool.query(
+            `INSERT INTO task_suggestions (title, description, priority, horizon, category, due_date, url, reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+            [s.title, s.description || null, s.priority, s.horizon, s.category || null, s.due_date || null, s.url || null, s.reason || null]
+          );
+          count++;
+        }
+        if (count) console.log(`Generated ${count} task suggestions`);
+      } catch (err) { console.error("Task suggestion error:", err.message); }
+    });
+    console.log("Task suggestion generator started (weekly on Mondays at 8am)");
   }
 
   app.listen(PORT, "0.0.0.0", () => {
