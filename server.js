@@ -47,6 +47,15 @@ const AI_MODELS = {
   sonnet: "claude-sonnet-4-6-20250415",
 };
 
+// Validation constants
+const VALID_PRIORITIES = ["low", "medium", "high", "urgent"];
+const VALID_HORIZONS = ["short", "medium", "long"];
+const VALID_RECURRENCE_RULES = ["daily", "weekly", "monthly", "yearly", "weekdays"];
+const VALID_NOTE_COLORS = ["default", "warm", "teal", "green", "blue"];
+const VALID_EMAIL_STATUSES = ["draft", "scheduled", "sent", "failed"];
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const VALID_AI_FEATURES = ["email_draft", "task_breakdown", "quick_add", "review_summary", "email_tone", "daily_briefing", "note_tagging"];
+
 async function callAI(model, prompt, maxTokens = 1024) {
   if (!Anthropic || !process.env.ANTHROPIC_API_KEY) throw new Error("AI not configured");
   if (!AI_MODELS[model]) throw new Error("Invalid model: " + model);
@@ -60,6 +69,7 @@ async function callAI(model, prompt, maxTokens = 1024) {
 }
 
 async function getAIModelForFeature(feature) {
+  if (!VALID_AI_FEATURES.includes(feature)) return "off";
   try {
     const r = await pool.query(`SELECT ai_model_${feature} as model FROM user_settings WHERE id = 1`);
     return r.rows[0]?.model || "off";
@@ -78,8 +88,8 @@ let envContacts = {};
 try { envContacts = JSON.parse(process.env.CONTACTS || "{}"); } catch { envContacts = {}; }
 
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 
 // ---------------------------------------------------------------------------
 // Database
@@ -163,6 +173,13 @@ const generalLimiter = rateLimit({
   message: { error: "Too many requests, please try again later." },
 });
 app.use("/api/", generalLimiter);
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: "Too many login attempts, please try again later." },
+});
+app.use("/api/login", authLimiter);
 
 // ---------------------------------------------------------------------------
 // Shared CSS — companion to Perfin (indigo/lavender palette vs Perfin's warm/amber)
@@ -475,6 +492,13 @@ const SHARED_CSS = `
 `;
 
 // ---------------------------------------------------------------------------
+// Shared JS utilities (included in all pages via pageHead)
+// ---------------------------------------------------------------------------
+const SHARED_JS = `
+
+`;
+
+// ---------------------------------------------------------------------------
 // Shared HTML helpers
 // ---------------------------------------------------------------------------
 function pageHead(title) {
@@ -491,6 +515,7 @@ function pageHead(title) {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>${SHARED_CSS}</style>
+  <script>${SHARED_JS}</script>
 </head>`;
 }
 
@@ -605,7 +630,7 @@ app.post("/api/logout", (req, res) => {
 // ============================================================================
 app.get("/api/todos", async (req, res) => {
   try {
-    const { horizon, priority, completed, category } = req.query;
+    const { horizon, priority, completed, category, limit } = req.query;
     let where = [];
     let params = [];
     let idx = 1;
@@ -614,7 +639,9 @@ app.get("/api/todos", async (req, res) => {
     if (completed !== undefined) { where.push(`completed = $${idx++}`); params.push(completed === "true"); }
     if (category) { where.push(`category = $${idx++}`); params.push(category); }
     const clause = where.length ? "WHERE " + where.join(" AND ") : "";
-    const r = await pool.query(`SELECT * FROM todos ${clause} ORDER BY completed ASC, sort_order ASC, CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at DESC`, params);
+    const limitClause = limit ? ` LIMIT $${idx++}` : "";
+    if (limit) params.push(parseInt(limit, 10));
+    const r = await pool.query(`SELECT * FROM todos ${clause} ORDER BY completed ASC, sort_order ASC, CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at DESC${limitClause}`, params);
     res.json(r.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -625,6 +652,9 @@ app.post("/api/todos", async (req, res) => {
   try {
     const { title, description, priority, horizon, category, due_date, recurring, recurrence_rule } = req.body;
     if (!title) return res.status(400).json({ error: "Title is required." });
+    if (priority && !VALID_PRIORITIES.includes(priority)) return res.status(400).json({ error: "Invalid priority. Must be: " + VALID_PRIORITIES.join(", ") });
+    if (horizon && !VALID_HORIZONS.includes(horizon)) return res.status(400).json({ error: "Invalid horizon. Must be: " + VALID_HORIZONS.join(", ") });
+    if (recurrence_rule && !VALID_RECURRENCE_RULES.includes(recurrence_rule)) return res.status(400).json({ error: "Invalid recurrence rule. Must be: " + VALID_RECURRENCE_RULES.join(", ") });
     const r = await pool.query(
       `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
       [title, description || null, priority || "medium", horizon || "short", category || null, due_date || null, recurring || false, recurrence_rule || null]
@@ -638,6 +668,9 @@ app.post("/api/todos", async (req, res) => {
 app.patch("/api/todos/:id", async (req, res) => {
   try {
     const { title, description, priority, horizon, category, due_date, completed, sort_order, recurring, recurrence_rule } = req.body;
+    if (priority !== undefined && !VALID_PRIORITIES.includes(priority)) return res.status(400).json({ error: "Invalid priority. Must be: " + VALID_PRIORITIES.join(", ") });
+    if (horizon !== undefined && !VALID_HORIZONS.includes(horizon)) return res.status(400).json({ error: "Invalid horizon. Must be: " + VALID_HORIZONS.join(", ") });
+    if (recurrence_rule !== undefined && recurrence_rule !== null && !VALID_RECURRENCE_RULES.includes(recurrence_rule)) return res.status(400).json({ error: "Invalid recurrence rule. Must be: " + VALID_RECURRENCE_RULES.join(", ") });
     const fields = [];
     const params = [];
     let idx = 1;
@@ -695,6 +728,9 @@ app.post("/api/emails", async (req, res) => {
     if (!recipient_email || !subject || !body) {
       return res.status(400).json({ error: "Recipient email, subject, and body are required." });
     }
+    if (!EMAIL_REGEX.test(recipient_email)) {
+      return res.status(400).json({ error: "Invalid email address format." });
+    }
     const status = scheduled_at ? "scheduled" : "draft";
     const r = await pool.query(
       `INSERT INTO emails (recipient_name, recipient_email, subject, body, status, scheduled_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
@@ -746,9 +782,12 @@ app.post("/api/emails/:id/send", async (req, res) => {
     const r = await pool.query("SELECT * FROM emails WHERE id = $1", [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     const email = r.rows[0];
+    if (!EMAIL_REGEX.test(email.recipient_email)) {
+      return res.status(400).json({ error: "Invalid recipient email address." });
+    }
     const transporter = nodemailer.createTransport({
       host: smtpHost,
-      port: parseInt(process.env.SMTP_PORT || "587"),
+      port: parseInt(process.env.SMTP_PORT || "587", 10),
       secure: process.env.SMTP_PORT === "465",
       auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
     });
@@ -782,6 +821,8 @@ app.post("/api/notes", async (req, res) => {
   try {
     const { title, content, pinned, color, reminder_at, tags } = req.body;
     if (!content) return res.status(400).json({ error: "Content is required." });
+    if (color && !VALID_NOTE_COLORS.includes(color)) return res.status(400).json({ error: "Invalid color. Must be: " + VALID_NOTE_COLORS.join(", ") });
+    if (tags && !Array.isArray(tags)) return res.status(400).json({ error: "Tags must be an array." });
     const r = await pool.query(
       `INSERT INTO notes (title, content, pinned, color, reminder_at, tags) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
       [title || null, content, pinned || false, color || "default", reminder_at || null, tags || null]
@@ -795,6 +836,8 @@ app.post("/api/notes", async (req, res) => {
 app.patch("/api/notes/:id", async (req, res) => {
   try {
     const { title, content, pinned, color, reminder_at, tags } = req.body;
+    if (color !== undefined && !VALID_NOTE_COLORS.includes(color)) return res.status(400).json({ error: "Invalid color. Must be: " + VALID_NOTE_COLORS.join(", ") });
+    if (tags !== undefined && tags !== null && !Array.isArray(tags)) return res.status(400).json({ error: "Tags must be an array." });
     const fields = [];
     const params = [];
     let idx = 1;
@@ -1318,8 +1361,8 @@ app.get("/api/search", async (req, res) => {
 app.get("/api/calendar", async (req, res) => {
   try {
     const { month, year } = req.query;
-    const m = parseInt(month) || new Date().getMonth() + 1;
-    const y = parseInt(year) || new Date().getFullYear();
+    const m = parseInt(month, 10) || new Date().getMonth() + 1;
+    const y = parseInt(year, 10) || new Date().getFullYear();
     const startDate = `${y}-${String(m).padStart(2,"0")}-01`;
     const endDate = m === 12 ? `${y+1}-01-01` : `${y}-${String(m+1).padStart(2,"0")}-01`;
     const [todos, emails, notes] = await Promise.all([
@@ -1356,9 +1399,9 @@ app.get("/api/review", async (req, res) => {
     res.json({
       week_start: ws, week_end: we,
       tasks_completed: completed.rows,
-      tasks_created_count: parseInt(created.rows[0].cnt),
-      emails_sent_count: parseInt(sent.rows[0].cnt),
-      notes_created_count: parseInt(notesCreated.rows[0].cnt),
+      tasks_created_count: parseInt(created.rows[0].cnt, 10),
+      emails_sent_count: parseInt(sent.rows[0].cnt, 10),
+      notes_created_count: parseInt(notesCreated.rows[0].cnt, 10),
       upcoming_tasks: upcoming.rows,
       overdue_tasks: overdue.rows,
     });
@@ -1552,7 +1595,7 @@ async function load() {
     {label:'Notes',value:stats.notes.total,cls:'warm'},
   ].map(c => '<div class="card"><div class="label">'+c.label+'</div><div class="value '+c.cls+'">'+c.value+'</div></div>').join('');
 
-  allTodos = await fetch('/api/todos?completed=false').then(r=>r.json());
+  allTodos = await fetch('/api/todos?completed=false&limit=50').then(r=>r.json());
   renderDashTasks();
 
   const upcoming = allTodos.filter(t=>t.due_date).sort((a,b)=>new Date(a.due_date)-new Date(b.due_date)).slice(0,5);
@@ -1605,7 +1648,7 @@ document.addEventListener('keydown', function(e) {
   else if (e.key === 'r' || e.key === 'R') { location.href = '/review'; }
 });
 
-function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+
 load();
 </script>
 </body></html>`);
@@ -2085,7 +2128,7 @@ document.addEventListener('keydown', function(e) {
   else if (e.key === 'q' || e.key === 'Q') { e.preventDefault(); openQuickTodo(); }
 });
 
-function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+
 load();
 </script>
 </body></html>`);
@@ -2450,7 +2493,7 @@ async function confirmQuick() {
   closeQuick(); load();
 }
 
-function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+
 load();
 </script>
 </body></html>`);
@@ -2616,7 +2659,7 @@ async function deleteNote() {
   closeNote(); load();
 }
 
-function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+
 load();
 </script>
 </body></html>`);
@@ -2717,7 +2760,7 @@ async function deleteDirect(id) {
   load();
 }
 
-function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+
 load();
 </script>
 </body></html>`);
@@ -2795,7 +2838,7 @@ async function load() {
   }
   document.getElementById('cal-days').innerHTML = html;
 }
-function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+
 load();
 </script>
 </body></html>`);
@@ -2880,7 +2923,7 @@ async function load() {
     }
   }).catch(function(){});
 }
-function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+
 load();
 </script>
 </body></html>`);
@@ -3160,7 +3203,7 @@ async function processScheduledEmails() {
       try {
         const transporter = nodemailer.createTransport({
           host: process.env.SMTP_HOST,
-          port: parseInt(process.env.SMTP_PORT || "587"),
+          port: parseInt(process.env.SMTP_PORT || "587", 10),
           secure: process.env.SMTP_PORT === "465",
           auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
         });
@@ -3185,7 +3228,7 @@ async function processScheduledEmails() {
 // ============================================================================
 // Start server
 // ============================================================================
-const PORT = parseInt(process.env.PORT || "3001");
+const PORT = parseInt(process.env.PORT || "3001", 10);
 
 async function start() {
   if (process.env.NEON_DATABASE_URL) {
@@ -3215,7 +3258,8 @@ async function start() {
           else if (rule === "weekly") nextDue.setDate(nextDue.getDate() + 7);
           else if (rule === "monthly") nextDue.setMonth(nextDue.getMonth() + 1);
           else if (rule === "yearly") nextDue.setFullYear(nextDue.getFullYear() + 1);
-          while (nextDue <= new Date()) {
+          let catchupLimit = 365;
+          while (nextDue <= new Date() && catchupLimit-- > 0) {
             if (rule === "daily") nextDue.setDate(nextDue.getDate() + 1);
             else if (rule === "weekly") nextDue.setDate(nextDue.getDate() + 7);
             else if (rule === "monthly") nextDue.setMonth(nextDue.getMonth() + 1);

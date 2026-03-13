@@ -9,7 +9,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **Database**: Neon PostgreSQL (schema in `db/`)
 - **Email**: nodemailer (SMTP) with scheduled sending via node-cron
 - **AI**: Anthropic Claude API — 7 AI features with per-feature model selection (Haiku/Sonnet/Off)
-- **Tests**: `tests/` (node:test runner, run with `npm test`, 73 tests)
+- **Tests**: `tests/` (node:test runner, run with `npm test`, 79 tests)
 - **Deployment**: `Dockerfile`, `fly.toml` (Fly.io), `render.yaml` (Render)
 
 ## Current State (as of March 2026)
@@ -51,7 +51,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - `db/001_schema.sql` — database schema (todos, emails, notes, contacts, settings)
 - `db/002_features.sql` — enhancement migration (recurring, subtasks, templates, reviews)
 - `db/003_ai_features.sql` — AI model preferences & note tags migration
-- `tests/api.test.js` — test suite (73 tests, 22 suites)
+- `tests/api.test.js` — test suite (79 tests, 22 suites)
 - `Dockerfile` / `docker-compose.yml` — container deployment
 - `fly.toml` — Fly.io config
 - `render.yaml` — Render blueprint
@@ -61,7 +61,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 # Install & run locally
 npm install && node server.js
 
-# Run tests (73 tests)
+# Run tests (79 tests)
 npm test
 
 # Pages

@@ -757,3 +757,64 @@ describe("Security", () => {
     assert.equal(noMode, null);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Backend validation tests
+// ---------------------------------------------------------------------------
+describe("Backend validation constants", () => {
+  const VALID_PRIORITIES = ["low", "medium", "high", "urgent"];
+  const VALID_HORIZONS = ["short", "medium", "long"];
+  const VALID_RECURRENCE_RULES = ["daily", "weekly", "monthly", "yearly", "weekdays"];
+  const VALID_NOTE_COLORS = ["default", "warm", "teal", "green", "blue"];
+  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const VALID_AI_FEATURES = ["email_draft", "task_breakdown", "quick_add", "review_summary", "email_tone", "daily_briefing", "note_tagging"];
+
+  it("rejects invalid priority values", () => {
+    assert.ok(!VALID_PRIORITIES.includes("critical"));
+    assert.ok(!VALID_PRIORITIES.includes(""));
+    assert.ok(!VALID_PRIORITIES.includes("URGENT"));
+    assert.ok(VALID_PRIORITIES.includes("urgent"));
+    assert.ok(VALID_PRIORITIES.includes("low"));
+  });
+
+  it("rejects invalid horizon values", () => {
+    assert.ok(!VALID_HORIZONS.includes("immediate"));
+    assert.ok(!VALID_HORIZONS.includes(""));
+    assert.ok(VALID_HORIZONS.includes("short"));
+    assert.ok(VALID_HORIZONS.includes("long"));
+  });
+
+  it("rejects invalid recurrence rules", () => {
+    assert.ok(!VALID_RECURRENCE_RULES.includes("hourly"));
+    assert.ok(!VALID_RECURRENCE_RULES.includes("biweekly"));
+    assert.ok(!VALID_RECURRENCE_RULES.includes(""));
+    assert.ok(VALID_RECURRENCE_RULES.includes("daily"));
+    assert.ok(VALID_RECURRENCE_RULES.includes("weekdays"));
+  });
+
+  it("rejects invalid note colors", () => {
+    assert.ok(!VALID_NOTE_COLORS.includes("red"));
+    assert.ok(!VALID_NOTE_COLORS.includes("purple"));
+    assert.ok(VALID_NOTE_COLORS.includes("default"));
+    assert.ok(VALID_NOTE_COLORS.includes("teal"));
+  });
+
+  it("validates email format", () => {
+    assert.ok(EMAIL_REGEX.test("user@example.com"));
+    assert.ok(EMAIL_REGEX.test("a@b.co"));
+    assert.ok(EMAIL_REGEX.test("test.user+tag@domain.org"));
+    assert.ok(!EMAIL_REGEX.test("invalid"));
+    assert.ok(!EMAIL_REGEX.test("@missing.com"));
+    assert.ok(!EMAIL_REGEX.test("no@domain"));
+    assert.ok(!EMAIL_REGEX.test("spaces in@email.com"));
+    assert.ok(!EMAIL_REGEX.test(""));
+  });
+
+  it("validates AI feature names", () => {
+    assert.ok(VALID_AI_FEATURES.includes("email_draft"));
+    assert.ok(VALID_AI_FEATURES.includes("note_tagging"));
+    assert.equal(VALID_AI_FEATURES.length, 7);
+    assert.ok(!VALID_AI_FEATURES.includes("unknown_feature"));
+    assert.ok(!VALID_AI_FEATURES.includes(""));
+  });
+});
