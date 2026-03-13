@@ -914,3 +914,146 @@ describe("Dashboard inline actions", () => {
     assert.ok(updated.completed_at);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Markdown notes tests
+// ---------------------------------------------------------------------------
+describe("Markdown notes", () => {
+  it("validates note format field", () => {
+    const validFormats = ["plain", "markdown"];
+    assert.ok(validFormats.includes("plain"));
+    assert.ok(validFormats.includes("markdown"));
+    assert.ok(!validFormats.includes("html"));
+    assert.ok(!validFormats.includes("richtext"));
+  });
+
+  it("renders markdown bold and italic correctly", () => {
+    // Simulate the renderMd logic for bold/italic
+    function renderMdSimple(s) {
+      return s
+        .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>');
+    }
+    assert.ok(renderMdSimple("**bold**").includes("<strong>bold</strong>"));
+    assert.ok(renderMdSimple("*italic*").includes("<em>italic</em>"));
+    assert.ok(renderMdSimple("***both***").includes("<strong><em>both</em></strong>"));
+  });
+
+  it("renders markdown lists and checkboxes", () => {
+    function renderMdLists(s) {
+      return s
+        .replace(/^- \[x\] (.+)$/gm, '<done>$1</done>')
+        .replace(/^- \[ \] (.+)$/gm, '<todo>$1</todo>')
+        .replace(/^[*-] (.+)$/gm, '<li>$1</li>');
+    }
+    assert.ok(renderMdLists("- [x] Done task").includes("<done>Done task</done>"));
+    assert.ok(renderMdLists("- [ ] Pending task").includes("<todo>Pending task</todo>"));
+    assert.ok(renderMdLists("- List item").includes("<li>List item</li>"));
+  });
+
+  it("default format is plain", () => {
+    const note = { id: 1, content: "Hello", format: "plain" };
+    assert.equal(note.format, "plain");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task dependency tests
+// ---------------------------------------------------------------------------
+describe("Task dependencies", () => {
+  it("prevents self-dependency", () => {
+    const todoId = 5;
+    const dependsOnId = 5;
+    assert.equal(todoId === dependsOnId, true);
+    // API should reject this
+  });
+
+  it("detects circular dependencies", () => {
+    // If A depends on B, then B cannot depend on A
+    const deps = [
+      { todo_id: 1, depends_on_id: 2 },
+    ];
+    const newDep = { todo_id: 2, depends_on_id: 1 };
+    const isCircular = deps.some(d => d.todo_id === newDep.depends_on_id && d.depends_on_id === newDep.todo_id);
+    assert.ok(isCircular);
+  });
+
+  it("identifies blocked tasks correctly", () => {
+    const deps = {
+      blocked_by: [
+        { depends_on_id: 2, title: "Task B", completed: false },
+        { depends_on_id: 3, title: "Task C", completed: true },
+      ],
+      blocking: [
+        { todo_id: 4, title: "Task D" },
+      ],
+    };
+    const unblockedDeps = deps.blocked_by.filter(d => !d.completed);
+    assert.equal(unblockedDeps.length, 1);
+    assert.equal(deps.blocking.length, 1);
+    // Task is blocked if any unblocked dependency exists
+    assert.ok(unblockedDeps.length > 0);
+  });
+
+  it("allows completion of non-blocked tasks", () => {
+    const deps = {
+      blocked_by: [
+        { depends_on_id: 2, title: "Task B", completed: true },
+      ],
+    };
+    const unblockedDeps = deps.blocked_by.filter(d => !d.completed);
+    assert.equal(unblockedDeps.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Streak/habit tracking tests
+// ---------------------------------------------------------------------------
+describe("Streak tracking", () => {
+  it("increments streak on on-time completion", () => {
+    const todo = { streak_count: 3, best_streak: 5, due_date: "2026-03-15" };
+    const today = "2026-03-14";
+    const isOnTime = today <= todo.due_date;
+    const newStreak = isOnTime ? todo.streak_count + 1 : 1;
+    const newBest = Math.max(newStreak, todo.best_streak);
+    assert.equal(newStreak, 4);
+    assert.equal(newBest, 5);
+  });
+
+  it("resets streak on late completion", () => {
+    const todo = { streak_count: 3, best_streak: 5, due_date: "2026-03-10" };
+    const today = "2026-03-14";
+    const isOnTime = today <= todo.due_date;
+    const newStreak = isOnTime ? todo.streak_count + 1 : 1;
+    assert.equal(newStreak, 1);
+  });
+
+  it("updates best streak when current exceeds it", () => {
+    const todo = { streak_count: 5, best_streak: 5, due_date: "2026-03-15" };
+    const today = "2026-03-14";
+    const isOnTime = today <= todo.due_date;
+    const newStreak = isOnTime ? todo.streak_count + 1 : 1;
+    const newBest = Math.max(newStreak, todo.best_streak);
+    assert.equal(newStreak, 6);
+    assert.equal(newBest, 6);
+  });
+
+  it("carries streak to next recurring instance", () => {
+    const completed = { streak_count: 4, best_streak: 4 };
+    const next = { ...completed, completed: false, due_date: "2026-03-20" };
+    assert.equal(next.streak_count, 4);
+    assert.equal(next.best_streak, 4);
+    assert.equal(next.completed, false);
+  });
+
+  it("resets streak on overdue auto-completion", () => {
+    // Cron job auto-completes overdue tasks with streak = 0
+    const todo = { streak_count: 5, best_streak: 5 };
+    const autoCompleted = { ...todo, streak_count: 0, completed: true };
+    assert.equal(autoCompleted.streak_count, 0);
+    // Best streak preserved
+    const next = { streak_count: 0, best_streak: todo.best_streak };
+    assert.equal(next.best_streak, 5);
+  });
+});

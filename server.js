@@ -375,6 +375,9 @@ const SHARED_CSS = `
     .note-card .note-preview { font-size: 12px; color: var(--text-muted); font-weight: 300;
                                line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 4;
                                -webkit-box-orient: vertical; overflow: hidden; }
+    .note-card .note-preview.md { display: block; max-height: 80px; }
+    .note-card .note-preview.md h2, .note-card .note-preview.md h3, .note-card .note-preview.md h4 { margin: 2px 0; }
+    .md-badge { display: inline-block; font-size: 9px; padding: 1px 6px; border-radius: 8px; background: var(--surface-2); color: var(--teal); border: 1px solid var(--teal); margin-left: 6px; vertical-align: middle; }
     .note-card .note-date { font-size: 10px; color: var(--text-muted); margin-top: 12px;
                             text-transform: uppercase; letter-spacing: 0.5px; }
 
@@ -453,6 +456,10 @@ const SHARED_CSS = `
 
     /* Recurring badge */
     .badge.recurring { background: rgba(212,165,116,0.1); color: var(--warm); }
+    .badge.streak { background: rgba(76,175,80,0.1); color: var(--green); }
+    .badge.blocked { background: rgba(239,83,80,0.1); color: var(--red); }
+    .badge.blocking { background: rgba(255,193,7,0.1); color: var(--yellow); }
+    .todo-blocked { opacity: 0.65; }
 
     @media (max-width: 768px) {
       .topnav { flex-direction: column; gap: 12px; align-items: flex-start; }
@@ -496,6 +503,27 @@ const SHARED_CSS = `
 // ---------------------------------------------------------------------------
 const SHARED_JS = `
 function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+function renderMd(s){
+  if(!s)return'';
+  return s
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/^### (.+)$/gm,'<h4 style="margin:8px 0 4px;font-size:13px;font-weight:600;">$1</h4>')
+    .replace(/^## (.+)$/gm,'<h3 style="margin:8px 0 4px;font-size:14px;font-weight:600;">$1</h3>')
+    .replace(/^# (.+)$/gm,'<h2 style="margin:8px 0 4px;font-size:15px;font-weight:600;">$1</h2>')
+    .replace(/\\*\\*\\*(.+?)\\*\\*\\*/g,'<strong><em>$1</em></strong>')
+    .replace(/\\*\\*(.+?)\\*\\*/g,'<strong>$1</strong>')
+    .replace(/\\*(.+?)\\*/g,'<em>$1</em>')
+    .replace(/~~(.+?)~~/g,'<del>$1</del>')
+    .replace(/\`([^\`]+)\`/g,'<code style="background:var(--surface-2);padding:1px 5px;border-radius:3px;font-size:11px;">$1</code>')
+    .replace(/^- \\[x\\] (.+)$/gm,'<div style="margin:2px 0;"><span style="color:var(--green);margin-right:4px;">&#9745;</span><s style="opacity:0.5;">$1</s></div>')
+    .replace(/^- \\[ \\] (.+)$/gm,'<div style="margin:2px 0;"><span style="color:var(--text-muted);margin-right:4px;">&#9744;</span>$1</div>')
+    .replace(/^[*-] (.+)$/gm,'<div style="margin:2px 0;padding-left:12px;">&bull; $1</div>')
+    .replace(/^\\d+\\. (.+)$/gm,'<div style="margin:2px 0;padding-left:12px;">$1</div>')
+    .replace(/^> (.+)$/gm,'<blockquote style="border-left:2px solid var(--warm);padding-left:10px;margin:4px 0;color:var(--text-muted);font-style:italic;">$1</blockquote>')
+    .replace(/^---$/gm,'<hr style="border:none;border-top:1px solid var(--border);margin:8px 0;">')
+    .replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g,'<a href="$2" target="_blank" style="color:var(--teal);text-decoration:underline;">$1</a>')
+    .replace(/\\n/g,'<br>');
+}
 var _undoTimer=null;
 function showUndo(msg,type,id){
   clearTimeout(_undoTimer);
@@ -839,13 +867,14 @@ app.get("/api/notes", async (req, res) => {
 
 app.post("/api/notes", async (req, res) => {
   try {
-    const { title, content, pinned, color, reminder_at, tags } = req.body;
+    const { title, content, pinned, color, reminder_at, tags, format } = req.body;
     if (!content) return res.status(400).json({ error: "Content is required." });
     if (color && !VALID_NOTE_COLORS.includes(color)) return res.status(400).json({ error: "Invalid color. Must be: " + VALID_NOTE_COLORS.join(", ") });
     if (tags && !Array.isArray(tags)) return res.status(400).json({ error: "Tags must be an array." });
+    if (format && !["plain", "markdown"].includes(format)) return res.status(400).json({ error: "Invalid format. Must be: plain, markdown" });
     const r = await pool.query(
-      `INSERT INTO notes (title, content, pinned, color, reminder_at, tags) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [title || null, content, pinned || false, color || "default", reminder_at || null, tags || null]
+      `INSERT INTO notes (title, content, pinned, color, reminder_at, tags, format) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [title || null, content, pinned || false, color || "default", reminder_at || null, tags || null, format || "plain"]
     );
     res.json(r.rows[0]);
   } catch (err) {
@@ -855,9 +884,10 @@ app.post("/api/notes", async (req, res) => {
 
 app.patch("/api/notes/:id", async (req, res) => {
   try {
-    const { title, content, pinned, color, reminder_at, tags } = req.body;
+    const { title, content, pinned, color, reminder_at, tags, format } = req.body;
     if (color !== undefined && !VALID_NOTE_COLORS.includes(color)) return res.status(400).json({ error: "Invalid color. Must be: " + VALID_NOTE_COLORS.join(", ") });
     if (tags !== undefined && tags !== null && !Array.isArray(tags)) return res.status(400).json({ error: "Tags must be an array." });
+    if (format !== undefined && !["plain", "markdown"].includes(format)) return res.status(400).json({ error: "Invalid format. Must be: plain, markdown" });
     const fields = [];
     const params = [];
     let idx = 1;
@@ -867,6 +897,7 @@ app.patch("/api/notes/:id", async (req, res) => {
     if (color !== undefined) { fields.push(`color = $${idx++}`); params.push(color); }
     if (reminder_at !== undefined) { fields.push(`reminder_at = $${idx++}`); params.push(reminder_at); }
     if (tags !== undefined) { fields.push(`tags = $${idx++}`); params.push(tags); }
+    if (format !== undefined) { fields.push(`format = $${idx++}`); params.push(format); }
     if (!fields.length) return res.status(400).json({ error: "No fields to update." });
     params.push(req.params.id);
     const r = await pool.query(`UPDATE notes SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, params);
@@ -1118,8 +1149,14 @@ app.post("/api/todos/:id/complete-recurring", async (req, res) => {
     if (!todo.recurring || !todo.recurrence_rule) {
       return res.status(400).json({ error: "Not a recurring task." });
     }
-    // Mark current as completed
-    await pool.query("UPDATE todos SET completed = true, completed_at = now() WHERE id = $1", [todo.id]);
+    // Calculate streak: check if completed on time (before or on due date)
+    const today = new Date().toISOString().split("T")[0];
+    const isOnTime = !todo.due_date || today <= todo.due_date.toISOString().split("T")[0];
+    let newStreak = isOnTime ? (todo.streak_count || 0) + 1 : 1;
+    let newBest = Math.max(newStreak, todo.best_streak || 0);
+    // Mark current as completed with streak info
+    await pool.query("UPDATE todos SET completed = true, completed_at = now(), streak_count = $2, best_streak = $3, last_streak_date = $4 WHERE id = $1",
+      [todo.id, newStreak, newBest, today]);
     // Calculate next due date
     const rule = todo.recurrence_rule;
     let nextDue = todo.due_date ? new Date(todo.due_date) : new Date();
@@ -1129,14 +1166,76 @@ app.post("/api/todos/:id/complete-recurring", async (req, res) => {
     } else if (rule === "weekly") nextDue.setDate(nextDue.getDate() + 7);
     else if (rule === "monthly") nextDue.setMonth(nextDue.getMonth() + 1);
     else if (rule === "yearly") nextDue.setFullYear(nextDue.getFullYear() + 1);
-    // Create next instance
+    // Create next instance with streak carried forward
     const n = await pool.query(
-      `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_parent_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_parent_id, streak_count, best_streak, last_streak_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
       [todo.title, todo.description, todo.priority, todo.horizon, todo.category,
-       nextDue.toISOString().split("T")[0], true, rule, todo.recurrence_parent_id || todo.id]
+       nextDue.toISOString().split("T")[0], true, rule, todo.recurrence_parent_id || todo.id,
+       newStreak, newBest, today]
     );
-    res.json({ completed: todo, next: n.rows[0] });
+    res.json({ completed: todo, next: n.rows[0], streak: newStreak, best_streak: newBest });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Streak/Habit Stats
+// ============================================================================
+app.get("/api/streaks", async (req, res) => {
+  try {
+    // Get active recurring tasks with their current streaks
+    const active = await pool.query(
+      "SELECT id, title, recurrence_rule, streak_count, best_streak, last_streak_date, due_date FROM todos WHERE deleted_at IS NULL AND recurring = true AND completed = false ORDER BY streak_count DESC"
+    );
+    // Get top streaks across all recurring tasks (including completed ones)
+    const top = await pool.query(
+      "SELECT DISTINCT ON (COALESCE(recurrence_parent_id, id)) COALESCE(recurrence_parent_id, id) as chain_id, title, best_streak, streak_count, recurrence_rule FROM todos WHERE recurring = true AND best_streak > 0 ORDER BY COALESCE(recurrence_parent_id, id), best_streak DESC"
+    );
+    res.json({ active: active.rows, top_streaks: top.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Task Dependencies
+// ============================================================================
+app.get("/api/todos/:id/dependencies", async (req, res) => {
+  try {
+    const [blockedBy, blocking] = await Promise.all([
+      pool.query(`SELECT td.id as dep_id, td.depends_on_id, t.title, t.completed FROM task_dependencies td JOIN todos t ON t.id = td.depends_on_id WHERE td.todo_id = $1`, [req.params.id]),
+      pool.query(`SELECT td.id as dep_id, td.todo_id, t.title, t.completed FROM task_dependencies td JOIN todos t ON t.id = td.todo_id WHERE td.depends_on_id = $1`, [req.params.id]),
+    ]);
+    res.json({ blocked_by: blockedBy.rows, blocking: blocking.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/todos/:id/dependencies", async (req, res) => {
+  try {
+    const { depends_on_id } = req.body;
+    if (!depends_on_id) return res.status(400).json({ error: "depends_on_id is required." });
+    if (parseInt(depends_on_id) === parseInt(req.params.id)) return res.status(400).json({ error: "A task cannot depend on itself." });
+    // Check both tasks exist
+    const [task, dep] = await Promise.all([
+      pool.query("SELECT id FROM todos WHERE id = $1 AND deleted_at IS NULL", [req.params.id]),
+      pool.query("SELECT id FROM todos WHERE id = $1 AND deleted_at IS NULL", [depends_on_id]),
+    ]);
+    if (!task.rows.length || !dep.rows.length) return res.status(404).json({ error: "Task not found." });
+    // Check for circular dependency
+    const chain = await pool.query("SELECT * FROM task_dependencies WHERE todo_id = $1 AND depends_on_id = $2", [depends_on_id, req.params.id]);
+    if (chain.rows.length) return res.status(400).json({ error: "Circular dependency: that task already depends on this one." });
+    const r = await pool.query(
+      "INSERT INTO task_dependencies (todo_id, depends_on_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING *",
+      [req.params.id, depends_on_id]
+    );
+    if (!r.rows.length) return res.status(409).json({ error: "Dependency already exists." });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/dependencies/:id", async (req, res) => {
+  try {
+    const r = await pool.query("DELETE FROM task_dependencies WHERE id = $1 RETURNING id", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1698,7 +1797,8 @@ function renderDashTodo(t) {
   var completeBtn = t.recurring
     ? '<button onclick="event.stopPropagation();dashCompleteRecurring('+t.id+')" title="Complete & create next" style="background:none;border:1px solid var(--green);color:var(--green);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">&#10003;</button>'
     : '<button onclick="event.stopPropagation();dashComplete('+t.id+')" title="Mark complete" style="background:none;border:1px solid var(--green);color:var(--green);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">&#10003;</button>';
-  return '<div class="todo-item" style="display:flex;align-items:center;gap:10px;">'+completeBtn+'<div class="todo-content" style="flex:1;"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span>'+(t.category?'<span>'+esc(t.category)+'</span>':'')+(t.due_date?'<span'+overdue+'>Due: '+new Date(t.due_date).toLocaleDateString()+'</span>':'')+(t.recurring?'<span class="badge recurring">recurring</span>':'')+'</div></div></div>';
+  var streakBadge = t.recurring && t.streak_count > 0 ? '<span class="badge streak">&#x1F525; '+t.streak_count+'</span>' : '';
+  return '<div class="todo-item" style="display:flex;align-items:center;gap:10px;">'+completeBtn+'<div class="todo-content" style="flex:1;"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span>'+(t.category?'<span>'+esc(t.category)+'</span>':'')+(t.due_date?'<span'+overdue+'>Due: '+new Date(t.due_date).toLocaleDateString()+'</span>':'')+(t.recurring?'<span class="badge recurring">recurring</span>':'')+streakBadge+'</div></div></div>';
 }
 
 async function dashComplete(id) {
@@ -1894,6 +1994,15 @@ ${themeScript()}
         <button onclick="addSubtask()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
       </div>
     </div>
+    <!-- Dependencies section (edit mode only) -->
+    <div id="deps-section" style="display:none;margin-top:16px;">
+      <label>Dependencies</label>
+      <div id="deps-list" style="margin-bottom:8px;"></div>
+      <div style="display:flex;gap:8px;">
+        <select id="dep-select" style="flex:1"><option value="">Select a task this depends on...</option></select>
+        <button onclick="addDep()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
+      </div>
+    </div>
     <div class="modal-actions">
       <button onclick="closeModal()">Cancel</button>
       <button class="primary" onclick="saveTodo()">Save</button>
@@ -1985,10 +2094,11 @@ async function load() {
   var todos = await fetch('/api/todos'+(q.length?'?'+q.join('&'):'')).then(r=>r.json());
   if (!todos.length) { document.getElementById('todo-list').innerHTML = '<div class="empty-msg">No tasks found</div>'; return; }
 
-  // Fetch subtasks for all todos
-  var subtaskMap = {};
+  // Fetch subtasks and dependencies for all todos
+  var subtaskMap = {}, depMap = {};
   await Promise.all(todos.map(async t => {
     try { subtaskMap[t.id] = await fetch('/api/todos/'+t.id+'/subtasks').then(r=>r.json()); } catch { subtaskMap[t.id] = []; }
+    try { depMap[t.id] = await fetch('/api/todos/'+t.id+'/dependencies').then(r=>r.json()); } catch { depMap[t.id] = {blocked_by:[],blocking:[]}; }
   }));
 
   document.getElementById('todo-list').innerHTML = todos.map((t, idx) => {
@@ -2003,7 +2113,14 @@ async function load() {
         '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" onclick="event.stopPropagation();toggleSubtask('+s.id+','+!s.completed+')"></div><span class="subtask-text'+(s.completed?' done':'')+'" ondblclick="event.stopPropagation();inlineEditSubtask(this,'+s.id+')">'+esc(s.title)+'</span><button class="subtask-edit-btn" onclick="event.stopPropagation();inlineEditSubtask(this.previousElementSibling,'+s.id+')">&#9998;</button></div>'
       ).join('')+'</div>';
     }
-    return '<div class="todo-item" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><input type="checkbox" class="bulk-check" data-id="'+t.id+'" style="display:'+(selectMode?'inline-block':'none')+';accent-color:var(--warm);margin-right:4px;cursor:pointer;" onchange="toggleBulkItem('+t.id+',this.checked)"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" onclick="toggleTodo('+t.id+','+!t.completed+','+!!t.recurring+')"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+(t.recurring?'<span class="badge recurring">'+t.recurrence_rule+'</span>':'')+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions"><button onclick="openEdit('+t.id+')">&#9998;</button></div></div>';
+    var deps = depMap[t.id] || {blocked_by:[],blocking:[]};
+    var unblockedBy = deps.blocked_by.filter(d=>!d.completed);
+    var isBlocked = unblockedBy.length > 0;
+    var depBadges = '';
+    if (isBlocked) depBadges += '<span class="badge blocked" title="Blocked by: '+unblockedBy.map(d=>esc(d.title)).join(', ')+'">blocked ('+unblockedBy.length+')</span>';
+    if (deps.blocking.length) depBadges += '<span class="badge blocking" title="Blocking: '+deps.blocking.map(d=>esc(d.title)).join(', ')+'">blocking ('+deps.blocking.length+')</span>';
+    if (t.streak_count > 0) depBadges += '<span class="badge streak" title="Best: '+t.best_streak+'">&#x1F525; '+t.streak_count+' streak</span>';
+    return '<div class="todo-item'+(isBlocked?' todo-blocked':'')+'" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><input type="checkbox" class="bulk-check" data-id="'+t.id+'" style="display:'+(selectMode?'inline-block':'none')+';accent-color:var(--warm);margin-right:4px;cursor:pointer;" onchange="toggleBulkItem('+t.id+',this.checked)"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" onclick="toggleTodo('+t.id+','+!t.completed+','+!!t.recurring+')"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+(t.recurring?'<span class="badge recurring">'+t.recurrence_rule+'</span>':'')+depBadges+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions"><button onclick="openEdit('+t.id+')">&#9998;</button></div></div>';
   }).join('');
 }
 
@@ -2120,6 +2237,7 @@ function openAdd() {
   document.getElementById('f-recurrence-rule').value = 'weekly';
   document.getElementById('delete-btn').style.display = 'none';
   document.getElementById('subtasks-section').style.display = 'block';
+  document.getElementById('deps-section').style.display = 'none';
   editSubtasks = [];
   renderEditSubtasks();
   document.getElementById('modal').classList.add('active');
@@ -2152,7 +2270,9 @@ async function openEdit(id) {
   document.getElementById('f-recurrence-rule').value = t.recurrence_rule || 'weekly';
   document.getElementById('delete-btn').style.display = 'inline-block';
   document.getElementById('subtasks-section').style.display = 'block';
+  document.getElementById('deps-section').style.display = 'block';
   loadEditSubtasks(id);
+  loadDeps(id);
   document.getElementById('modal').classList.add('active');
 }
 
@@ -2201,6 +2321,46 @@ async function deleteTodo() {
   await fetch('/api/todos/'+id, {method:'DELETE'});
   closeModal(); load();
   showUndo('Task moved to trash','todo',id);
+}
+
+// Dependencies
+async function loadDeps(todoId) {
+  var deps = await fetch('/api/todos/'+todoId+'/dependencies').then(r=>r.json());
+  var html = '';
+  if (deps.blocked_by.length) {
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Blocked by:</div>';
+    deps.blocked_by.forEach(d => {
+      html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:12px;"><span class="badge blocked">blocked by</span><span'+(d.completed?' style="text-decoration:line-through;opacity:0.5"':'')+'>'+esc(d.title)+'</span><button onclick="removeDep('+d.dep_id+','+todoId+')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:4px;">&times;</button></div>';
+    });
+  }
+  if (deps.blocking.length) {
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;margin-top:6px;">Blocking:</div>';
+    deps.blocking.forEach(d => {
+      html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:12px;"><span class="badge blocking">blocking</span><span>'+esc(d.title)+'</span></div>';
+    });
+  }
+  if (!deps.blocked_by.length && !deps.blocking.length) html = '<div style="font-size:11px;color:var(--text-muted);">No dependencies</div>';
+  document.getElementById('deps-list').innerHTML = html;
+  // Populate select with other todos
+  var todos = await fetch('/api/todos?completed=false').then(r=>r.json());
+  var existing = new Set(deps.blocked_by.map(d=>d.depends_on_id));
+  var sel = document.getElementById('dep-select');
+  sel.innerHTML = '<option value="">Select a task this depends on...</option>';
+  todos.filter(t => t.id !== parseInt(todoId) && !existing.has(t.id)).forEach(t => {
+    sel.innerHTML += '<option value="'+t.id+'">'+esc(t.title)+'</option>';
+  });
+}
+async function addDep() {
+  var todoId = document.getElementById('edit-id').value;
+  var depId = document.getElementById('dep-select').value;
+  if (!depId || !todoId) return;
+  var r = await fetch('/api/todos/'+todoId+'/dependencies', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({depends_on_id:parseInt(depId)})}).then(r=>r.json());
+  if (r.error) { alert(r.error); return; }
+  loadDeps(todoId);
+}
+async function removeDep(depId, todoId) {
+  await fetch('/api/dependencies/'+depId, {method:'DELETE'});
+  loadDeps(todoId);
 }
 
 // Quick Add (natural language)
@@ -2726,8 +2886,15 @@ ${themeScript()}
     <input type="hidden" id="n-id">
     <label>Title</label>
     <input type="text" id="n-title" placeholder="Optional title">
-    <label>Content</label>
-    <textarea id="n-content" style="min-height:200px" placeholder="Write your note..."></textarea>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
+      <label style="margin:0;">Content</label>
+      <label style="display:inline;cursor:pointer;font-size:11px;margin:0;">
+        <input type="checkbox" id="n-markdown" style="width:auto;margin-right:4px;" onchange="toggleMdPreview()"> Markdown
+      </label>
+      <button id="n-preview-btn" onclick="toggleMdPreview()" style="display:none;padding:2px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;">Preview</button>
+    </div>
+    <textarea id="n-content" style="min-height:200px" placeholder="Write your note... (supports **bold**, *italic*, - lists, > quotes, [links](url))"></textarea>
+    <div id="n-md-preview" style="display:none;min-height:100px;max-height:300px;overflow-y:auto;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);font-size:13px;line-height:1.6;margin-bottom:12px;"></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div><label>Color</label>
         <select id="n-color"><option value="default">Default</option><option value="warm">Warm</option><option value="teal">Teal</option><option value="green">Green</option><option value="blue">Blue</option></select>
@@ -2813,13 +2980,33 @@ async function load() {
     return '<div class="note-card'+(n.pinned?' pinned':'')+'" style="position:relative;'+borderStyle+'" onclick="openEditNote('+n.id+')">'+
       '<input type="checkbox" class="note-bulk-check" data-id="'+n.id+'" style="display:'+(noteSelectMode?'block':'none')+';position:absolute;top:10px;right:10px;accent-color:var(--warm);cursor:pointer;z-index:2;" onclick="event.stopPropagation()" onchange="toggleNoteBulkItem('+n.id+',this.checked,event)">'+
       (n.pinned?'<div style="font-size:10px;color:var(--warm);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">&#128204; Pinned</div>':'')+
-      (n.title?'<div class="note-title">'+esc(n.title)+'</div>':'')+
-      '<div class="note-preview">'+esc(n.content)+'</div>'+
+      (n.title?'<div class="note-title">'+esc(n.title)+(n.format==='markdown'?'<span class="md-badge">MD</span>':'')+'</div>':(!n.title && n.format==='markdown'?'<div style="margin-bottom:4px;"><span class="md-badge">MD</span></div>':''))+
+      '<div class="note-preview'+(n.format==='markdown'?' md':'')+'">'+(n.format==='markdown'?renderMd(n.content):esc(n.content))+'</div>'+
       tagsHtml+
       '<div class="note-date">'+new Date(n.updated_at).toLocaleDateString()+
       (n.reminder_at?' &bull; Reminder: '+new Date(n.reminder_at).toLocaleString():'')+
       '</div></div>';
   }).join('');
+}
+
+function toggleMdPreview() {
+  var isMd = document.getElementById('n-markdown').checked;
+  var previewBtn = document.getElementById('n-preview-btn');
+  var previewEl = document.getElementById('n-md-preview');
+  previewBtn.style.display = isMd ? 'inline-block' : 'none';
+  if (isMd && previewEl.style.display !== 'none') {
+    previewEl.innerHTML = renderMd(document.getElementById('n-content').value);
+  } else if (!isMd) {
+    previewEl.style.display = 'none';
+  }
+  if (isMd && previewBtn.textContent === 'Preview') {
+    previewEl.style.display = 'block';
+    previewEl.innerHTML = renderMd(document.getElementById('n-content').value);
+    previewBtn.textContent = 'Edit';
+  } else if (previewBtn.textContent === 'Edit') {
+    previewEl.style.display = 'none';
+    previewBtn.textContent = 'Preview';
+  }
 }
 
 function openNote() {
@@ -2830,6 +3017,9 @@ function openNote() {
   document.getElementById('n-color').value = 'default';
   document.getElementById('n-reminder').value = '';
   document.getElementById('n-pinned').checked = false;
+  document.getElementById('n-markdown').checked = false;
+  document.getElementById('n-preview-btn').style.display = 'none';
+  document.getElementById('n-md-preview').style.display = 'none';
   document.getElementById('n-delete-btn').style.display = 'none';
   currentTags = []; renderTags();
   document.getElementById('note-modal').classList.add('active');
@@ -2846,6 +3036,10 @@ async function openEditNote(id) {
   document.getElementById('n-color').value = n.color||'default';
   document.getElementById('n-reminder').value = n.reminder_at?n.reminder_at.slice(0,16):'';
   document.getElementById('n-pinned').checked = n.pinned;
+  document.getElementById('n-markdown').checked = n.format === 'markdown';
+  document.getElementById('n-preview-btn').style.display = n.format === 'markdown' ? 'inline-block' : 'none';
+  document.getElementById('n-preview-btn').textContent = 'Preview';
+  document.getElementById('n-md-preview').style.display = 'none';
   document.getElementById('n-delete-btn').style.display = 'inline-block';
   currentTags = n.tags || []; renderTags();
   document.getElementById('note-modal').classList.add('active');
@@ -2861,6 +3055,7 @@ async function saveNote() {
     pinned: document.getElementById('n-pinned').checked,
     reminder_at: document.getElementById('n-reminder').value ? new Date(document.getElementById('n-reminder').value).toISOString() : null,
     tags: currentTags.length ? currentTags : null,
+    format: document.getElementById('n-markdown').checked ? 'markdown' : 'plain',
   };
   if (!data.content) return alert('Content is required');
   var id = document.getElementById('n-id').value;
@@ -3518,8 +3713,8 @@ async function start() {
       try {
         const r = await pool.query("SELECT * FROM todos WHERE deleted_at IS NULL AND recurring = true AND completed = false AND due_date < CURRENT_DATE");
         for (const todo of r.rows) {
-          // Auto-complete and create next
-          await pool.query("UPDATE todos SET completed = true, completed_at = now() WHERE id = $1", [todo.id]);
+          // Auto-complete and reset streak (overdue = missed)
+          await pool.query("UPDATE todos SET completed = true, completed_at = now(), streak_count = 0 WHERE id = $1", [todo.id]);
           const rule = todo.recurrence_rule;
           let nextDue = new Date(todo.due_date);
           if (rule === "daily") nextDue.setDate(nextDue.getDate() + 1);
@@ -3535,8 +3730,8 @@ async function start() {
             else break;
           }
           await pool.query(
-            "INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_parent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-            [todo.title, todo.description, todo.priority, todo.horizon, todo.category, nextDue.toISOString().split("T")[0], true, rule, todo.recurrence_parent_id || todo.id]
+            "INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_parent_id, streak_count, best_streak) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10)",
+            [todo.title, todo.description, todo.priority, todo.horizon, todo.category, nextDue.toISOString().split("T")[0], true, rule, todo.recurrence_parent_id || todo.id, todo.best_streak || 0]
           );
         }
         if (r.rows.length) console.log(`Processed ${r.rows.length} recurring tasks`);

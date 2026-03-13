@@ -9,7 +9,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **Database**: Neon PostgreSQL (schema in `db/`)
 - **Email**: nodemailer (SMTP) with scheduled sending via node-cron
 - **AI**: Anthropic Claude API — 7 AI features with per-feature model selection (Haiku/Sonnet/Off)
-- **Tests**: `tests/` (node:test runner, run with `npm test`, 88 tests)
+- **Tests**: `tests/` (node:test runner, run with `npm test`, 101 tests)
 - **Deployment**: `Dockerfile`, `fly.toml` (Fly.io), `render.yaml` (Render)
 
 ## Current State (as of March 2026)
@@ -19,7 +19,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **To-Do Lists**: Short/medium/long-term horizons, 4 priority levels, categories, due dates
 - **Todo Categories**: Preset categories (work, personal, health, finance, errands, home, learning) + custom; filterable on todos page and dashboard
 - **Dashboard Task Views**: All / By Category / By Urgency / Due Soon tabs
-- **Recurring Tasks**: Daily, weekly, monthly, yearly, weekdays recurrence rules with auto-generation
+- **Recurring Tasks**: Daily, weekly, monthly, yearly, weekdays recurrence rules with auto-generation and streak/habit tracking
 - **Subtasks**: Checklists within tasks with progress tracking
 - **Natural Language Quick Add**: Create todos from natural language with auto-detected priority/horizon/due date (AI-enhanced when enabled)
 - **Email Drafting**: Compose, schedule, send; natural language "Quick Send" parser
@@ -31,7 +31,9 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **AI Note Auto-Tagging**: Suggest tags for notes based on content
 - **AI Model Selection**: Per-feature choice of Haiku (fast/cheap), Sonnet (smarter), or Off — configurable in Settings
 - **Email Templates**: Save and reuse common email formats
-- **Notes**: Color-coded, pinnable, with optional reminders and tags
+- **Notes**: Color-coded, pinnable, with optional reminders, tags, and Markdown support (bold, italic, lists, checkboxes, links, quotes, headings)
+- **Task Dependencies**: Blocking/blocked-by relationships between tasks with circular dependency prevention
+- **Streak Tracking**: Recurring tasks track completion streaks (current + best) with on-time detection
 - **Contacts**: Name→email lookup for quick email addressing
 - **Dashboard**: Overview cards, task views, AI briefing, scheduled emails, Perfin widget, global search
 - **Global Search**: Search across todos, emails, and notes
@@ -57,7 +59,8 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - `db/002_features.sql` — enhancement migration (recurring, subtasks, templates, reviews)
 - `db/003_ai_features.sql` — AI model preferences & note tags migration
 - `db/004_soft_delete.sql` — soft delete columns for trash/undo
-- `tests/api.test.js` — test suite (88 tests, 27 suites)
+- `db/005_dependencies_streaks_markdown.sql` — task dependencies, streak tracking, note format migration
+- `tests/api.test.js` — test suite (101 tests, 30 suites)
 - `Dockerfile` / `docker-compose.yml` — container deployment
 - `fly.toml` — Fly.io config
 - `render.yaml` — Render blueprint
@@ -87,8 +90,12 @@ POST   /api/todos           # Create todo
 PATCH  /api/todos/:id       # Update todo
 DELETE /api/todos/:id       # Delete todo
 POST   /api/todos/reorder   # Reorder todos (drag-and-drop)
-POST   /api/todos/:id/complete-recurring  # Complete recurring task & generate next
+POST   /api/todos/:id/complete-recurring  # Complete recurring task & generate next (with streak tracking)
 GET    /api/todo-categories  # List all categories (defaults + custom)
+GET    /api/todos/:id/dependencies  # Get task dependencies (blocked_by + blocking)
+POST   /api/todos/:id/dependencies  # Add dependency (depends_on_id)
+DELETE /api/dependencies/:id         # Remove dependency
+GET    /api/streaks                  # Get streak stats for recurring tasks
 
 GET    /api/emails          # List emails (query: status)
 POST   /api/emails          # Create email (draft or scheduled)
@@ -96,9 +103,9 @@ PATCH  /api/emails/:id      # Update email
 DELETE /api/emails/:id      # Delete email
 POST   /api/emails/:id/send # Send email now
 
-GET    /api/notes           # List notes (includes tags)
-POST   /api/notes           # Create note (with optional tags array)
-PATCH  /api/notes/:id       # Update note
+GET    /api/notes           # List notes (includes tags, format)
+POST   /api/notes           # Create note (with optional tags array, format: plain/markdown)
+PATCH  /api/notes/:id       # Update note (including format)
 DELETE /api/notes/:id       # Delete note
 
 GET    /api/trash            # List all trashed items
@@ -170,7 +177,7 @@ GET    /sw.js               # Service worker
 ## Database
 - Auto-migration runs on server startup — no manual SQL execution needed
 - `user_settings` table: single-row pattern (CHECK id = 1), includes ai_model_* columns
-- Tables: `todos`, `emails`, `notes`, `contacts`, `user_settings`, `subtasks`, `email_templates`, `weekly_reviews`
+- Tables: `todos`, `emails`, `notes`, `contacts`, `user_settings`, `subtasks`, `email_templates`, `weekly_reviews`, `task_dependencies`
 
 ## AI Features & Models
 - 7 AI features, each independently configurable: Haiku (fast/cheap), Sonnet (smarter), or Off
