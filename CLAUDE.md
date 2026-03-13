@@ -8,8 +8,8 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **Server**: `server.js` (Express, port 3001, bound to 0.0.0.0)
 - **Database**: Neon PostgreSQL (schema in `db/`)
 - **Email**: nodemailer (SMTP) with scheduled sending via node-cron
-- **AI**: Anthropic Claude API — 7 AI features with per-feature model selection (Haiku/Sonnet/Off)
-- **Tests**: `tests/` (node:test runner, run with `npm test`, 101 tests)
+- **AI**: Anthropic Claude API — 9 AI features with per-feature model selection (Haiku/Sonnet/Off)
+- **Tests**: `tests/` (node:test runner, run with `npm test`, 115 tests)
 - **Deployment**: `Dockerfile`, `fly.toml` (Fly.io), `render.yaml` (Render)
 
 ## Current State (as of March 2026)
@@ -35,9 +35,18 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **Task Dependencies**: Blocking/blocked-by relationships between tasks with circular dependency prevention
 - **Streak Tracking**: Recurring tasks track completion streaks (current + best) with on-time detection
 - **Contacts**: Name→email lookup for quick email addressing
-- **Dashboard**: Overview cards, task views, AI briefing, scheduled emails, Perfin widget, global search
+- **Dashboard**: Customizable widget layout (drag-to-reorder, show/hide widgets), overview cards, task views, AI briefing, smart suggestions, natural language AI query, scheduled emails, Perfin widget, global search
+- **AI Smart Suggestions**: AI-powered productivity coaching based on task priorities, due dates, and streaks
+- **AI Natural Language Query**: Ask questions about your data ("what did I do last week?", "how many tasks are overdue?")
+- **Automations/Rules Engine**: Create trigger→action rules (e.g., "when task created with category=work, set priority=high"), configurable in Settings
+- **File Attachments**: Upload files (up to 10MB) to tasks, emails, and notes via local storage
+- **iCal Export**: Export tasks and scheduled emails as .ics file for Google Calendar, Outlook, etc.
+- **Voice Input**: Web Speech API microphone button on Quick Add and notes (Chrome/Edge)
+- **Location-Based Reminders**: Set location (name + coordinates + radius) on tasks, periodic geofence checking with browser notifications
+- **Mobile-Optimized**: Bottom navigation bar, hamburger menu, swipe between pages, floating action button, horizontal-scroll filters, responsive layouts
+- **Offline Support**: Service worker caches pages and API responses, queues mutations for sync when back online, offline banner indicator
 - **Global Search**: Search across todos, emails, and notes
-- **Calendar View**: Monthly calendar showing tasks, emails, and notes by date
+- **Calendar View**: Monthly calendar with iCal export, showing tasks, emails, and notes by date
 - **Weekly Review**: Stats summary + AI narrative of completed tasks, emails sent, notes created
 - **Keyboard Shortcuts**: Global shortcuts (n=new todo, e=new email, /=search, etc.)
 - **Drag-and-Drop**: Reorder todos by dragging
@@ -60,7 +69,9 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - `db/003_ai_features.sql` — AI model preferences & note tags migration
 - `db/004_soft_delete.sql` — soft delete columns for trash/undo
 - `db/005_dependencies_streaks_markdown.sql` — task dependencies, streak tracking, note format migration
-- `tests/api.test.js` — test suite (101 tests, 30 suites)
+- `db/006_dashboard_automations.sql` — dashboard layout, automations, attachments, location reminders
+- `uploads/` — local file attachment storage
+- `tests/api.test.js` — test suite (115 tests, 36 suites)
 - `Dockerfile` / `docker-compose.yml` — container deployment
 - `fly.toml` — Fly.io config
 - `render.yaml` — Render blueprint
@@ -124,8 +135,23 @@ DELETE /api/contacts/:id    # Delete contact
 GET    /api/contacts/lookup/:name  # Lookup by name
 
 GET    /api/settings        # Get settings
-PATCH  /api/settings        # Update settings
+PATCH  /api/settings        # Update settings (including dashboard_layout)
 GET    /api/stats           # Dashboard statistics
+
+# Automations API
+GET    /api/automations            # List automation rules
+POST   /api/automations            # Create automation rule
+PATCH  /api/automations/:id        # Update automation rule
+DELETE /api/automations/:id        # Delete automation rule
+
+# Attachments API
+GET    /api/attachments/:type/:id       # List attachments for entity
+POST   /api/attachments/:type/:id       # Upload file attachment (multipart)
+GET    /api/attachments/download/:id    # Download attachment
+DELETE /api/attachments/:id             # Delete attachment
+
+# Calendar Export
+GET    /api/calendar.ics           # iCal export of tasks and scheduled emails
 
 # Enhancement API
 GET    /api/subtasks/:todoId       # List subtasks for a todo
@@ -151,6 +177,8 @@ POST   /api/ai/review-summary      # Generate weekly review narrative
 POST   /api/ai/adjust-tone         # Rewrite email in different tone
 GET    /api/ai/daily-briefing      # Generate daily task briefing
 POST   /api/ai/suggest-tags        # Suggest tags for note content
+GET    /api/ai/smart-suggestions   # AI productivity coaching suggestions
+POST   /api/ai/query               # Natural language query about your data
 GET    /api/ai/models              # Get per-feature model preferences
 PATCH  /api/ai/models              # Update per-feature model preferences
 
@@ -177,12 +205,12 @@ GET    /sw.js               # Service worker
 ## Database
 - Auto-migration runs on server startup — no manual SQL execution needed
 - `user_settings` table: single-row pattern (CHECK id = 1), includes ai_model_* columns
-- Tables: `todos`, `emails`, `notes`, `contacts`, `user_settings`, `subtasks`, `email_templates`, `weekly_reviews`, `task_dependencies`
+- Tables: `todos`, `emails`, `notes`, `contacts`, `user_settings`, `subtasks`, `email_templates`, `weekly_reviews`, `task_dependencies`, `automations`, `attachments`
 
 ## AI Features & Models
-- 7 AI features, each independently configurable: Haiku (fast/cheap), Sonnet (smarter), or Off
+- 9 AI features, each independently configurable: Haiku (fast/cheap), Sonnet (smarter), or Off
 - Models: `claude-haiku-4-5-20251001`, `claude-sonnet-4-6-20250415`
-- Features: email drafting, task breakdown, smart quick add, weekly review summary, email tone adjustment, daily briefing, note auto-tagging
+- Features: email drafting, task breakdown, smart quick add, weekly review summary, email tone adjustment, daily briefing, note auto-tagging, smart suggestions, natural language query
 - Configuration stored in `user_settings` table (ai_model_* columns)
 - Settings page provides per-feature dropdowns
 

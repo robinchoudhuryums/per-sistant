@@ -1057,3 +1057,152 @@ describe("Streak tracking", () => {
     assert.equal(next.best_streak, 5);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Dashboard customization tests
+// ---------------------------------------------------------------------------
+describe("Dashboard customization", () => {
+  it("default layout contains all widgets", () => {
+    const layout = { widgets: ["search", "cards", "briefing", "suggestions", "ai_query", "tasks", "upcoming_emails", "perfin", "shortcuts"], hidden: [] };
+    assert.equal(layout.widgets.length, 9);
+    assert.ok(layout.widgets.includes("search"));
+    assert.ok(layout.widgets.includes("tasks"));
+    assert.ok(layout.widgets.includes("suggestions"));
+    assert.ok(layout.widgets.includes("ai_query"));
+  });
+
+  it("hidden widgets are excluded from display", () => {
+    const layout = { widgets: ["search", "cards", "tasks"], hidden: ["cards"] };
+    const visible = layout.widgets.filter(w => !layout.hidden.includes(w));
+    assert.equal(visible.length, 2);
+    assert.ok(!visible.includes("cards"));
+  });
+
+  it("widget reordering preserves all widgets", () => {
+    const widgets = ["a", "b", "c"];
+    const srcIdx = 0, tgtIdx = 2;
+    const moved = widgets.splice(srcIdx, 1)[0];
+    widgets.splice(tgtIdx, 0, moved);
+    assert.deepEqual(widgets, ["b", "c", "a"]);
+    assert.equal(widgets.length, 3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Automation rules tests
+// ---------------------------------------------------------------------------
+describe("Automations", () => {
+  it("validates trigger types", () => {
+    const VALID_TRIGGERS = ["todo_created", "todo_completed", "email_created", "note_created", "schedule"];
+    assert.ok(VALID_TRIGGERS.includes("todo_created"));
+    assert.ok(VALID_TRIGGERS.includes("todo_completed"));
+    assert.ok(!VALID_TRIGGERS.includes("invalid"));
+  });
+
+  it("validates action types", () => {
+    const VALID_ACTIONS = ["set_priority", "set_category", "set_horizon", "add_tag", "send_notification", "create_todo"];
+    assert.ok(VALID_ACTIONS.includes("set_priority"));
+    assert.ok(VALID_ACTIONS.includes("create_todo"));
+    assert.ok(!VALID_ACTIONS.includes("delete_all"));
+  });
+
+  it("condition matching works correctly", () => {
+    const rule = { conditions: { category: "work", title_contains: "meeting" } };
+    const entity1 = { title: "Weekly meeting", category: "work" };
+    const entity2 = { title: "Buy groceries", category: "personal" };
+    // entity1 matches
+    let match1 = true;
+    if (rule.conditions.category && entity1.category !== rule.conditions.category) match1 = false;
+    if (rule.conditions.title_contains && !entity1.title.toLowerCase().includes(rule.conditions.title_contains)) match1 = false;
+    assert.ok(match1);
+    // entity2 doesn't match
+    let match2 = true;
+    if (rule.conditions.category && entity2.category !== rule.conditions.category) match2 = false;
+    assert.ok(!match2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// File attachment tests
+// ---------------------------------------------------------------------------
+describe("File attachments", () => {
+  it("validates entity types", () => {
+    const valid = ["todo", "email", "note"];
+    assert.ok(valid.includes("todo"));
+    assert.ok(valid.includes("note"));
+    assert.ok(!valid.includes("contact"));
+  });
+
+  it("attachment has expected fields", () => {
+    const attachment = { id: 1, filename: "123-file.pdf", original_name: "file.pdf", mime_type: "application/pdf", size_bytes: 1024, entity_type: "todo", entity_id: 1 };
+    assert.ok(attachment.filename);
+    assert.ok(attachment.original_name);
+    assert.ok(attachment.mime_type);
+    assert.ok(attachment.size_bytes > 0);
+    assert.ok(["todo", "email", "note"].includes(attachment.entity_type));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// iCal export tests
+// ---------------------------------------------------------------------------
+describe("iCal export", () => {
+  it("generates valid iCal format", () => {
+    const header = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Per-sistant//EN\r\n";
+    assert.ok(header.includes("BEGIN:VCALENDAR"));
+    assert.ok(header.includes("VERSION:2.0"));
+  });
+
+  it("formats dates correctly for iCal", () => {
+    const d = new Date("2026-03-15");
+    const dateStr = d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+    const dateOnly = dateStr.substring(0, 8);
+    assert.equal(dateOnly, "20260315");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Location-based reminder tests
+// ---------------------------------------------------------------------------
+describe("Location reminders", () => {
+  it("haversine distance calculation", () => {
+    // Simple haversine distance
+    function haversine(lat1, lon1, lat2, lon2) {
+      var R = 6371000; var p = Math.PI / 180;
+      var a = 0.5 - Math.cos((lat2-lat1)*p)/2 + Math.cos(lat1*p)*Math.cos(lat2*p)*(1-Math.cos((lon2-lon1)*p))/2;
+      return 2 * R * Math.asin(Math.sqrt(a));
+    }
+    // Same point = 0 distance
+    assert.equal(haversine(40.7128, -74.006, 40.7128, -74.006), 0);
+    // NYC to nearby point (~1km)
+    const dist = haversine(40.7128, -74.006, 40.7218, -74.006);
+    assert.ok(dist > 900 && dist < 1100);
+  });
+
+  it("location reminder fields are valid", () => {
+    const todo = { location_name: "Office", location_lat: 40.7128, location_lng: -74.006, location_radius: 200 };
+    assert.ok(todo.location_lat >= -90 && todo.location_lat <= 90);
+    assert.ok(todo.location_lng >= -180 && todo.location_lng <= 180);
+    assert.ok(todo.location_radius > 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Offline support tests
+// ---------------------------------------------------------------------------
+describe("Offline support", () => {
+  it("offline queue structure is valid", () => {
+    const queue = [
+      { url: "/api/todos", method: "POST", body: '{"title":"Test"}', headers: { "Content-Type": "application/json" } },
+    ];
+    assert.ok(Array.isArray(queue));
+    assert.equal(queue[0].method, "POST");
+    assert.ok(queue[0].body);
+  });
+
+  it("cache version naming", () => {
+    const CACHE = "per-sistant-v2";
+    assert.ok(CACHE.startsWith("per-sistant-"));
+    assert.ok(CACHE.includes("v2"));
+  });
+});

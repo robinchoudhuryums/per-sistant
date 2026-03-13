@@ -30,6 +30,9 @@ const helmet = require("helmet");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 
+let multer;
+try { multer = require("multer"); } catch { multer = null; }
+
 let nodemailer;
 try { nodemailer = require("nodemailer"); } catch { nodemailer = null; }
 
@@ -463,7 +466,9 @@ const SHARED_CSS = `
 
     @media (max-width: 768px) {
       .topnav { flex-direction: column; gap: 12px; align-items: flex-start; }
-      .topnav .nav-links { gap: 16px; flex-wrap: wrap; }
+      .topnav .nav-links { display: none; gap: 16px; flex-wrap: wrap; }
+      .topnav .nav-links.mobile-open { display: flex; }
+      .topnav .mobile-toggle { display: block; }
       h1 { font-size: 28px; }
       .top-cards { grid-template-columns: repeat(2, 1fr); }
       .notes-grid { grid-template-columns: 1fr; }
@@ -475,6 +480,10 @@ const SHARED_CSS = `
       .filters button { padding: 8px 16px; font-size: 12px; }
       .subtask-list { padding-left: 16px; }
       .drag-handle { display: none; }
+      .dash-two-col { grid-template-columns: 1fr !important; }
+      .mobile-fab { display: flex !important; }
+      .bottom-nav { display: flex !important; }
+      body { padding-bottom: 70px; }
     }
     @media (max-width: 480px) {
       .topnav .nav-links { gap: 12px; font-size: 12px; }
@@ -485,16 +494,48 @@ const SHARED_CSS = `
       .section { padding: 16px; }
       .todo-meta { gap: 8px; }
       .badge { font-size: 9px; padding: 2px 6px; }
-      .filters { gap: 6px; }
-      .filters button { padding: 6px 12px; font-size: 11px; }
+      .filters { gap: 6px; overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 4px; }
+      .filters::-webkit-scrollbar { display: none; }
+      .filters button { padding: 6px 12px; font-size: 11px; white-space: nowrap; }
       .cal-grid { font-size: 10px; }
       .cal-day { min-height: 40px; padding: 3px; }
+      .actions { gap: 6px; }
+      .actions button, .actions .btn { padding: 8px 14px; font-size: 11px; }
     }
     @media (max-width: 360px) {
       .container { padding: 12px 8px; }
       h1 { font-size: 20px; }
       .topnav .nav-links { gap: 10px; font-size: 11px; }
       .modal { padding: 12px; }
+    }
+
+    /* Mobile bottom navigation */
+    .bottom-nav { display: none; position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg);
+                  border-top: 1px solid var(--border); z-index: 99; justify-content: space-around;
+                  padding: 8px 0 env(safe-area-inset-bottom, 8px); backdrop-filter: blur(20px); }
+    .bottom-nav a { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 12px;
+                    font-size: 9px; color: var(--text-muted); text-decoration: none; letter-spacing: 0.5px;
+                    text-transform: uppercase; font-weight: 500; transition: color 0.2s;
+                    -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    .bottom-nav a .nav-icon { font-size: 18px; }
+    .bottom-nav a.active { color: var(--warm); }
+    .bottom-nav a:hover { color: var(--text); }
+
+    /* Mobile FAB (floating action button) */
+    .mobile-fab { display: none !important; position: fixed; bottom: 80px; right: 20px; width: 52px; height: 52px;
+                  border-radius: 50%; background: var(--warm); color: #fff; border: none; font-size: 26px;
+                  cursor: pointer; z-index: 98; box-shadow: 0 4px 16px rgba(0,0,0,0.3); align-items: center;
+                  justify-content: center; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    .mobile-fab:active { transform: scale(0.92); }
+
+    /* Mobile hamburger */
+    .topnav .mobile-toggle { display: none; background: none; border: none; color: var(--text); font-size: 22px;
+                              cursor: pointer; padding: 8px; -webkit-tap-highlight-color: transparent; }
+
+    /* Swipe gesture hint */
+    .swipe-hint { display: none; }
+    @media (max-width: 768px) {
+      .swipe-hint { display: block; font-size: 10px; color: var(--text-muted); text-align: center; padding: 4px; }
     }
 `;
 
@@ -523,6 +564,63 @@ function renderMd(s){
     .replace(/^---$/gm,'<hr style="border:none;border-top:1px solid var(--border);margin:8px 0;">')
     .replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g,'<a href="$2" target="_blank" style="color:var(--teal);text-decoration:underline;">$1</a>')
     .replace(/\\n/g,'<br>');
+}
+// Offline detection and sync
+window.addEventListener('online', function() {
+  document.body.classList.remove('offline');
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage('sync');
+  }
+  var offBanner = document.getElementById('offline-banner');
+  if (offBanner) offBanner.style.display = 'none';
+});
+window.addEventListener('offline', function() {
+  document.body.classList.add('offline');
+  var offBanner = document.getElementById('offline-banner');
+  if (!offBanner) {
+    offBanner = document.createElement('div');
+    offBanner.id = 'offline-banner';
+    offBanner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:var(--yellow);color:#000;text-align:center;padding:6px;font-size:12px;font-weight:500;z-index:9999;';
+    offBanner.textContent = 'You are offline. Changes will sync when reconnected.';
+    document.body.appendChild(offBanner);
+  }
+  offBanner.style.display = 'block';
+});
+if (navigator.serviceWorker) {
+  navigator.serviceWorker.addEventListener('message', function(e) {
+    if (e.data === 'synced' && typeof load === 'function') load();
+  });
+}
+var _touchStartX=0,_touchStartY=0;
+document.addEventListener('touchstart',function(e){_touchStartX=e.changedTouches[0].screenX;_touchStartY=e.changedTouches[0].screenY;},{passive:true});
+document.addEventListener('touchend',function(e){
+  var dx=e.changedTouches[0].screenX-_touchStartX,dy=e.changedTouches[0].screenY-_touchStartY;
+  if(Math.abs(dx)>100&&Math.abs(dx)>Math.abs(dy)*1.5){
+    var pages=['/','/todos','/emails','/notes','/calendar','/contacts','/review','/settings'];
+    var cur=pages.indexOf(location.pathname);if(cur<0)return;
+    if(dx<0&&cur<pages.length-1)location.href=pages[cur+1];
+    else if(dx>0&&cur>0)location.href=pages[cur-1];
+  }
+},{passive:true});
+// Voice input (Web Speech API)
+function startVoiceInput(targetId, onDone) {
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { alert('Voice input not supported in this browser. Try Chrome or Edge.'); return; }
+  var recognition = new SR();
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  recognition.onresult = function(e) {
+    var text = e.results[0][0].transcript;
+    var target = document.getElementById(targetId);
+    if (target) {
+      if (target.tagName === 'TEXTAREA') target.value += (target.value ? ' ' : '') + text;
+      else target.value = text;
+    }
+    if (onDone) onDone(text);
+  };
+  recognition.onerror = function(e) { if (e.error !== 'no-speech') console.error('Voice error:', e.error); };
+  recognition.start();
 }
 var _undoTimer=null;
 function showUndo(msg,type,id){
@@ -563,22 +661,29 @@ function pageHead(title) {
 
 function navBar(activePage) {
   const links = [
-    { href: "/", label: "Dashboard" },
-    { href: "/todos", label: "To-Dos" },
-    { href: "/emails", label: "Emails" },
-    { href: "/notes", label: "Notes" },
-    { href: "/calendar", label: "Calendar" },
-    { href: "/contacts", label: "Contacts" },
-    { href: "/review", label: "Review" },
-    { href: "/settings", label: "Settings" },
+    { href: "/", label: "Dashboard", icon: "&#9632;" },
+    { href: "/todos", label: "To-Dos", icon: "&#9745;" },
+    { href: "/emails", label: "Emails", icon: "&#9993;" },
+    { href: "/notes", label: "Notes", icon: "&#9998;" },
+    { href: "/calendar", label: "Calendar", icon: "&#128197;" },
+    { href: "/contacts", label: "Contacts", icon: "&#128100;" },
+    { href: "/review", label: "Review", icon: "&#128202;" },
+    { href: "/settings", label: "Settings", icon: "&#9881;" },
   ];
+  const bottomLinks = links.slice(0, 5); // Dashboard, Todos, Emails, Notes, Calendar
   const perfinLink = PERFIN_URL ? `<a href="${PERFIN_URL}" target="_blank">Perfin</a>` : "";
   return `<nav class="topnav">
-    <div class="logo">Per-sistant</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
+      <div class="logo">Per-sistant</div>
+      <button class="mobile-toggle" onclick="document.querySelector('.nav-links').classList.toggle('mobile-open')" aria-label="Toggle menu">&#9776;</button>
+    </div>
     <div class="nav-links">
       ${links.map(l => `<a href="${l.href}" class="${activePage === l.href ? 'active' : ''}">${l.label}</a>`).join("\n      ")}
       ${perfinLink}
     </div>
+  </nav>
+  <nav class="bottom-nav">
+    ${bottomLinks.map(l => `<a href="${l.href}" class="${activePage === l.href ? 'active' : ''}"><span class="nav-icon">${l.icon}</span>${l.label}</a>`).join("\n    ")}
   </nav>`;
 }
 
@@ -707,6 +812,7 @@ app.post("/api/todos", async (req, res) => {
       `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
       [title, description || null, priority || "medium", horizon || "short", category || null, due_date || null, recurring || false, recurrence_rule || null]
     );
+    runAutomations('todo_created', r.rows[0], 'todo').catch(() => {});
     res.json(r.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -731,6 +837,10 @@ app.patch("/api/todos/:id", async (req, res) => {
     if (sort_order !== undefined) { fields.push(`sort_order = $${idx++}`); params.push(sort_order); }
     if (recurring !== undefined) { fields.push(`recurring = $${idx++}`); params.push(recurring); }
     if (recurrence_rule !== undefined) { fields.push(`recurrence_rule = $${idx++}`); params.push(recurrence_rule); }
+    if (req.body.location_name !== undefined) { fields.push(`location_name = $${idx++}`); params.push(req.body.location_name); }
+    if (req.body.location_lat !== undefined) { fields.push(`location_lat = $${idx++}`); params.push(req.body.location_lat); }
+    if (req.body.location_lng !== undefined) { fields.push(`location_lng = $${idx++}`); params.push(req.body.location_lng); }
+    if (req.body.location_radius !== undefined) { fields.push(`location_radius = $${idx++}`); params.push(req.body.location_radius); }
     if (completed !== undefined) {
       fields.push(`completed = $${idx++}`); params.push(completed);
       fields.push(`completed_at = $${idx++}`); params.push(completed ? new Date().toISOString() : null);
@@ -739,6 +849,7 @@ app.patch("/api/todos/:id", async (req, res) => {
     params.push(req.params.id);
     const r = await pool.query(`UPDATE todos SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, params);
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    if (completed) runAutomations('todo_completed', r.rows[0], 'todo').catch(() => {});
     res.json(r.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1057,7 +1168,7 @@ app.get("/api/settings", async (req, res) => {
 
 app.patch("/api/settings", async (req, res) => {
   try {
-    const { theme, session_timeout_minutes, default_horizon, perfin_url } = req.body;
+    const { theme, session_timeout_minutes, default_horizon, perfin_url, dashboard_layout } = req.body;
     const fields = [];
     const params = [];
     let idx = 1;
@@ -1065,6 +1176,7 @@ app.patch("/api/settings", async (req, res) => {
     if (session_timeout_minutes !== undefined) { fields.push(`session_timeout_minutes = $${idx++}`); params.push(session_timeout_minutes); }
     if (default_horizon !== undefined) { fields.push(`default_horizon = $${idx++}`); params.push(default_horizon); }
     if (perfin_url !== undefined) { fields.push(`perfin_url = $${idx++}`); params.push(perfin_url || null); }
+    if (dashboard_layout !== undefined) { fields.push(`dashboard_layout = $${idx++}`); params.push(JSON.stringify(dashboard_layout)); }
     if (!fields.length) return res.status(400).json({ error: "No fields to update." });
     const r = await pool.query(`UPDATE user_settings SET ${fields.join(", ")} WHERE id = 1 RETURNING *`, params);
     if (theme && req.session) req.session.theme = theme;
@@ -1192,6 +1304,151 @@ app.get("/api/streaks", async (req, res) => {
       "SELECT DISTINCT ON (COALESCE(recurrence_parent_id, id)) COALESCE(recurrence_parent_id, id) as chain_id, title, best_streak, streak_count, recurrence_rule FROM todos WHERE recurring = true AND best_streak > 0 ORDER BY COALESCE(recurrence_parent_id, id), best_streak DESC"
     );
     res.json({ active: active.rows, top_streaks: top.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Automations / Rules Engine
+// ============================================================================
+const VALID_TRIGGERS = ['todo_created', 'todo_completed', 'email_created', 'note_created', 'schedule'];
+const VALID_ACTIONS = ['set_priority', 'set_category', 'set_horizon', 'add_tag', 'send_notification', 'create_todo'];
+
+app.get("/api/automations", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM automations ORDER BY created_at DESC");
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/automations", async (req, res) => {
+  try {
+    const { name, trigger_type, conditions, action_type, action_data } = req.body;
+    if (!name) return res.status(400).json({ error: "Name is required." });
+    if (!VALID_TRIGGERS.includes(trigger_type)) return res.status(400).json({ error: "Invalid trigger. Must be: " + VALID_TRIGGERS.join(", ") });
+    if (!VALID_ACTIONS.includes(action_type)) return res.status(400).json({ error: "Invalid action. Must be: " + VALID_ACTIONS.join(", ") });
+    const r = await pool.query(
+      "INSERT INTO automations (name, trigger_type, conditions, action_type, action_data) VALUES ($1,$2,$3,$4,$5) RETURNING *",
+      [name, trigger_type, conditions || {}, action_type, action_data || {}]
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch("/api/automations/:id", async (req, res) => {
+  try {
+    const { name, trigger_type, conditions, action_type, action_data, enabled } = req.body;
+    if (trigger_type && !VALID_TRIGGERS.includes(trigger_type)) return res.status(400).json({ error: "Invalid trigger." });
+    if (action_type && !VALID_ACTIONS.includes(action_type)) return res.status(400).json({ error: "Invalid action." });
+    const fields = []; const params = []; let idx = 1;
+    if (name !== undefined) { fields.push(`name = $${idx++}`); params.push(name); }
+    if (trigger_type !== undefined) { fields.push(`trigger_type = $${idx++}`); params.push(trigger_type); }
+    if (conditions !== undefined) { fields.push(`conditions = $${idx++}`); params.push(JSON.stringify(conditions)); }
+    if (action_type !== undefined) { fields.push(`action_type = $${idx++}`); params.push(action_type); }
+    if (action_data !== undefined) { fields.push(`action_data = $${idx++}`); params.push(JSON.stringify(action_data)); }
+    if (enabled !== undefined) { fields.push(`enabled = $${idx++}`); params.push(enabled); }
+    if (!fields.length) return res.status(400).json({ error: "No fields." });
+    params.push(req.params.id);
+    const r = await pool.query(`UPDATE automations SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, params);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/automations/:id", async (req, res) => {
+  try {
+    const r = await pool.query("DELETE FROM automations WHERE id = $1 RETURNING id", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Run automations for a trigger
+async function runAutomations(triggerType, entity, entityType) {
+  try {
+    const rules = await pool.query("SELECT * FROM automations WHERE trigger_type = $1 AND enabled = true", [triggerType]);
+    for (const rule of rules.rows) {
+      const cond = rule.conditions || {};
+      // Check conditions
+      let match = true;
+      if (cond.category && entity.category !== cond.category) match = false;
+      if (cond.priority && entity.priority !== cond.priority) match = false;
+      if (cond.title_contains && !(entity.title || '').toLowerCase().includes(cond.title_contains.toLowerCase())) match = false;
+      if (cond.horizon && entity.horizon !== cond.horizon) match = false;
+      if (!match) continue;
+      // Execute action
+      const data = rule.action_data || {};
+      if (rule.action_type === 'set_priority' && data.priority && entity.id) {
+        await pool.query("UPDATE todos SET priority = $1 WHERE id = $2", [data.priority, entity.id]);
+      } else if (rule.action_type === 'set_category' && data.category && entity.id) {
+        await pool.query("UPDATE todos SET category = $1 WHERE id = $2", [data.category, entity.id]);
+      } else if (rule.action_type === 'set_horizon' && data.horizon && entity.id) {
+        await pool.query("UPDATE todos SET horizon = $1 WHERE id = $2", [data.horizon, entity.id]);
+      } else if (rule.action_type === 'add_tag' && data.tag && entity.id && entityType === 'note') {
+        await pool.query("UPDATE notes SET tags = array_append(COALESCE(tags, ARRAY[]::TEXT[]), $1) WHERE id = $2 AND NOT ($1 = ANY(COALESCE(tags, ARRAY[]::TEXT[])))", [data.tag, entity.id]);
+      } else if (rule.action_type === 'create_todo' && data.title) {
+        await pool.query("INSERT INTO todos (title, priority, horizon, category) VALUES ($1, $2, $3, $4)", [data.title, data.priority || 'medium', data.horizon || 'short', data.category || null]);
+      }
+    }
+  } catch (err) { console.error("Automation error:", err.message); }
+}
+
+// ============================================================================
+// API — File Attachments
+// ============================================================================
+const uploadsDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+const upload = multer ? multer({
+  storage: multer.diskStorage({
+    destination: uploadsDir,
+    filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_")),
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+}) : null;
+
+app.get("/api/attachments/:entityType/:entityId", async (req, res) => {
+  try {
+    const { entityType, entityId } = req.params;
+    if (!["todo", "email", "note"].includes(entityType)) return res.status(400).json({ error: "Invalid entity type." });
+    const r = await pool.query("SELECT * FROM attachments WHERE entity_type = $1 AND entity_id = $2 ORDER BY created_at DESC", [entityType, entityId]);
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+if (upload) {
+  app.post("/api/attachments/:entityType/:entityId", upload.single("file"), async (req, res) => {
+    try {
+      const { entityType, entityId } = req.params;
+      if (!["todo", "email", "note"].includes(entityType)) return res.status(400).json({ error: "Invalid entity type." });
+      if (!req.file) return res.status(400).json({ error: "No file uploaded." });
+      const r = await pool.query(
+        "INSERT INTO attachments (filename, original_name, mime_type, size_bytes, entity_type, entity_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *",
+        [req.file.filename, req.file.originalname, req.file.mimetype, req.file.size, entityType, entityId]
+      );
+      res.json(r.rows[0]);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+}
+
+app.get("/api/attachments/download/:id", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM attachments WHERE id = $1", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    const filePath = path.join(uploadsDir, r.rows[0].filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: "File not found on disk." });
+    res.setHeader("Content-Disposition", `attachment; filename="${r.rows[0].original_name}"`);
+    res.setHeader("Content-Type", r.rows[0].mime_type);
+    fs.createReadStream(filePath).pipe(res);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/attachments/:id", async (req, res) => {
+  try {
+    const r = await pool.query("DELETE FROM attachments WHERE id = $1 RETURNING *", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    const filePath = path.join(uploadsDir, r.rows[0].filename);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1510,6 +1767,49 @@ Example: ["meeting-notes", "project-alpha", "action-items"]`, 128);
 });
 
 // ============================================================================
+// API — AI Smart Suggestions
+// ============================================================================
+app.get("/api/ai/smart-suggestions", async (req, res) => {
+  try {
+    const model = await getAIModelForFeature("daily_briefing");
+    if (model === "off") return res.json({ suggestions: null });
+    const todos = await pool.query("SELECT id, title, priority, horizon, category, due_date, recurring, recurrence_rule, streak_count FROM todos WHERE deleted_at IS NULL AND completed = false ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, due_date NULLS LAST LIMIT 30");
+    if (!todos.rows.length) return res.json({ suggestions: null });
+    const todayStr = new Date().toISOString().split("T")[0];
+    const dayName = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][new Date().getDay()];
+    const taskList = todos.rows.map(t => `- "${t.title}" [${t.priority}/${t.horizon}]${t.category ? ' ('+t.category+')' : ''}${t.due_date ? ' due:'+t.due_date.toISOString().split("T")[0] : ''}${t.recurring ? ' recurring:'+t.recurrence_rule : ''}${t.streak_count > 0 ? ' streak:'+t.streak_count : ''}`).join("\n");
+    const prompt = `You are a productivity coach. Today is ${dayName}, ${todayStr}. Here are the user's pending tasks:\n${taskList}\n\nProvide exactly 3 smart suggestions as a JSON array of objects with "suggestion" (short actionable advice) and "task_ids" (array of relevant task IDs). Consider: urgency, due dates, streaks at risk, workload balance, and day of week. Focus on what to tackle NOW.\nRespond with ONLY a JSON array, no other text.`;
+    const result = await callAI(model, prompt, 512);
+    const cleaned = result.replace(/```json?\s*|\s*```/g, "").trim();
+    const suggestions = JSON.parse(cleaned);
+    res.json({ suggestions });
+  } catch (err) { res.json({ suggestions: null, error: err.message }); }
+});
+
+// ============================================================================
+// API — AI Natural Language Query
+// ============================================================================
+app.post("/api/ai/query", async (req, res) => {
+  try {
+    const { query } = req.body;
+    if (!query) return res.status(400).json({ error: "Query is required." });
+    const model = await getAIModelForFeature("daily_briefing");
+    if (model === "off") return res.json({ answer: "AI is not enabled. Enable it in Settings.", data: null });
+    // Gather context
+    const [todos, emails, notes] = await Promise.all([
+      pool.query("SELECT id, title, priority, horizon, category, due_date, completed, completed_at, recurring, recurrence_rule, streak_count, created_at FROM todos WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 50"),
+      pool.query("SELECT id, subject, recipient_name, recipient_email, status, scheduled_at, sent_at, created_at FROM emails WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 20"),
+      pool.query("SELECT id, title, content, tags, pinned, created_at, updated_at FROM notes WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 20"),
+    ]);
+    const todayStr = new Date().toISOString().split("T")[0];
+    const context = `Today: ${todayStr}\n\nTasks (${todos.rows.length}):\n${todos.rows.map(t => `- [${t.completed?'done':'pending'}] "${t.title}" priority:${t.priority} horizon:${t.horizon}${t.category?' cat:'+t.category:''}${t.due_date?' due:'+t.due_date.toISOString().split("T")[0]:''}${t.completed_at?' completed:'+t.completed_at.toISOString().split("T")[0]:''}${t.recurring?' recurring:'+t.recurrence_rule:''}`).join("\n")}\n\nEmails (${emails.rows.length}):\n${emails.rows.map(e => `- [${e.status}] "${e.subject}" to:${e.recipient_name||e.recipient_email}${e.sent_at?' sent:'+e.sent_at.toISOString().split("T")[0]:''}`).join("\n")}\n\nNotes (${notes.rows.length}):\n${notes.rows.map(n => `- "${n.title||n.content.substring(0,40)}"${n.tags?' tags:'+n.tags.join(','):''}${n.pinned?' pinned':''}`).join("\n")}`;
+    const prompt = `You are a personal assistant with access to the user's data. Answer their question based on the data below. Be concise and helpful. If the question asks for counts, lists, or stats, provide specific numbers.\n\nData:\n${context}\n\nUser question: "${query}"\n\nAnswer concisely:`;
+    const answer = await callAI(model, prompt, 1024);
+    res.json({ answer });
+  } catch (err) { res.json({ answer: "Sorry, I couldn't process that query.", error: err.message }); }
+});
+
+// ============================================================================
 // API — AI Model Preferences
 // ============================================================================
 app.get("/api/ai/models", async (req, res) => {
@@ -1586,6 +1886,34 @@ app.get("/api/calendar", async (req, res) => {
       pool.query("SELECT id, COALESCE(title, LEFT(content,30)) as title, reminder_at as event_date, 'note' as type FROM notes WHERE deleted_at IS NULL AND reminder_at >= $1 AND reminder_at < $2", [startDate, endDate]),
     ]);
     res.json([...todos.rows, ...emails.rows, ...notes.rows]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — iCal Export
+// ============================================================================
+app.get("/api/calendar.ics", async (req, res) => {
+  try {
+    const [todos, emails] = await Promise.all([
+      pool.query("SELECT id, title, description, due_date, priority FROM todos WHERE deleted_at IS NULL AND due_date IS NOT NULL AND completed = false ORDER BY due_date"),
+      pool.query("SELECT id, subject, recipient_email, scheduled_at FROM emails WHERE deleted_at IS NULL AND scheduled_at IS NOT NULL AND status = 'scheduled' ORDER BY scheduled_at"),
+    ]);
+    let ical = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Per-sistant//EN\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\nX-WR-CALNAME:Per-sistant Tasks\r\n";
+    for (const t of todos.rows) {
+      const d = new Date(t.due_date);
+      const dateStr = d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+      const dateOnly = dateStr.substring(0, 8);
+      ical += `BEGIN:VEVENT\r\nUID:todo-${t.id}@per-sistant\r\nDTSTART;VALUE=DATE:${dateOnly}\r\nDTEND;VALUE=DATE:${dateOnly}\r\nSUMMARY:[${t.priority.toUpperCase()}] ${t.title.replace(/[\\,;]/g, " ")}\r\n${t.description ? "DESCRIPTION:" + t.description.replace(/\n/g, "\\n").replace(/[\\,;]/g, " ") + "\r\n" : ""}END:VEVENT\r\n`;
+    }
+    for (const e of emails.rows) {
+      const d = new Date(e.scheduled_at);
+      const dateStr = d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+      ical += `BEGIN:VEVENT\r\nUID:email-${e.id}@per-sistant\r\nDTSTART:${dateStr}\r\nDTEND:${dateStr}\r\nSUMMARY:Email: ${e.subject.replace(/[\\,;]/g, " ")}\r\nDESCRIPTION:To: ${e.recipient_email}\r\nEND:VEVENT\r\n`;
+    }
+    ical += "END:VCALENDAR\r\n";
+    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="per-sistant.ics"');
+    res.send(ical);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1680,61 +2008,115 @@ app.get("/", async (req, res) => {
 ${themeScript()}
 <div class="container">
   ${navBar("/")}
-  <h1>Dashboard</h1>
-  <p class="subtitle">Your personal command center</p>
-
-  <!-- Global Search -->
-  <div class="search-bar">
-    <span class="search-icon">&#128269;</span>
-    <input type="text" id="global-search" placeholder="Search todos, emails, notes, contacts... (press /)" oninput="doSearch(this.value)">
+  <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div><h1>Dashboard</h1><p class="subtitle" style="margin-bottom:0;">Your personal command center</p></div>
+    <button id="customize-btn" onclick="toggleCustomize()" style="padding:6px 14px;font-size:10px;font-weight:500;letter-spacing:0.5px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;text-transform:uppercase;">Customize</button>
   </div>
-  <div class="section search-results" id="search-results" style="display:none;margin-bottom:24px;"></div>
+  <div style="margin-bottom:36px;"></div>
 
-  <div class="top-cards" id="cards"></div>
-
-  <!-- AI Daily Briefing -->
-  <div id="briefing-section" style="display:none;margin-bottom:24px;">
-    <div class="section">
-      <h2>Today's Briefing</h2>
-      <div id="briefing-content" style="font-size:14px;font-weight:300;line-height:1.7;"></div>
+  <!-- Customization panel -->
+  <div id="customize-panel" style="display:none;margin-bottom:24px;padding:16px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--warm);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <span style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;">Widget Visibility &amp; Order</span>
+      <button onclick="resetLayout()" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Reset</button>
     </div>
+    <div id="widget-toggles" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+    <div style="margin-top:10px;font-size:10px;color:var(--text-muted);">Drag widgets below to reorder. Click toggles above to show/hide.</div>
   </div>
 
-  <!-- Task Overview with Tabs -->
-  <div class="section" style="margin-bottom:24px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-      <h2 style="margin-bottom:0;">Task Overview</h2>
+  <div id="dash-widgets">
+    <!-- Search widget -->
+    <div class="dash-widget" data-widget="search" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div class="search-bar">
+        <span class="search-icon">&#128269;</span>
+        <input type="text" id="global-search" placeholder="Search todos, emails, notes, contacts... (press /)" oninput="doSearch(this.value)">
+      </div>
+      <div class="section search-results" id="search-results" style="display:none;margin-bottom:24px;"></div>
     </div>
-    <div class="filters" id="dash-task-filters">
-      <button class="active" onclick="setDashView(this,'all')">All</button>
-      <button onclick="setDashView(this,'category')">By Category</button>
-      <button onclick="setDashView(this,'urgency')">By Urgency</button>
-      <button onclick="setDashView(this,'due')">Due Soon</button>
-    </div>
-    <div id="dash-tasks"></div>
-  </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
-    <div class="section">
-      <h2>Upcoming Tasks</h2>
-      <div id="upcoming-tasks"></div>
+    <!-- Cards widget -->
+    <div class="dash-widget" data-widget="cards" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div class="top-cards" id="cards"></div>
     </div>
-    <div class="section">
-      <h2>Scheduled Emails</h2>
-      <div id="scheduled-emails"></div>
-    </div>
-  </div>
 
-  <!-- Perfin Integration -->
-  <div id="perfin-section" style="display:none;margin-top:24px;">
-    <div class="section">
-      <h2>Perfin — Financial Overview</h2>
-      <div id="perfin-data"></div>
+    <!-- AI Daily Briefing widget -->
+    <div class="dash-widget" data-widget="briefing" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div id="briefing-section" style="display:none;margin-bottom:24px;">
+        <div class="section">
+          <h2>Today's Briefing</h2>
+          <div id="briefing-content" style="font-size:14px;font-weight:300;line-height:1.7;"></div>
+        </div>
+      </div>
     </div>
-  </div>
 
-  <div style="margin-top:24px;text-align:center;">
-    <p style="font-size:11px;color:var(--text-muted);">Keyboard shortcuts: <span class="kbd">/</span> Search &middot; <span class="kbd">N</span> New task &middot; <span class="kbd">E</span> New email &middot; <span class="kbd">?</span> Show all</p>
+    <!-- AI Smart Suggestions widget -->
+    <div class="dash-widget" data-widget="suggestions" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div id="suggestions-section" style="display:none;margin-bottom:24px;">
+        <div class="section">
+          <h2>Smart Suggestions</h2>
+          <div id="suggestions-content"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI Natural Language Query widget -->
+    <div class="dash-widget" data-widget="ai_query" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div class="section" style="margin-bottom:24px;">
+        <h2>Ask Your Assistant</h2>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="ai-query-input" placeholder="Ask anything... &quot;What did I do last week?&quot; &quot;How many tasks are overdue?&quot;" style="flex:1;padding:10px 14px;font-size:13px;font-family:inherit;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);outline:none;" onkeydown="if(event.key==='Enter')askAI()">
+          <button onclick="askAI()" style="padding:10px 18px;font-size:12px;font-weight:500;letter-spacing:0.5px;border:1px solid var(--teal);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;">Ask</button>
+        </div>
+        <div id="ai-query-answer" style="display:none;margin-top:12px;padding:12px 16px;background:var(--surface-2);border-radius:8px;font-size:13px;font-weight:300;line-height:1.6;white-space:pre-wrap;"></div>
+      </div>
+    </div>
+
+    <!-- Task Overview widget -->
+    <div class="dash-widget" data-widget="tasks" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div class="section" style="margin-bottom:24px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <h2 style="margin-bottom:0;">Task Overview</h2>
+        </div>
+        <div class="filters" id="dash-task-filters">
+          <button class="active" onclick="setDashView(this,'all')">All</button>
+          <button onclick="setDashView(this,'category')">By Category</button>
+          <button onclick="setDashView(this,'urgency')">By Urgency</button>
+          <button onclick="setDashView(this,'due')">Due Soon</button>
+        </div>
+        <div id="dash-tasks"></div>
+      </div>
+    </div>
+
+    <!-- Upcoming + Emails widget -->
+    <div class="dash-widget" data-widget="upcoming_emails" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div class="dash-two-col" style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+        <div class="section">
+          <h2>Upcoming Tasks</h2>
+          <div id="upcoming-tasks"></div>
+        </div>
+        <div class="section">
+          <h2>Scheduled Emails</h2>
+          <div id="scheduled-emails"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Perfin widget -->
+    <div class="dash-widget" data-widget="perfin" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div id="perfin-section" style="display:none;margin-top:24px;">
+        <div class="section">
+          <h2>Perfin — Financial Overview</h2>
+          <div id="perfin-data"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Shortcuts widget -->
+    <div class="dash-widget" data-widget="shortcuts" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div style="margin-top:24px;text-align:center;">
+        <p style="font-size:11px;color:var(--text-muted);">Keyboard shortcuts: <span class="kbd">/</span> Search &middot; <span class="kbd">N</span> New task &middot; <span class="kbd">E</span> New email &middot; <span class="kbd">?</span> Show all</p>
+      </div>
+    </div>
   </div>
 </div>
 <script>
@@ -1872,6 +2254,107 @@ async function load() {
       document.getElementById('briefing-section').style.display = 'block';
     }
   }).catch(function(){});
+
+  // Load AI smart suggestions (non-blocking)
+  fetch('/api/ai/smart-suggestions').then(r=>r.json()).then(d => {
+    if (d.suggestions && d.suggestions.length) {
+      document.getElementById('suggestions-content').innerHTML = d.suggestions.map(s =>
+        '<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:13px;font-weight:300;line-height:1.5;">'+
+        '<span style="color:var(--teal);margin-right:8px;">&#9733;</span>'+esc(s.suggestion)+'</div>'
+      ).join('');
+      document.getElementById('suggestions-section').style.display = 'block';
+    }
+  }).catch(function(){});
+}
+
+async function askAI() {
+  var input = document.getElementById('ai-query-input');
+  var q = input.value.trim();
+  if (!q) return;
+  var answerEl = document.getElementById('ai-query-answer');
+  answerEl.textContent = 'Thinking...';
+  answerEl.style.display = 'block';
+  try {
+    var r = await fetch('/api/ai/query', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})}).then(r=>r.json());
+    answerEl.textContent = r.answer || 'No answer available.';
+  } catch (err) { answerEl.textContent = 'Error: '+err.message; }
+}
+
+// Dashboard widget customization
+var widgetNames = {search:'Search',cards:'Stats Cards',briefing:'AI Briefing',suggestions:'Smart Suggestions',ai_query:'Ask AI',tasks:'Task Overview',upcoming_emails:'Upcoming & Emails',perfin:'Perfin',shortcuts:'Shortcuts'};
+var dashLayout = {widgets:['search','cards','briefing','suggestions','ai_query','tasks','upcoming_emails','perfin','shortcuts'],hidden:[]};
+var wdragSrcWidget = null;
+
+async function loadLayout() {
+  try {
+    var settings = await fetch('/api/settings').then(r=>r.json());
+    if (settings.dashboard_layout) dashLayout = settings.dashboard_layout;
+  } catch {}
+  applyLayout();
+}
+
+function applyLayout() {
+  var container = document.getElementById('dash-widgets');
+  var widgets = container.querySelectorAll('.dash-widget');
+  var map = {};
+  widgets.forEach(w => { map[w.dataset.widget] = w; });
+  // Reorder
+  dashLayout.widgets.forEach(id => { if (map[id]) container.appendChild(map[id]); });
+  // Show/hide
+  widgets.forEach(w => {
+    w.style.display = dashLayout.hidden.includes(w.dataset.widget) ? 'none' : 'block';
+  });
+  renderToggles();
+}
+
+function renderToggles() {
+  var html = '';
+  dashLayout.widgets.forEach(id => {
+    var hidden = dashLayout.hidden.includes(id);
+    html += '<button onclick="toggleWidget(\\''+id+'\\');event.stopPropagation();" style="padding:4px 12px;font-size:10px;font-weight:500;border-radius:20px;cursor:pointer;font-family:inherit;border:1px solid '+(hidden?'var(--border)':'var(--warm)')+';background:'+(hidden?'transparent':'rgba(212,165,116,0.1)')+';color:'+(hidden?'var(--text-muted)':'var(--warm)')+';">'+(widgetNames[id]||id)+'</button>';
+  });
+  document.getElementById('widget-toggles').innerHTML = html;
+}
+
+function toggleWidget(id) {
+  var idx = dashLayout.hidden.indexOf(id);
+  if (idx > -1) dashLayout.hidden.splice(idx, 1);
+  else dashLayout.hidden.push(id);
+  applyLayout();
+  saveLayout();
+}
+
+function toggleCustomize() {
+  var panel = document.getElementById('customize-panel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  document.getElementById('customize-btn').textContent = panel.style.display === 'none' ? 'Customize' : 'Done';
+}
+
+function resetLayout() {
+  dashLayout = {widgets:['search','cards','briefing','tasks','upcoming_emails','perfin','shortcuts'],hidden:[]};
+  applyLayout();
+  saveLayout();
+}
+
+async function saveLayout() {
+  await fetch('/api/settings', {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({dashboard_layout:dashLayout})});
+}
+
+function wdragStart(e) { wdragSrcWidget = e.currentTarget.dataset.widget; e.currentTarget.style.opacity = '0.4'; }
+function wdragOver(e) { e.preventDefault(); e.currentTarget.style.borderTop = '2px solid var(--warm)'; }
+function wdragEnd(e) { document.querySelectorAll('.dash-widget').forEach(w => { w.style.opacity = '1'; w.style.borderTop = ''; }); }
+function wdrop(e) {
+  e.preventDefault(); e.currentTarget.style.borderTop = '';
+  var target = e.currentTarget.dataset.widget;
+  if (wdragSrcWidget === target) return;
+  var srcIdx = dashLayout.widgets.indexOf(wdragSrcWidget);
+  var tgtIdx = dashLayout.widgets.indexOf(target);
+  if (srcIdx > -1 && tgtIdx > -1) {
+    dashLayout.widgets.splice(srcIdx, 1);
+    dashLayout.widgets.splice(tgtIdx, 0, wdragSrcWidget);
+    applyLayout();
+    saveLayout();
+  }
 }
 
 // Keyboard shortcuts
@@ -1884,7 +2367,7 @@ document.addEventListener('keydown', function(e) {
   else if (e.key === 'r' || e.key === 'R') { location.href = '/review'; }
 });
 
-
+loadLayout();
 load();
 </script>
 </body></html>`);
@@ -1994,6 +2477,20 @@ ${themeScript()}
         <button onclick="addSubtask()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
       </div>
     </div>
+    <!-- Location reminder (edit mode only) -->
+    <div id="location-section" style="display:none;margin-top:16px;">
+      <label>Location Reminder</label>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="text" id="f-location-name" placeholder="e.g. Home, Office, Grocery Store" style="flex:1">
+        <button onclick="getLocation()" title="Use current location" style="padding:10px 14px;font-size:14px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);flex-shrink:0;">&#128205;</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px;">
+        <input type="number" step="any" id="f-location-lat" placeholder="Latitude" style="font-size:11px;">
+        <input type="number" step="any" id="f-location-lng" placeholder="Longitude" style="font-size:11px;">
+        <input type="number" id="f-location-radius" placeholder="Radius (m)" value="200" style="font-size:11px;">
+      </div>
+      <div id="location-status" style="font-size:10px;color:var(--text-muted);margin-top:4px;"></div>
+    </div>
     <!-- Dependencies section (edit mode only) -->
     <div id="deps-section" style="display:none;margin-top:16px;">
       <label>Dependencies</label>
@@ -2019,7 +2516,10 @@ ${themeScript()}
       Examples: "Buy groceries tomorrow" &middot; "Call dentist Friday at 2PM" &middot; "Finish report by March 20"
     </p>
     <label>What needs to be done?</label>
-    <input type="text" id="qt-input" placeholder="Type a task..." onkeydown="if(event.key==='Enter')parseQuickTodo()">
+    <div style="display:flex;gap:8px;">
+      <input type="text" id="qt-input" placeholder="Type or speak a task..." onkeydown="if(event.key==='Enter')parseQuickTodo()" style="flex:1">
+      <button onclick="startVoiceInput('qt-input')" title="Voice input" style="padding:10px 14px;font-size:16px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);flex-shrink:0;">&#127908;</button>
+    </div>
     <div id="qt-preview" style="display:none;margin-top:16px;" class="section">
       <h2>Preview</h2>
       <div id="qt-preview-content"></div>
@@ -2120,6 +2620,7 @@ async function load() {
     if (isBlocked) depBadges += '<span class="badge blocked" title="Blocked by: '+unblockedBy.map(d=>esc(d.title)).join(', ')+'">blocked ('+unblockedBy.length+')</span>';
     if (deps.blocking.length) depBadges += '<span class="badge blocking" title="Blocking: '+deps.blocking.map(d=>esc(d.title)).join(', ')+'">blocking ('+deps.blocking.length+')</span>';
     if (t.streak_count > 0) depBadges += '<span class="badge streak" title="Best: '+t.best_streak+'">&#x1F525; '+t.streak_count+' streak</span>';
+    if (t.location_name) depBadges += '<span title="'+esc(t.location_name)+'" style="font-size:10px;color:var(--teal);">&#128205; '+esc(t.location_name)+'</span>';
     return '<div class="todo-item'+(isBlocked?' todo-blocked':'')+'" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><input type="checkbox" class="bulk-check" data-id="'+t.id+'" style="display:'+(selectMode?'inline-block':'none')+';accent-color:var(--warm);margin-right:4px;cursor:pointer;" onchange="toggleBulkItem('+t.id+',this.checked)"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" onclick="toggleTodo('+t.id+','+!t.completed+','+!!t.recurring+')"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+(t.recurring?'<span class="badge recurring">'+t.recurrence_rule+'</span>':'')+depBadges+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions"><button onclick="openEdit('+t.id+')">&#9998;</button></div></div>';
   }).join('');
 }
@@ -2238,6 +2739,12 @@ function openAdd() {
   document.getElementById('delete-btn').style.display = 'none';
   document.getElementById('subtasks-section').style.display = 'block';
   document.getElementById('deps-section').style.display = 'none';
+  document.getElementById('location-section').style.display = 'block';
+  document.getElementById('f-location-name').value = '';
+  document.getElementById('f-location-lat').value = '';
+  document.getElementById('f-location-lng').value = '';
+  document.getElementById('f-location-radius').value = 200;
+  document.getElementById('location-status').textContent = '';
   editSubtasks = [];
   renderEditSubtasks();
   document.getElementById('modal').classList.add('active');
@@ -2271,6 +2778,12 @@ async function openEdit(id) {
   document.getElementById('delete-btn').style.display = 'inline-block';
   document.getElementById('subtasks-section').style.display = 'block';
   document.getElementById('deps-section').style.display = 'block';
+  document.getElementById('location-section').style.display = 'block';
+  document.getElementById('f-location-name').value = t.location_name || '';
+  document.getElementById('f-location-lat').value = t.location_lat || '';
+  document.getElementById('f-location-lng').value = t.location_lng || '';
+  document.getElementById('f-location-radius').value = t.location_radius || 200;
+  document.getElementById('location-status').textContent = t.location_lat ? 'Location: ' + t.location_lat.toFixed(4) + ', ' + t.location_lng.toFixed(4) : '';
   loadEditSubtasks(id);
   loadDeps(id);
   document.getElementById('modal').classList.add('active');
@@ -2290,6 +2803,10 @@ async function saveTodo() {
     due_date: document.getElementById('f-due').value || null,
     recurring: isRecurring,
     recurrence_rule: isRecurring ? document.getElementById('f-recurrence-rule').value : null,
+    location_name: document.getElementById('f-location-name').value || null,
+    location_lat: parseFloat(document.getElementById('f-location-lat').value) || null,
+    location_lng: parseFloat(document.getElementById('f-location-lng').value) || null,
+    location_radius: parseInt(document.getElementById('f-location-radius').value) || 200,
   };
   if (!data.title) return alert('Title is required');
   var result;
@@ -2322,6 +2839,41 @@ async function deleteTodo() {
   closeModal(); load();
   showUndo('Task moved to trash','todo',id);
 }
+
+// Location
+function getLocation() {
+  if (!navigator.geolocation) { alert('Geolocation not supported'); return; }
+  document.getElementById('location-status').textContent = 'Getting location...';
+  navigator.geolocation.getCurrentPosition(function(pos) {
+    document.getElementById('f-location-lat').value = pos.coords.latitude.toFixed(6);
+    document.getElementById('f-location-lng').value = pos.coords.longitude.toFixed(6);
+    document.getElementById('location-status').textContent = 'Location set: ' + pos.coords.latitude.toFixed(4) + ', ' + pos.coords.longitude.toFixed(4);
+  }, function(err) {
+    document.getElementById('location-status').textContent = 'Error: ' + err.message;
+  }, {enableHighAccuracy: true});
+}
+
+// Check location reminders periodically
+function checkLocationReminders() {
+  if (!navigator.geolocation || !('Notification' in window) || Notification.permission !== 'granted') return;
+  navigator.geolocation.getCurrentPosition(async function(pos) {
+    try {
+      var todos = await fetch('/api/todos?completed=false').then(r=>r.json());
+      todos.filter(t => t.location_lat && t.location_lng).forEach(t => {
+        var dist = haversine(pos.coords.latitude, pos.coords.longitude, t.location_lat, t.location_lng);
+        if (dist <= (t.location_radius || 200)) {
+          new Notification('Per-sistant Reminder', { body: t.title + (t.location_name ? ' (near ' + t.location_name + ')' : ''), icon: '/icon-192.svg' });
+        }
+      });
+    } catch {}
+  }, function(){}, {enableHighAccuracy: false, timeout: 5000});
+}
+function haversine(lat1, lon1, lat2, lon2) {
+  var R = 6371000; var p = Math.PI / 180;
+  var a = 0.5 - Math.cos((lat2-lat1)*p)/2 + Math.cos(lat1*p)*Math.cos(lat2*p)*(1-Math.cos((lon2-lon1)*p))/2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+if (typeof setInterval !== 'undefined') setInterval(checkLocationReminders, 300000); // every 5 min
 
 // Dependencies
 async function loadDeps(todoId) {
@@ -2893,7 +3445,10 @@ ${themeScript()}
       </label>
       <button id="n-preview-btn" onclick="toggleMdPreview()" style="display:none;padding:2px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;">Preview</button>
     </div>
-    <textarea id="n-content" style="min-height:200px" placeholder="Write your note... (supports **bold**, *italic*, - lists, > quotes, [links](url))"></textarea>
+    <div style="position:relative;">
+      <textarea id="n-content" style="min-height:200px" placeholder="Write your note... (supports **bold**, *italic*, - lists, > quotes, [links](url))"></textarea>
+      <button onclick="startVoiceInput('n-content')" title="Voice input" style="position:absolute;top:10px;right:10px;padding:6px 10px;font-size:14px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:var(--surface);color:var(--warm);z-index:1;">&#127908;</button>
+    </div>
     <div id="n-md-preview" style="display:none;min-height:100px;max-height:300px;overflow-y:auto;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);font-size:13px;line-height:1.6;margin-bottom:12px;"></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div><label>Color</label>
@@ -3195,6 +3750,7 @@ ${themeScript()}
     <button onclick="prevMonth()">&larr; Previous</button>
     <span id="cal-title" style="font-size:18px;font-weight:300;padding:0 16px;"></span>
     <button onclick="nextMonth()">Next &rarr;</button>
+    <a href="/api/calendar.ics" class="btn" style="margin-left:auto;" download>Export iCal</a>
     <button onclick="goToday()" style="margin-left:auto;">Today</button>
   </div>
 
@@ -3478,7 +4034,59 @@ ${themeScript()}
     </div>
   </div>
 
+  <div class="section">
+    <h2>Automations</h2>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Create rules that trigger actions automatically when events occur.</p>
+    <div id="automations-list" style="margin-bottom:12px;"></div>
+    <button onclick="openAutoModal()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;text-transform:uppercase;">+ New Rule</button>
+  </div>
+
   ${AUTH_SECRET ? '<div class="section"><h2>Session</h2><div class="actions" style="margin-bottom:0;"><button class="danger" style="border-color:var(--red);color:var(--red);" onclick="logout()">Log Out</button></div></div>' : ''}
+</div>
+
+<!-- Automation Modal -->
+<div class="modal-overlay" id="auto-modal">
+  <div class="modal">
+    <h2 id="auto-modal-title">New Automation</h2>
+    <input type="hidden" id="auto-id">
+    <label>Name</label>
+    <input type="text" id="auto-name" placeholder="e.g. Auto-prioritize work tasks">
+    <label>When (Trigger)</label>
+    <select id="auto-trigger" style="width:100%;padding:10px 14px;font-size:14px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
+      <option value="todo_created">Task Created</option>
+      <option value="todo_completed">Task Completed</option>
+      <option value="email_created">Email Created</option>
+      <option value="note_created">Note Created</option>
+    </select>
+    <label>If (Condition — optional)</label>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div>
+        <select id="auto-cond-field" style="width:100%;padding:8px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);">
+          <option value="">Any</option>
+          <option value="category">Category equals</option>
+          <option value="priority">Priority equals</option>
+          <option value="title_contains">Title contains</option>
+          <option value="horizon">Horizon equals</option>
+        </select>
+      </div>
+      <input type="text" id="auto-cond-value" placeholder="Value..." style="padding:8px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);">
+    </div>
+    <label>Then (Action)</label>
+    <select id="auto-action" style="width:100%;padding:10px 14px;font-size:14px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);" onchange="updateActionFields()">
+      <option value="set_priority">Set Priority</option>
+      <option value="set_category">Set Category</option>
+      <option value="set_horizon">Set Horizon</option>
+      <option value="add_tag">Add Tag (notes)</option>
+      <option value="create_todo">Create Follow-up Task</option>
+    </select>
+    <label>Action Value</label>
+    <input type="text" id="auto-action-value" placeholder="e.g. urgent, work, short...">
+    <div class="modal-actions">
+      <button onclick="closeAutoModal()">Cancel</button>
+      <button class="primary" onclick="saveAutomation()">Save</button>
+      <button class="danger" id="auto-delete-btn" style="display:none" onclick="deleteAutomation()">Delete</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -3607,12 +4215,95 @@ async function emptyTrash() {
   setTimeout(function(){ el.className = 'status-msg'; }, 3000);
 }
 
+// Automations
+async function loadAutomations() {
+  var autos = await fetch('/api/automations').then(r=>r.json());
+  var el = document.getElementById('automations-list');
+  if (!autos.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">No automation rules configured.</div>'; return; }
+  el.innerHTML = autos.map(a => {
+    var condText = '';
+    if (a.conditions) {
+      var keys = Object.keys(a.conditions).filter(k=>a.conditions[k]);
+      condText = keys.length ? ' when ' + keys.map(k=>k+'='+a.conditions[k]).join(' & ') : '';
+    }
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px;">'
+      +'<div style="flex:1;"><div style="font-weight:400;">'+esc(a.name)+'</div>'
+      +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">'+a.trigger_type+condText+' &rarr; '+a.action_type+'</div></div>'
+      +'<div style="display:flex;gap:6px;align-items:center;">'
+      +'<button onclick="toggleAutomation('+a.id+','+!a.enabled+')" style="background:'+(a.enabled?'var(--green-bg)':'var(--surface-2)')+';color:'+(a.enabled?'var(--green)':'var(--text-muted)')+';border:1px solid '+(a.enabled?'var(--green)':'var(--border)')+';padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(a.enabled?'On':'Off')+'</button>'
+      +'<button onclick="editAutomation('+a.id+')" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Edit</button>'
+      +'</div></div>';
+  }).join('');
+}
+function openAutoModal() {
+  document.getElementById('auto-modal-title').textContent = 'New Automation';
+  document.getElementById('auto-id').value = '';
+  document.getElementById('auto-name').value = '';
+  document.getElementById('auto-trigger').value = 'todo_created';
+  document.getElementById('auto-cond-field').value = '';
+  document.getElementById('auto-cond-value').value = '';
+  document.getElementById('auto-action').value = 'set_priority';
+  document.getElementById('auto-action-value').value = '';
+  document.getElementById('auto-delete-btn').style.display = 'none';
+  document.getElementById('auto-modal').classList.add('active');
+}
+function closeAutoModal() { document.getElementById('auto-modal').classList.remove('active'); }
+async function editAutomation(id) {
+  var autos = await fetch('/api/automations').then(r=>r.json());
+  var a = autos.find(x=>x.id===id); if (!a) return;
+  document.getElementById('auto-modal-title').textContent = 'Edit Automation';
+  document.getElementById('auto-id').value = id;
+  document.getElementById('auto-name').value = a.name;
+  document.getElementById('auto-trigger').value = a.trigger_type;
+  var condKeys = Object.keys(a.conditions||{}).filter(k=>a.conditions[k]);
+  document.getElementById('auto-cond-field').value = condKeys[0] || '';
+  document.getElementById('auto-cond-value').value = condKeys.length ? a.conditions[condKeys[0]] : '';
+  document.getElementById('auto-action').value = a.action_type;
+  var actData = a.action_data||{};
+  document.getElementById('auto-action-value').value = actData[Object.keys(actData)[0]] || '';
+  document.getElementById('auto-delete-btn').style.display = 'inline-block';
+  document.getElementById('auto-modal').classList.add('active');
+}
+async function saveAutomation() {
+  var id = document.getElementById('auto-id').value;
+  var condField = document.getElementById('auto-cond-field').value;
+  var condValue = document.getElementById('auto-cond-value').value;
+  var actionType = document.getElementById('auto-action').value;
+  var actionValue = document.getElementById('auto-action-value').value;
+  var conditions = {};
+  if (condField && condValue) conditions[condField] = condValue;
+  var actionKey = actionType === 'set_priority' ? 'priority' : actionType === 'set_category' ? 'category' : actionType === 'set_horizon' ? 'horizon' : actionType === 'add_tag' ? 'tag' : 'title';
+  var action_data = {}; action_data[actionKey] = actionValue;
+  var data = {
+    name: document.getElementById('auto-name').value,
+    trigger_type: document.getElementById('auto-trigger').value,
+    conditions: conditions,
+    action_type: actionType,
+    action_data: action_data,
+  };
+  if (!data.name) return alert('Name is required');
+  if (id) await fetch('/api/automations/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  else await fetch('/api/automations', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  closeAutoModal(); loadAutomations();
+}
+async function deleteAutomation() {
+  var id = document.getElementById('auto-id').value;
+  await fetch('/api/automations/'+id, {method:'DELETE'});
+  closeAutoModal(); loadAutomations();
+}
+async function toggleAutomation(id, enabled) {
+  await fetch('/api/automations/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})});
+  loadAutomations();
+}
+function updateActionFields() {}
+
 async function logout() {
   await fetch('/api/logout', {method:'POST'});
   location.href = '/login';
 }
 
 load();
+loadAutomations();
 </script>
 </body></html>`);
 });
@@ -3638,10 +4329,73 @@ app.get("/manifest.json", (req, res) => {
 
 app.get("/sw.js", (req, res) => {
   res.type("application/javascript").send(`
-    const CACHE = 'per-sistant-v1';
-    self.addEventListener('install', e => { self.skipWaiting(); });
-    self.addEventListener('activate', e => { e.waitUntil(clients.claim()); });
-    self.addEventListener('fetch', e => { e.respondWith(fetch(e.request).catch(() => caches.match(e.request))); });
+    const CACHE = 'per-sistant-v2';
+    const PAGES = ['/', '/todos', '/emails', '/notes', '/calendar', '/contacts', '/review', '/settings'];
+    const OFFLINE_KEY = 'per-sistant-offline-queue';
+
+    self.addEventListener('install', e => {
+      e.waitUntil(caches.open(CACHE).then(cache => cache.addAll(PAGES)).then(() => self.skipWaiting()));
+    });
+
+    self.addEventListener('activate', e => {
+      e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+    });
+
+    self.addEventListener('fetch', e => {
+      const url = new URL(e.request.url);
+      // API requests: network-first, cache fallback for GET
+      if (url.pathname.startsWith('/api/')) {
+        if (e.request.method === 'GET') {
+          e.respondWith(
+            fetch(e.request).then(r => {
+              const rc = r.clone();
+              caches.open(CACHE).then(cache => cache.put(e.request, rc));
+              return r;
+            }).catch(() => caches.match(e.request))
+          );
+        } else {
+          // POST/PATCH/DELETE: try network, queue if offline
+          e.respondWith(
+            fetch(e.request.clone()).catch(async () => {
+              // Store in offline queue for sync later
+              const body = await e.request.clone().text();
+              const queue = JSON.parse(await (await caches.match(OFFLINE_KEY))?.text() || '[]');
+              queue.push({ url: e.request.url, method: e.request.method, body, headers: Object.fromEntries(e.request.headers) });
+              const queueResponse = new Response(JSON.stringify(queue));
+              await caches.open(CACHE).then(c => c.put(OFFLINE_KEY, queueResponse));
+              return new Response(JSON.stringify({ ok: true, offline: true }), { headers: { 'Content-Type': 'application/json' } });
+            })
+          );
+        }
+        return;
+      }
+      // Page requests: network-first with cache fallback
+      e.respondWith(
+        fetch(e.request).then(r => {
+          const rc = r.clone();
+          caches.open(CACHE).then(cache => cache.put(e.request, rc));
+          return r;
+        }).catch(() => caches.match(e.request))
+      );
+    });
+
+    // Sync offline queue when back online
+    self.addEventListener('message', e => {
+      if (e.data === 'sync') {
+        caches.open(CACHE).then(async cache => {
+          const resp = await cache.match(OFFLINE_KEY);
+          if (!resp) return;
+          const queue = JSON.parse(await resp.text());
+          for (const req of queue) {
+            try {
+              await fetch(req.url, { method: req.method, body: req.body, headers: req.headers });
+            } catch {}
+          }
+          await cache.delete(OFFLINE_KEY);
+          self.clients.matchAll().then(clients => clients.forEach(c => c.postMessage('synced')));
+        });
+      }
+    });
   `);
 });
 
