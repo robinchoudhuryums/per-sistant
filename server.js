@@ -218,7 +218,6 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
-      scriptSrcAttr: ["'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
     },
@@ -614,6 +613,9 @@ const SHARED_JS = `
   if(u.startsWith('/api/')){opts.headers=opts.headers||{};if(!opts.headers['X-Requested-With'])opts.headers['X-Requested-With']='XMLHttpRequest';}
   return _f.call(this,url,opts);
 };})();
+// Event delegation helpers (CSP-safe, no inline handlers needed)
+function bindEvents(bindings){bindings.forEach(function(b){var el=document.getElementById(b[0]);if(el)el.addEventListener(b[1],b[2]);});}
+function onDelegate(parentId,event,selector,handler){var p=document.getElementById(parentId);if(!p)return;p.addEventListener(event,function(e){var t=e.target.closest(selector);if(t&&p.contains(t))handler.call(t,e);});}
 function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 function renderMd(s){
   if(!s)return'';
@@ -699,7 +701,7 @@ function showUndo(msg,type,id,action){
   var el=document.getElementById('undo-toast');
   if(!el){el=document.createElement('div');el.id='undo-toast';el.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface-2);border:1px solid var(--border);padding:12px 20px;border-radius:12px;display:flex;align-items:center;gap:12px;z-index:9999;backdrop-filter:blur(20px);font-size:14px;color:var(--text);box-shadow:0 8px 32px rgba(0,0,0,0.3);';document.body.appendChild(el);}
   var undoAction = action || 'delete';
-  el.innerHTML=esc(msg)+' <button onclick="undoAction(\\''+type+'\\','+id+',\\''+undoAction+'\\');event.stopPropagation();" style="background:var(--warm);color:#fff;border:none;padding:4px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;">Undo</button>';
+  el.innerHTML=esc(msg)+' <button data-undo-type="'+type+'" data-undo-id="'+id+'" data-undo-action="'+undoAction+'" style="background:var(--warm);color:#fff;border:none;padding:4px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;">Undo</button>';
   el.style.display='flex';
   _undoTimer=setTimeout(function(){el.style.display='none';},6000);
 }
@@ -717,6 +719,13 @@ async function undoAction(type,id,action){
 }
 // Backward compat
 function undoDelete(type,id){undoAction(type,id,'delete');}
+// Global event delegation
+document.addEventListener('click',function(e){
+  var ub=e.target.closest('[data-undo-type]');
+  if(ub){e.stopPropagation();undoAction(ub.dataset.undoType,ub.dataset.undoId,ub.dataset.undoAction);}
+  var nt=e.target.closest('#nav-toggle-btn');
+  if(nt){document.querySelector('.nav-links').classList.toggle('mobile-open');}
+});
 `;
 
 // ---------------------------------------------------------------------------
@@ -757,7 +766,7 @@ function navBar(activePage) {
   return `<nav class="topnav">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
       <div class="logo">Per-sistant</div>
-      <button class="mobile-toggle" onclick="document.querySelector('.nav-links').classList.toggle('mobile-open')" aria-label="Toggle menu">&#9776;</button>
+      <button class="mobile-toggle" id="nav-toggle-btn" aria-label="Toggle menu">&#9776;</button>
     </div>
     <div class="nav-links">
       ${links.map(l => `<a href="${l.href}" class="${activePage === l.href ? 'active' : ''}">${l.label}</a>`).join("\n      ")}
@@ -2655,7 +2664,7 @@ ${themeScript()}
   ${navBar("/")}
   <div style="display:flex;align-items:center;justify-content:space-between;">
     <div><h1>Dashboard</h1><p class="subtitle" style="margin-bottom:0;">Your personal command center</p></div>
-    <button id="customize-btn" onclick="toggleCustomize()" style="padding:6px 14px;font-size:10px;font-weight:500;letter-spacing:0.5px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;text-transform:uppercase;">Customize</button>
+    <button id="customize-btn" style="padding:6px 14px;font-size:10px;font-weight:500;letter-spacing:0.5px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;text-transform:uppercase;">Customize</button>
   </div>
   <div style="margin-bottom:36px;"></div>
 
@@ -2663,7 +2672,7 @@ ${themeScript()}
   <div id="customize-panel" style="display:none;margin-bottom:24px;padding:16px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--warm);">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
       <span style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;">Widget Visibility &amp; Order</span>
-      <button onclick="resetLayout()" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Reset</button>
+      <button id="reset-layout-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Reset</button>
     </div>
     <div id="widget-toggles" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
     <div style="margin-top:10px;font-size:10px;color:var(--text-muted);">Drag widgets below to reorder. Click toggles above to show/hide.</div>
@@ -2671,21 +2680,21 @@ ${themeScript()}
 
   <div id="dash-widgets">
     <!-- Search widget -->
-    <div class="dash-widget" data-widget="search" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="search" draggable="true">
       <div class="search-bar">
         <span class="search-icon">&#128269;</span>
-        <input type="text" id="global-search" placeholder="Search todos, emails, notes, contacts... (press /)" oninput="doSearch(this.value)">
+        <input type="text" id="global-search" placeholder="Search todos, emails, notes, contacts... (press /)">
       </div>
       <div class="section search-results" id="search-results" style="display:none;margin-bottom:24px;"></div>
     </div>
 
     <!-- Cards widget -->
-    <div class="dash-widget" data-widget="cards" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="cards" draggable="true">
       <div class="top-cards" id="cards"></div>
     </div>
 
     <!-- AI Daily Briefing widget -->
-    <div class="dash-widget" data-widget="briefing" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="briefing" draggable="true">
       <div id="briefing-section" style="display:none;margin-bottom:24px;">
         <div class="section">
           <h2>Today's Briefing</h2>
@@ -2695,7 +2704,7 @@ ${themeScript()}
     </div>
 
     <!-- AI Smart Suggestions widget -->
-    <div class="dash-widget" data-widget="suggestions" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="suggestions" draggable="true">
       <div id="suggestions-section" style="display:none;margin-bottom:24px;">
         <div class="section">
           <h2>Smart Suggestions</h2>
@@ -2705,35 +2714,35 @@ ${themeScript()}
     </div>
 
     <!-- AI Natural Language Query widget -->
-    <div class="dash-widget" data-widget="ai_query" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="ai_query" draggable="true">
       <div class="section" style="margin-bottom:24px;">
         <h2>Ask Your Assistant</h2>
         <div style="display:flex;gap:8px;">
-          <input type="text" id="ai-query-input" placeholder="Ask anything... &quot;What did I do last week?&quot; &quot;How many tasks are overdue?&quot;" style="flex:1;padding:10px 14px;font-size:13px;font-family:inherit;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);outline:none;" onkeydown="if(event.key==='Enter')askAI()">
-          <button onclick="askAI()" style="padding:10px 18px;font-size:12px;font-weight:500;letter-spacing:0.5px;border:1px solid var(--teal);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;">Ask</button>
+          <input type="text" id="ai-query-input" placeholder="Ask anything... &quot;What did I do last week?&quot; &quot;How many tasks are overdue?&quot;" style="flex:1;padding:10px 14px;font-size:13px;font-family:inherit;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);outline:none;">
+          <button id="ask-ai-btn" style="padding:10px 18px;font-size:12px;font-weight:500;letter-spacing:0.5px;border:1px solid var(--teal);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;">Ask</button>
         </div>
         <div id="ai-query-answer" style="display:none;margin-top:12px;padding:12px 16px;background:var(--surface-2);border-radius:8px;font-size:13px;font-weight:300;line-height:1.6;white-space:pre-wrap;"></div>
       </div>
     </div>
 
     <!-- Task Overview widget -->
-    <div class="dash-widget" data-widget="tasks" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="tasks" draggable="true">
       <div class="section" style="margin-bottom:24px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
           <h2 style="margin-bottom:0;">Task Overview</h2>
         </div>
         <div class="filters" id="dash-task-filters">
-          <button class="active" onclick="setDashView(this,'all')">All</button>
-          <button onclick="setDashView(this,'category')">By Category</button>
-          <button onclick="setDashView(this,'urgency')">By Urgency</button>
-          <button onclick="setDashView(this,'due')">Due Soon</button>
+          <button class="active" data-view="all">All</button>
+          <button data-view="category">By Category</button>
+          <button data-view="urgency">By Urgency</button>
+          <button data-view="due">Due Soon</button>
         </div>
         <div id="dash-tasks"></div>
       </div>
     </div>
 
     <!-- Upcoming + Emails widget -->
-    <div class="dash-widget" data-widget="upcoming_emails" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="upcoming_emails" draggable="true">
       <div class="dash-two-col" style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
         <div class="section">
           <h2>Upcoming Tasks</h2>
@@ -2747,7 +2756,7 @@ ${themeScript()}
     </div>
 
     <!-- Perfin widget -->
-    <div class="dash-widget" data-widget="perfin" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="perfin" draggable="true">
       <div id="perfin-section" style="display:none;margin-top:24px;">
         <div class="section">
           <h2>Perfin — Financial Overview</h2>
@@ -2757,7 +2766,7 @@ ${themeScript()}
     </div>
 
     <!-- Shortcuts widget -->
-    <div class="dash-widget" data-widget="shortcuts" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="shortcuts" draggable="true">
       <div style="margin-top:24px;text-align:center;">
         <p style="font-size:11px;color:var(--text-muted);">Keyboard shortcuts: <span class="kbd">/</span> Search &middot; <span class="kbd">N</span> New task &middot; <span class="kbd">E</span> New email &middot; <span class="kbd">?</span> Show all</p>
       </div>
@@ -2777,11 +2786,11 @@ function doSearch(q) {
         var href = r.type==='todo'?'/todos':r.type==='email'?'/emails':r.type==='note'?'/notes':'/contacts';
         var actions = '';
         if (r.type === 'todo' && !r.completed) {
-          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button onclick="event.preventDefault();event.stopPropagation();searchComplete('+r.id+','+!!r.recurring+')" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Complete</button></div>';
+          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button data-action="search-complete" data-id="'+r.id+'" data-recurring="'+!!r.recurring+'" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Complete</button></div>';
         } else if (r.type === 'email' && r.status === 'scheduled') {
-          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button onclick="event.preventDefault();event.stopPropagation();searchSendEmail('+r.id+')" style="background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Send Now</button></div>';
+          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button data-action="search-send" data-id="'+r.id+'" style="background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Send Now</button></div>';
         } else if (r.type === 'note') {
-          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button onclick="event.preventDefault();event.stopPropagation();searchTogglePin('+r.id+','+!r.pinned+')" style="background:var(--yellow-bg);color:var(--yellow);border:1px solid var(--yellow);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(r.pinned?'Unpin':'Pin')+'</button></div>';
+          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button data-action="search-pin" data-id="'+r.id+'" data-pinned="'+!r.pinned+'" style="background:var(--yellow-bg);color:var(--yellow);border:1px solid var(--yellow);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(r.pinned?'Unpin':'Pin')+'</button></div>';
         }
         return '<a href="'+href+'" class="result-item" style="display:block;text-decoration:none;color:inherit;"><div class="result-type">'+r.type+(r.type==='todo'&&r.completed?' (done)':'')+'</div><div style="font-size:14px;">'+esc(r.title||'')+'</div>'+(r.description?'<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+esc(r.description)+'</div>':'')+actions+'</a>';
       }).join('');
@@ -2792,7 +2801,7 @@ function doSearch(q) {
 
 var dashView = 'all';
 var allTodos = [];
-function setDashView(btn, v) { dashView = v; document.querySelectorAll('#dash-task-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); renderDashTasks(); }
+function setDashView(btn, v) { dashView = v; document.querySelectorAll('#dash-task-filters button').forEach(function(b){b.classList.remove('active');}); btn.classList.add('active'); renderDashTasks(); }
 
 function renderDashTasks() {
   var container = document.getElementById('dash-tasks');
@@ -2829,9 +2838,7 @@ function renderDashTasks() {
 
 function renderDashTodo(t) {
   var overdue = t.due_date && new Date(t.due_date) <= new Date() ? ' style="color:var(--red)"' : '';
-  var completeBtn = t.recurring
-    ? '<button onclick="event.stopPropagation();dashCompleteRecurring('+t.id+')" title="Complete & create next" style="background:none;border:1px solid var(--green);color:var(--green);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">&#10003;</button>'
-    : '<button onclick="event.stopPropagation();dashComplete('+t.id+')" title="Mark complete" style="background:none;border:1px solid var(--green);color:var(--green);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">&#10003;</button>';
+  var completeBtn = '<button data-action="'+(t.recurring?'dash-complete-recurring':'dash-complete')+'" data-id="'+t.id+'" title="'+(t.recurring?'Complete & create next':'Mark complete')+'" style="background:none;border:1px solid var(--green);color:var(--green);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">&#10003;</button>';
   var streakBadge = t.recurring && t.streak_count > 0 ? '<span class="badge streak">&#x1F525; '+t.streak_count+'</span>' : '';
   return '<div class="todo-item" style="display:flex;align-items:center;gap:10px;">'+completeBtn+'<div class="todo-content" style="flex:1;"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span>'+(t.category?'<span>'+esc(t.category)+'</span>':'')+(t.due_date?'<span'+overdue+'>Due: '+new Date(t.due_date).toLocaleDateString()+'</span>':'')+(t.recurring?'<span class="badge recurring">recurring</span>':'')+streakBadge+'</div></div></div>';
 }
@@ -2900,7 +2907,7 @@ async function load() {
 
   const emails = await fetch('/api/emails?status=scheduled').then(r=>r.json());
   document.getElementById('scheduled-emails').innerHTML = emails.length
-    ? emails.slice(0,5).map(e => '<div class="todo-item" style="display:flex;align-items:center;gap:10px;"><button onclick="event.stopPropagation();dashSendEmail('+e.id+')" title="Send now" style="background:none;border:1px solid var(--blue);color:var(--blue);padding:2px 8px;border-radius:6px;cursor:pointer;font-size:11px;flex-shrink:0;font-family:inherit;">Send</button><div class="todo-content" style="flex:1;"><div class="todo-title">'+esc(e.subject)+'</div><div class="todo-meta"><span>To: '+esc(e.recipient_name||e.recipient_email)+'</span><span>'+new Date(e.scheduled_at).toLocaleString()+'</span></div></div></div>').join('')
+    ? emails.slice(0,5).map(e => '<div class="todo-item" style="display:flex;align-items:center;gap:10px;"><button data-action="dash-send-email" data-id="'+e.id+'" title="Send now" style="background:none;border:1px solid var(--blue);color:var(--blue);padding:2px 8px;border-radius:6px;cursor:pointer;font-size:11px;flex-shrink:0;font-family:inherit;">Send</button><div class="todo-content" style="flex:1;"><div class="todo-title">'+esc(e.subject)+'</div><div class="todo-meta"><span>To: '+esc(e.recipient_name||e.recipient_email)+'</span><span>'+new Date(e.scheduled_at).toLocaleString()+'</span></div></div></div>').join('')
     : '<div class="empty-msg">No scheduled emails</div>';
 
   // Load Perfin data
@@ -2998,7 +3005,7 @@ function renderToggles() {
   var html = '';
   dashLayout.widgets.forEach(id => {
     var hidden = dashLayout.hidden.includes(id);
-    html += '<button onclick="toggleWidget(\\''+id+'\\');event.stopPropagation();" style="padding:4px 12px;font-size:10px;font-weight:500;border-radius:20px;cursor:pointer;font-family:inherit;border:1px solid '+(hidden?'var(--border)':'var(--warm)')+';background:'+(hidden?'transparent':'rgba(212,165,116,0.1)')+';color:'+(hidden?'var(--text-muted)':'var(--warm)')+';">'+(widgetNames[id]||id)+'</button>';
+    html += '<button data-toggle-widget="'+id+'" style="padding:4px 12px;font-size:10px;font-weight:500;border-radius:20px;cursor:pointer;font-family:inherit;border:1px solid '+(hidden?'var(--border)':'var(--warm)')+';background:'+(hidden?'transparent':'rgba(212,165,116,0.1)')+';color:'+(hidden?'var(--text-muted)':'var(--warm)')+';">'+(widgetNames[id]||id)+'</button>';
   });
   document.getElementById('widget-toggles').innerHTML = html;
 }
@@ -3054,6 +3061,42 @@ document.addEventListener('keydown', function(e) {
   else if (e.key === 'r' || e.key === 'R') { location.href = '/review'; }
 });
 
+// Bind static events
+bindEvents([
+  ['customize-btn','click',toggleCustomize],
+  ['reset-layout-btn','click',resetLayout],
+  ['ask-ai-btn','click',askAI],
+]);
+document.getElementById('global-search').addEventListener('input',function(){doSearch(this.value);});
+document.getElementById('ai-query-input').addEventListener('keydown',function(e){if(e.key==='Enter')askAI();});
+
+// Dash view filter tabs
+onDelegate('dash-task-filters','click','button[data-view]',function(){setDashView(this,this.dataset.view);});
+
+// Widget toggles (dynamic)
+onDelegate('widget-toggles','click','[data-toggle-widget]',function(e){e.stopPropagation();toggleWidget(this.dataset.toggleWidget);});
+
+// Drag-and-drop on widgets
+var dwc=document.getElementById('dash-widgets');
+dwc.addEventListener('dragstart',function(e){var w=e.target.closest('.dash-widget');if(w)wdragStart({currentTarget:w,preventDefault:function(){},dataTransfer:e.dataTransfer});});
+dwc.addEventListener('dragover',function(e){e.preventDefault();var w=e.target.closest('.dash-widget');if(w)w.style.borderTop='2px solid var(--warm)';});
+dwc.addEventListener('drop',function(e){e.preventDefault();var w=e.target.closest('.dash-widget');if(w){w.style.borderTop='';wdrop({preventDefault:function(){},currentTarget:w});}});
+dwc.addEventListener('dragend',function(){document.querySelectorAll('.dash-widget').forEach(function(w){w.style.opacity='1';w.style.borderTop='';});});
+
+// Dynamic content delegation — dashboard actions
+document.addEventListener('click',function(e){
+  var btn=e.target.closest('[data-action]');
+  if(!btn)return;
+  var id=parseInt(btn.dataset.id),act=btn.dataset.action;
+  e.preventDefault();e.stopPropagation();
+  if(act==='dash-complete')dashComplete(id);
+  else if(act==='dash-complete-recurring')dashCompleteRecurring(id);
+  else if(act==='dash-send-email')dashSendEmail(id);
+  else if(act==='search-complete')searchComplete(id,btn.dataset.recurring==='true');
+  else if(act==='search-send')searchSendEmail(id);
+  else if(act==='search-pin')searchTogglePin(id,btn.dataset.pinned==='true');
+});
+
 loadLayout();
 load();
 </script>
@@ -3073,44 +3116,44 @@ ${themeScript()}
   <p class="subtitle">Short, medium, and long-term task management</p>
 
   <div class="actions">
-    <button class="primary" onclick="openAdd()">+ New Task</button>
-    <button onclick="openQuickTodo()">Quick Add</button>
-    <button onclick="openTemplateList()">From Template</button>
-    <button id="select-toggle" onclick="toggleSelectMode()">Select</button>
+    <button class="primary" id="add-task-btn">+ New Task</button>
+    <button id="quick-add-btn">Quick Add</button>
+    <button id="template-btn">From Template</button>
+    <button id="select-toggle">Select</button>
   </div>
   <div id="bulk-bar" style="display:none;padding:10px 16px;margin-bottom:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);display:none;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;">
     <span id="bulk-count">0 selected</span>
-    <button onclick="bulkAction('complete')" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Complete</button>
-    <button onclick="bulkAction('delete')" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
-    <select id="bulk-priority" onchange="if(this.value)bulkAction('set_priority',{priority:this.value});this.value='';" style="padding:4px 8px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);">
+    <button id="bulk-complete-btn" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Complete</button>
+    <button id="bulk-delete-btn" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
+    <select id="bulk-priority" style="padding:4px 8px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);">
       <option value="">Set Priority...</option><option value="urgent">Urgent</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option>
     </select>
-    <button onclick="selectAll()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
+    <button id="select-all-btn" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
   </div>
 
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;font-weight:500;">
     <span style="padding:6px 0;">View:</span>
   </div>
   <div class="filters" id="horizon-filters">
-    <button class="active" onclick="setHorizon(this,'')">All</button>
-    <button onclick="setHorizon(this,'short')">Short-term</button>
-    <button onclick="setHorizon(this,'medium')">Medium-term</button>
-    <button onclick="setHorizon(this,'long')">Long-term</button>
+    <button class="active" data-horizon="">All</button>
+    <button data-horizon="short">Short-term</button>
+    <button data-horizon="medium">Medium-term</button>
+    <button data-horizon="long">Long-term</button>
   </div>
   <div class="filters" id="status-filters">
-    <button class="active" onclick="setStatus(this,'pending')">Pending</button>
-    <button onclick="setStatus(this,'all')">All</button>
-    <button onclick="setStatus(this,'done')">Completed</button>
+    <button class="active" data-status="pending">Pending</button>
+    <button data-status="all">All</button>
+    <button data-status="done">Completed</button>
   </div>
   <div class="filters" id="priority-filters">
-    <button class="active" onclick="setPriority(this,'')">Any Priority</button>
-    <button onclick="setPriority(this,'urgent')">Urgent</button>
-    <button onclick="setPriority(this,'high')">High</button>
-    <button onclick="setPriority(this,'medium')">Medium</button>
-    <button onclick="setPriority(this,'low')">Low</button>
+    <button class="active" data-priority="">Any Priority</button>
+    <button data-priority="urgent">Urgent</button>
+    <button data-priority="high">High</button>
+    <button data-priority="medium">Medium</button>
+    <button data-priority="low">Low</button>
   </div>
   <div class="filters" id="category-filters">
-    <button class="active" onclick="setCategory(this,'')">All Categories</button>
+    <button class="active" data-cat="">All Categories</button>
   </div>
 
   <div class="section">
@@ -3137,7 +3180,7 @@ ${themeScript()}
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div><label>Category</label>
-        <select id="f-category-select" onchange="if(this.value==='__custom__'){document.getElementById('f-category-custom').style.display='block';document.getElementById('f-category-custom').focus();}else{document.getElementById('f-category-custom').style.display='none';}">
+        <select id="f-category-select">
           <option value="">None</option>
           <option value="__custom__">Custom...</option>
         </select>
@@ -3149,12 +3192,12 @@ ${themeScript()}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div style="margin-top:12px;">
         <label style="display:inline;cursor:pointer">
-          <input type="checkbox" id="f-recurring" style="width:auto;margin-right:6px;" onchange="document.getElementById('f-recurrence').style.display=this.checked?'block':'none'"> Recurring task
+          <input type="checkbox" id="f-recurring" style="width:auto;margin-right:6px;"> Recurring task
         </label>
       </div>
       <div id="f-recurrence" style="display:none;">
         <label>Repeat</label>
-        <select id="f-recurrence-rule" onchange="document.getElementById('f-interval-row').style.display=this.value.startsWith('custom')?'flex':'none'">
+        <select id="f-recurrence-rule">
           <option value="daily">Daily</option><option value="weekdays">Weekdays</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option>
           <option value="custom_days">Every N Days</option><option value="custom_weeks">Every N Weeks</option><option value="custom_months">Every N Months</option>
         </select>
@@ -3166,11 +3209,11 @@ ${themeScript()}
       </div>
     </div>
     <div id="subtasks-section" style="display:none;margin-top:16px;">
-      <label>Subtasks <button onclick="aiBreakdown()" id="ai-breakdown-btn" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Breakdown</button></label>
+      <label>Subtasks <button id="ai-breakdown-btn" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Breakdown</button></label>
       <div id="subtask-list-edit"></div>
       <div style="display:flex;gap:8px;margin-top:8px;">
         <input type="text" id="new-subtask" placeholder="Add subtask..." style="flex:1">
-        <button onclick="addSubtask()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
+        <button id="add-subtask-btn" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
       </div>
     </div>
     <!-- Location reminder (edit mode only) -->
@@ -3178,7 +3221,7 @@ ${themeScript()}
       <label>Location Reminder</label>
       <div style="display:flex;gap:8px;align-items:center;">
         <input type="text" id="f-location-name" placeholder="e.g. Home, Office, Grocery Store" style="flex:1">
-        <button onclick="getLocation()" title="Use current location" style="padding:10px 14px;font-size:14px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);flex-shrink:0;">&#128205;</button>
+        <button id="get-location-btn" title="Use current location" style="padding:10px 14px;font-size:14px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);flex-shrink:0;">&#128205;</button>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px;">
         <input type="number" step="any" id="f-location-lat" placeholder="Latitude" style="font-size:11px;">
@@ -3193,14 +3236,14 @@ ${themeScript()}
       <div id="deps-list" style="margin-bottom:8px;"></div>
       <div style="display:flex;gap:8px;">
         <select id="dep-select" style="flex:1"><option value="">Select a task this depends on...</option></select>
-        <button onclick="addDep()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
+        <button id="add-dep-btn" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
       </div>
     </div>
     <div class="modal-actions">
-      <button onclick="closeModal()">Cancel</button>
-      <button class="primary" onclick="saveTodo()">Save</button>
-      <button id="save-template-btn" style="display:none;padding:10px 20px;font-size:13px;font-weight:500;border:1px solid var(--teal);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;" onclick="saveAsTemplate()">Save as Template</button>
-      <button class="danger" id="delete-btn" style="display:none" onclick="deleteTodo()">Delete</button>
+      <button id="cancel-modal-btn">Cancel</button>
+      <button class="primary" id="save-todo-btn">Save</button>
+      <button id="save-template-btn" style="display:none;padding:10px 20px;font-size:13px;font-weight:500;border:1px solid var(--teal);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;">Save as Template</button>
+      <button class="danger" id="delete-btn" style="display:none">Delete</button>
     </div>
   </div>
 </div>
@@ -3211,7 +3254,7 @@ ${themeScript()}
     <h2>Task Templates</h2>
     <div id="template-list" style="margin-bottom:16px;"></div>
     <div class="modal-actions">
-      <button onclick="closeTemplateList()">Close</button>
+      <button id="close-template-btn">Close</button>
     </div>
   </div>
 </div>
@@ -3225,17 +3268,17 @@ ${themeScript()}
     </p>
     <label>What needs to be done?</label>
     <div style="display:flex;gap:8px;">
-      <input type="text" id="qt-input" placeholder="Type or speak a task..." onkeydown="if(event.key==='Enter')parseQuickTodo()" style="flex:1">
-      <button onclick="startVoiceInput('qt-input')" title="Voice input" style="padding:10px 14px;font-size:16px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);flex-shrink:0;">&#127908;</button>
+      <input type="text" id="qt-input" placeholder="Type or speak a task..." style="flex:1">
+      <button id="qt-voice-btn" title="Voice input" style="padding:10px 14px;font-size:16px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);flex-shrink:0;">&#127908;</button>
     </div>
     <div id="qt-preview" style="display:none;margin-top:16px;" class="section">
       <h2>Preview</h2>
       <div id="qt-preview-content"></div>
     </div>
     <div class="modal-actions">
-      <button onclick="closeQuickTodo()">Cancel</button>
-      <button class="primary" onclick="parseQuickTodoAI()">Parse</button>
-      <button class="primary" id="qt-confirm" style="display:none" onclick="confirmQuickTodo()">Create</button>
+      <button id="qt-cancel-btn">Cancel</button>
+      <button class="primary" id="qt-parse-btn">Parse</button>
+      <button class="primary" id="qt-confirm" style="display:none">Create</button>
     </div>
   </div>
 </div>
@@ -3278,8 +3321,8 @@ async function loadCategories() {
     var cats = await fetch('/api/todo-categories').then(r=>r.json());
     var container = document.getElementById('category-filters');
     var existing = container.querySelector('button.active');
-    var html = '<button class="'+(curCategory===''?'active':'')+'" onclick="setCategory(this,\\'\\')">All Categories</button>';
-    cats.forEach(c => { html += '<button class="'+(curCategory===c?'active':'')+'" onclick="setCategory(this,\\''+c+'\\')">'+c.charAt(0).toUpperCase()+c.slice(1)+'</button>'; });
+    var html = '<button class="'+(curCategory===''?'active':'')+'" data-cat="">All Categories</button>';
+    cats.forEach(c => { html += '<button class="'+(curCategory===c?'active':'')+'" data-cat="'+c+'">'+c.charAt(0).toUpperCase()+c.slice(1)+'</button>'; });
     container.innerHTML = html;
     // Also populate category select in modal
     var sel = document.getElementById('f-category-select');
@@ -3318,7 +3361,7 @@ async function load() {
     if (subs.length) {
       subHtml = '<div class="subtask-progress"><div class="subtask-progress-fill" style="width:'+(subDone/subs.length*100)+'%"></div></div>';
       subHtml += '<div class="subtask-list">'+subs.map(s =>
-        '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" onclick="event.stopPropagation();toggleSubtask('+s.id+','+!s.completed+')"></div><span class="subtask-text'+(s.completed?' done':'')+'" ondblclick="event.stopPropagation();inlineEditSubtask(this,'+s.id+')">'+esc(s.title)+'</span><button class="subtask-edit-btn" onclick="event.stopPropagation();inlineEditSubtask(this.previousElementSibling,'+s.id+')">&#9998;</button></div>'
+        '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" data-action="toggle-subtask" data-id="'+s.id+'" data-completed="'+!s.completed+'"></div><span class="subtask-text'+(s.completed?' done':'')+'" data-action="edit-subtask" data-id="'+s.id+'">'+esc(s.title)+'</span><button class="subtask-edit-btn" data-action="edit-subtask-btn" data-id="'+s.id+'">&#9998;</button></div>'
       ).join('')+'</div>';
     }
     var deps = depMap[t.id] || {blocked_by:[],blocking:[]};
@@ -3339,8 +3382,8 @@ async function load() {
       }
       recurInfo = '<span class="badge recurring">'+ruleLabel+'</span>';
     }
-    var skipSnoozeButtons = t.recurring && !t.completed ? '<button onclick="event.stopPropagation();skipTodo('+t.id+')" title="Skip this occurrence" style="font-size:10px;padding:2px 6px;">Skip</button><button onclick="event.stopPropagation();snoozeTodo('+t.id+')" title="Snooze" style="font-size:10px;padding:2px 6px;">&#128164;</button>' : '';
-    return '<div class="todo-item'+(isBlocked?' todo-blocked':'')+'" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><input type="checkbox" class="bulk-check" data-id="'+t.id+'" style="display:'+(selectMode?'inline-block':'none')+';accent-color:var(--warm);margin-right:4px;cursor:pointer;" onchange="toggleBulkItem('+t.id+',this.checked)"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" onclick="toggleTodo('+t.id+','+!t.completed+','+!!t.recurring+')"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+recurInfo+depBadges+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions">'+skipSnoozeButtons+'<button onclick="openEdit('+t.id+')">&#9998;</button></div></div>';
+    var skipSnoozeButtons = t.recurring && !t.completed ? '<button data-action="skip" data-id="'+t.id+'" title="Skip this occurrence" style="font-size:10px;padding:2px 6px;">Skip</button><button data-action="snooze" data-id="'+t.id+'" title="Snooze" style="font-size:10px;padding:2px 6px;">&#128164;</button>' : '';
+    return '<div class="todo-item'+(isBlocked?' todo-blocked':'')+'" draggable="true" data-id="'+t.id+'"><input type="checkbox" class="bulk-check" data-id="'+t.id+'" style="display:'+(selectMode?'inline-block':'none')+';accent-color:var(--warm);margin-right:4px;cursor:pointer;"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" data-action="toggle" data-id="'+t.id+'" data-completed="'+!t.completed+'" data-recurring="'+!!t.recurring+'"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+recurInfo+depBadges+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions">'+skipSnoozeButtons+'<button data-action="edit" data-id="'+t.id+'">&#9998;</button></div></div>';
   }).join('');
 }
 
@@ -3390,13 +3433,13 @@ async function addSubtask() {
 }
 function renderEditSubtasks() {
   document.getElementById('subtask-list-edit').innerHTML = editSubtasks.map((s,i) =>
-    '<div class="subtask-item"><span class="subtask-text" ondblclick="inlineEditNewSubtask(this,'+i+')">'+esc(s.title)+'</span><button class="subtask-edit-btn" onclick="inlineEditNewSubtask(this.previousElementSibling,'+i+')" title="Edit">&#9998;</button><button onclick="editSubtasks.splice('+i+',1);renderEditSubtasks()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:8px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;">&#10005;</button></div>'
+    '<div class="subtask-item"><span class="subtask-text" data-action="edit-new-sub" data-idx="'+i+'">'+esc(s.title)+'</span><button class="subtask-edit-btn" data-action="edit-new-sub-btn" data-idx="'+i+'" title="Edit">&#9998;</button><button data-action="remove-new-sub" data-idx="'+i+'" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:8px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;">&#10005;</button></div>'
   ).join('');
 }
 async function loadEditSubtasks(todoId) {
   var subs = await fetch('/api/todos/'+todoId+'/subtasks').then(r=>r.json());
   document.getElementById('subtask-list-edit').innerHTML = subs.map(s =>
-    '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" onclick="toggleSubtask('+s.id+','+!s.completed+');loadEditSubtasks('+todoId+')"></div><span class="subtask-text'+(s.completed?' done':'')+'" ondblclick="inlineEditSubtask(this,'+s.id+','+todoId+')">'+esc(s.title)+'</span><button class="subtask-edit-btn" onclick="inlineEditSubtask(this.previousElementSibling,'+s.id+','+todoId+')" title="Edit">&#9998;</button><button onclick="deleteSubtask('+s.id+','+todoId+')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:8px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;">&#10005;</button></div>'
+    '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" data-action="toggle-edit-sub" data-id="'+s.id+'" data-completed="'+!s.completed+'" data-todo="'+todoId+'"></div><span class="subtask-text'+(s.completed?' done':'')+'" data-action="inline-edit-sub" data-id="'+s.id+'" data-todo="'+todoId+'">'+esc(s.title)+'</span><button class="subtask-edit-btn" data-action="inline-edit-sub-btn" data-id="'+s.id+'" data-todo="'+todoId+'" title="Edit">&#9998;</button><button data-action="delete-sub" data-id="'+s.id+'" data-todo="'+todoId+'" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:8px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;">&#10005;</button></div>'
   ).join('');
 }
 async function deleteSubtask(id, todoId) {
@@ -3619,7 +3662,7 @@ async function loadDeps(todoId) {
   if (deps.blocked_by.length) {
     html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Blocked by:</div>';
     deps.blocked_by.forEach(d => {
-      html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:12px;"><span class="badge blocked">blocked by</span><span'+(d.completed?' style="text-decoration:line-through;opacity:0.5"':'')+'>'+esc(d.title)+'</span><button onclick="removeDep('+d.dep_id+','+todoId+')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:4px;">&times;</button></div>';
+      html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:12px;"><span class="badge blocked">blocked by</span><span'+(d.completed?' style="text-decoration:line-through;opacity:0.5"':'')+'>'+esc(d.title)+'</span><button data-action="remove-dep" data-dep-id="'+d.dep_id+'" data-todo="'+todoId+'" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:4px;">&times;</button></div>';
     });
   }
   if (deps.blocking.length) {
@@ -3749,7 +3792,7 @@ async function openTemplateList() {
   else {
     el.innerHTML = templates.map(t => {
       var subs = t.subtasks || [];
-      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="flex:1;"><div style="font-size:14px;font-weight:400;">'+esc(t.name)+'</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+esc(t.title)+' &middot; <span class="badge '+t.priority+'">'+t.priority+'</span> &middot; '+t.horizon+(subs.length?' &middot; '+subs.length+' subtasks':'')+'</div></div><div style="display:flex;gap:6px;"><button onclick="applyTemplate('+t.id+')" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Use</button><button onclick="deleteTemplate('+t.id+')" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">&#10005;</button></div></div>';
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="flex:1;"><div style="font-size:14px;font-weight:400;">'+esc(t.name)+'</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+esc(t.title)+' &middot; <span class="badge '+t.priority+'">'+t.priority+'</span> &middot; '+t.horizon+(subs.length?' &middot; '+subs.length+' subtasks':'')+'</div></div><div style="display:flex;gap:6px;"><button data-action="apply-template" data-id="'+t.id+'" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Use</button><button data-action="delete-template" data-id="'+t.id+'" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">&#10005;</button></div></div>';
     }).join('');
   }
   document.getElementById('template-modal').classList.add('active');
@@ -3800,6 +3843,74 @@ document.addEventListener('keydown', function(e) {
 });
 
 
+// Bind static events
+bindEvents([
+  ['add-task-btn','click',openAdd],
+  ['quick-add-btn','click',openQuickTodo],
+  ['template-btn','click',openTemplateList],
+  ['select-toggle','click',toggleSelectMode],
+  ['bulk-complete-btn','click',function(){bulkAction('complete');}],
+  ['bulk-delete-btn','click',function(){bulkAction('delete');}],
+  ['select-all-btn','click',selectAll],
+  ['ai-breakdown-btn','click',aiBreakdown],
+  ['add-subtask-btn','click',addSubtask],
+  ['get-location-btn','click',getLocation],
+  ['add-dep-btn','click',addDep],
+  ['cancel-modal-btn','click',closeModal],
+  ['save-todo-btn','click',saveTodo],
+  ['save-template-btn','click',saveAsTemplate],
+  ['delete-btn','click',deleteTodo],
+  ['close-template-btn','click',closeTemplateList],
+  ['qt-voice-btn','click',function(){startVoiceInput('qt-input');}],
+  ['qt-cancel-btn','click',closeQuickTodo],
+  ['qt-parse-btn','click',parseQuickTodoAI],
+  ['qt-confirm','click',confirmQuickTodo],
+]);
+document.getElementById('bulk-priority').addEventListener('change',function(){if(this.value){bulkAction('set_priority',{priority:this.value});this.value='';}});
+document.getElementById('f-category-select').addEventListener('change',function(){if(this.value==='__custom__'){document.getElementById('f-category-custom').style.display='block';document.getElementById('f-category-custom').focus();}else{document.getElementById('f-category-custom').style.display='none';}});
+document.getElementById('f-recurring').addEventListener('change',function(){document.getElementById('f-recurrence').style.display=this.checked?'block':'none';});
+document.getElementById('f-recurrence-rule').addEventListener('change',function(){document.getElementById('f-interval-row').style.display=this.value.startsWith('custom')?'flex':'none';});
+document.getElementById('qt-input').addEventListener('keydown',function(e){if(e.key==='Enter')parseQuickTodo();});
+
+// Filter delegations
+onDelegate('horizon-filters','click','button[data-horizon]',function(){setHorizon(this,this.dataset.horizon);});
+onDelegate('status-filters','click','button[data-status]',function(){setStatus(this,this.dataset.status);});
+onDelegate('priority-filters','click','button[data-priority]',function(){setPriority(this,this.dataset.priority);});
+onDelegate('category-filters','click','button[data-cat]',function(){setCategory(this,this.dataset.cat);});
+
+// Drag on todo list
+var tl=document.getElementById('todo-list');
+tl.addEventListener('dragstart',function(e){var el=e.target.closest('.todo-item[data-id]');if(el)dragStart({currentTarget:el});});
+tl.addEventListener('dragover',function(e){e.preventDefault();var el=e.target.closest('.todo-item[data-id]');if(el)el.classList.add('drag-over');});
+tl.addEventListener('drop',function(e){e.preventDefault();var el=e.target.closest('.todo-item[data-id]');if(el){el.classList.remove('drag-over');drop({preventDefault:function(){},currentTarget:el});}});
+tl.addEventListener('dragend',function(){document.querySelectorAll('.todo-item').forEach(function(el){el.classList.remove('dragging','drag-over');});});
+
+// Dynamic todo item + subtask delegation
+document.addEventListener('click',function(e){
+  var btn=e.target.closest('[data-action]');
+  if(!btn)return;
+  var id=parseInt(btn.dataset.id),act=btn.dataset.action;
+  e.stopPropagation();
+  if(act==='toggle')toggleTodo(id,btn.dataset.completed==='true',btn.dataset.recurring==='true');
+  else if(act==='edit')openEdit(id);
+  else if(act==='skip')skipTodo(id);
+  else if(act==='snooze')snoozeTodo(id);
+  else if(act==='toggle-subtask'){toggleSubtask(id,btn.dataset.completed==='true');}
+  else if(act==='edit-subtask'||act==='edit-subtask-btn'){inlineEditSubtask(act==='edit-subtask-btn'?btn.previousElementSibling:btn,id);}
+  else if(act==='toggle-edit-sub'){toggleSubtask(id,btn.dataset.completed==='true');loadEditSubtasks(parseInt(btn.dataset.todo));}
+  else if(act==='inline-edit-sub'||act==='inline-edit-sub-btn'){inlineEditSubtask(act==='inline-edit-sub-btn'?btn.previousElementSibling:btn,id,parseInt(btn.dataset.todo));}
+  else if(act==='delete-sub')deleteSubtask(id,parseInt(btn.dataset.todo));
+  else if(act==='edit-new-sub'||act==='edit-new-sub-btn'){inlineEditNewSubtask(act==='edit-new-sub-btn'?btn.previousElementSibling:btn,parseInt(btn.dataset.idx));}
+  else if(act==='remove-new-sub'){editSubtasks.splice(parseInt(btn.dataset.idx),1);renderEditSubtasks();}
+  else if(act==='remove-dep')removeDep(parseInt(btn.dataset.depId),parseInt(btn.dataset.todo));
+  else if(act==='apply-template')applyTemplate(id);
+  else if(act==='delete-template')deleteTemplate(id);
+});
+// Bulk check delegation
+document.addEventListener('change',function(e){
+  if(e.target.classList.contains('bulk-check'))toggleBulkItem(parseInt(e.target.dataset.id),e.target.checked);
+});
+
 load();
 </script>
 </body></html>`);
@@ -3819,23 +3930,23 @@ ${themeScript()}
   <p class="subtitle">Draft, schedule, and send emails</p>
 
   <div class="actions">
-    <button class="primary" onclick="openCompose()">+ Compose</button>
-    <button onclick="openQuick()">Quick Send</button>
-    <button onclick="openTemplates()">Templates</button>
-    <button id="email-select-toggle" onclick="toggleEmailSelect()">Select</button>
+    <button class="primary" id="compose-btn">+ Compose</button>
+    <button id="quick-send-btn">Quick Send</button>
+    <button id="templates-btn">Templates</button>
+    <button id="email-select-toggle">Select</button>
   </div>
   <div id="email-bulk-bar" style="display:none;padding:10px 16px;margin-bottom:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);align-items:center;gap:8px;font-size:13px;">
     <span id="email-bulk-count">0 selected</span>
-    <button onclick="emailBulkAction('delete')" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
-    <button onclick="emailSelectAll()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
+    <button id="email-bulk-del-btn" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
+    <button id="email-select-all-btn" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
   </div>
 
   <div class="filters" id="email-filters">
-    <button class="active" onclick="setFilter(this,'')">All</button>
-    <button onclick="setFilter(this,'draft')">Drafts</button>
-    <button onclick="setFilter(this,'scheduled')">Scheduled</button>
-    <button onclick="setFilter(this,'sent')">Sent</button>
-    <button onclick="setFilter(this,'failed')">Failed</button>
+    <button class="active" data-filter="">All</button>
+    <button data-filter="draft">Drafts</button>
+    <button data-filter="scheduled">Scheduled</button>
+    <button data-filter="sent">Sent</button>
+    <button data-filter="failed">Failed</button>
   </div>
 
   <div class="section">
@@ -3854,24 +3965,24 @@ ${themeScript()}
     <input type="email" id="e-email" placeholder="email@example.com">
     <label>Subject</label>
     <input type="text" id="e-subject" placeholder="Subject line">
-    <label>Body <button onclick="aiDraft()" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Draft</button></label>
+    <label>Body <button id="ai-draft-btn" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Draft</button></label>
     <textarea id="e-body" style="min-height:160px" placeholder="Write your email..."></textarea>
     <div id="tone-buttons" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
       <span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;padding:5px 0;">Adjust tone:</span>
-      <button onclick="adjustTone('more formal')" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Formal</button>
-      <button onclick="adjustTone('more casual')" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Casual</button>
-      <button onclick="adjustTone('shorter')" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Shorter</button>
-      <button onclick="adjustTone('friendlier')" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Friendlier</button>
-      <button onclick="adjustTone('more direct')" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Direct</button>
+      <button data-tone="more formal" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Formal</button>
+      <button data-tone="more casual" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Casual</button>
+      <button data-tone="shorter" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Shorter</button>
+      <button data-tone="friendlier" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Friendlier</button>
+      <button data-tone="more direct" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Direct</button>
     </div>
     <label>Schedule Send (optional)</label>
     <input type="datetime-local" id="e-schedule">
     <div class="modal-actions">
-      <button onclick="closeCompose()">Cancel</button>
-      <button class="primary" onclick="saveEmail()">Save Draft</button>
-      <button class="primary" onclick="saveAndSchedule()" style="border-color:var(--yellow);color:var(--yellow)">Schedule</button>
-      <button id="send-now-btn" style="border-color:var(--green);color:var(--green)" onclick="sendNow()">Send Now</button>
-      <button class="danger" id="e-delete-btn" style="display:none" onclick="deleteEmail()">Delete</button>
+      <button id="close-compose-btn">Cancel</button>
+      <button class="primary" id="save-email-btn">Save Draft</button>
+      <button class="primary" id="schedule-btn" style="border-color:var(--yellow);color:var(--yellow)">Schedule</button>
+      <button id="send-now-btn" style="border-color:var(--green);color:var(--green)">Send Now</button>
+      <button class="danger" id="e-delete-btn" style="display:none">Delete</button>
     </div>
   </div>
 </div>
@@ -3892,9 +4003,9 @@ ${themeScript()}
       </div>
     </div>
     <div class="modal-actions">
-      <button onclick="closeQuick()">Cancel</button>
-      <button class="primary" onclick="parseQuick()">Parse & Preview</button>
-      <button class="primary" id="q-confirm" style="display:none" onclick="confirmQuick()">Confirm & Schedule</button>
+      <button id="close-quick-btn">Cancel</button>
+      <button class="primary" id="parse-quick-btn">Parse & Preview</button>
+      <button class="primary" id="q-confirm" style="display:none">Confirm & Schedule</button>
     </div>
   </div>
 </div>
@@ -3925,7 +4036,7 @@ async function load() {
   var emails = await fetch('/api/emails'+q).then(r=>r.json());
   if (!emails.length) { document.getElementById('email-list').innerHTML = '<div class="empty-msg">No emails found</div>'; return; }
   document.getElementById('email-list').innerHTML = '<table><thead><tr><th style="width:30px;"></th><th>Status</th><th>To</th><th>Subject</th><th>Scheduled</th><th>Actions</th></tr></thead><tbody>' +
-    emails.map(e => '<tr><td><input type="checkbox" class="email-bulk-check" data-id="'+e.id+'" style="display:'+(emailSelectMode?'inline-block':'none')+';accent-color:var(--warm);cursor:pointer;" onchange="toggleEmailBulkItem('+e.id+',this.checked)"></td><td><span class="badge '+e.status+'">'+e.status+'</span></td><td>'+esc(e.recipient_name||e.recipient_email)+'</td><td>'+esc(e.subject)+'</td><td>'+(e.scheduled_at?new Date(e.scheduled_at).toLocaleString():'—')+'</td><td><div class="todo-actions"><button onclick="openEditEmail('+e.id+')">&#9998;</button><button class="delete" onclick="deleteEmailDirect('+e.id+')">&#10005;</button></div></td></tr>'
+    emails.map(e => '<tr><td><input type="checkbox" class="email-bulk-check" data-id="'+e.id+'" style="display:'+(emailSelectMode?'inline-block':'none')+';accent-color:var(--warm);cursor:pointer;"></td><td><span class="badge '+e.status+'">'+e.status+'</span></td><td>'+esc(e.recipient_name||e.recipient_email)+'</td><td>'+esc(e.subject)+'</td><td>'+(e.scheduled_at?new Date(e.scheduled_at).toLocaleString():'—')+'</td><td><div class="todo-actions"><button data-action="edit-email" data-id="'+e.id+'">&#9998;</button><button class="delete" data-action="delete-email" data-id="'+e.id+'">&#10005;</button></div></td></tr>'
     ).join('') + '</tbody></table>';
 }
 
@@ -4058,11 +4169,11 @@ async function openTemplates() {
   var templates = await fetch('/api/email-templates').then(r=>r.json());
   var html = '<h2>Email Templates</h2>';
   if (templates.length) {
-    html += templates.map(t => '<div class="todo-item" style="cursor:pointer" onclick="useTemplate('+t.id+')"><div class="todo-content"><div class="todo-title">'+esc(t.name)+'</div><div class="todo-meta"><span>'+esc(t.subject)+'</span></div></div><div class="todo-actions"><button onclick="event.stopPropagation();deleteTemplate('+t.id+')">&#10005;</button></div></div>').join('');
+    html += templates.map(t => '<div class="todo-item" style="cursor:pointer" data-action="use-tpl" data-id="'+t.id+'"><div class="todo-content"><div class="todo-title">'+esc(t.name)+'</div><div class="todo-meta"><span>'+esc(t.subject)+'</span></div></div><div class="todo-actions"><button data-action="delete-tpl" data-id="'+t.id+'">&#10005;</button></div></div>').join('');
   } else { html += '<div class="empty-msg">No templates yet</div>'; }
-  html += '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);"><h2 style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">Save Current as Template</h2><input type="text" id="tpl-name" placeholder="Template name" style="width:100%;padding:8px 12px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);margin-bottom:8px;"><button onclick="saveAsTemplate()" class="primary" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save Template</button></div>';
+  html += '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);"><h2 style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">Save Current as Template</h2><input type="text" id="tpl-name" placeholder="Template name" style="width:100%;padding:8px 12px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);margin-bottom:8px;"><button data-action="save-tpl" class="primary" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save Template</button></div>';
   var overlay = document.createElement('div'); overlay.className = 'modal-overlay active'; overlay.id = 'tpl-modal';
-  overlay.innerHTML = '<div class="modal">'+html+'<div class="modal-actions"><button onclick="document.getElementById(\\\'tpl-modal\\\').remove()">Close</button></div></div>';
+  overlay.innerHTML = '<div class="modal">'+html+'<div class="modal-actions"><button data-action="close-tpl">Close</button></div></div>';
   document.body.appendChild(overlay);
 }
 async function useTemplate(id) {
@@ -4187,6 +4298,41 @@ async function confirmQuick() {
   closeQuick(); load();
 }
 
+// Bind static events
+bindEvents([
+  ['compose-btn','click',openCompose],
+  ['quick-send-btn','click',openQuick],
+  ['templates-btn','click',openTemplates],
+  ['email-select-toggle','click',toggleEmailSelect],
+  ['email-bulk-del-btn','click',function(){emailBulkAction('delete');}],
+  ['email-select-all-btn','click',emailSelectAll],
+  ['ai-draft-btn','click',aiDraft],
+  ['close-compose-btn','click',closeCompose],
+  ['save-email-btn','click',saveEmail],
+  ['schedule-btn','click',saveAndSchedule],
+  ['send-now-btn','click',sendNow],
+  ['e-delete-btn','click',deleteEmail],
+  ['close-quick-btn','click',closeQuick],
+  ['parse-quick-btn','click',parseQuick],
+  ['q-confirm','click',confirmQuick],
+]);
+onDelegate('tone-buttons','click','[data-tone]',function(){adjustTone(this.dataset.tone);});
+onDelegate('email-filters','click','button[data-filter]',function(){setFilter(this,this.dataset.filter);});
+document.addEventListener('click',function(e){
+  var btn=e.target.closest('[data-action]');
+  if(!btn)return;
+  var id=parseInt(btn.dataset.id),act=btn.dataset.action;
+  e.stopPropagation();
+  if(act==='edit-email')openEditEmail(id);
+  else if(act==='delete-email')deleteEmailDirect(id);
+  else if(act==='use-tpl')useTemplate(id);
+  else if(act==='delete-tpl')deleteTemplate(id);
+  else if(act==='save-tpl')saveAsTemplate();
+  else if(act==='close-tpl'){var m=document.getElementById('tpl-modal');if(m)m.remove();}
+});
+document.addEventListener('change',function(e){
+  if(e.target.classList.contains('email-bulk-check'))toggleEmailBulkItem(parseInt(e.target.dataset.id),e.target.checked);
+});
 
 load();
 </script>
@@ -4207,13 +4353,13 @@ ${themeScript()}
   <p class="subtitle">Quick notes and reminders</p>
 
   <div class="actions">
-    <button class="primary" onclick="openNote()">+ New Note</button>
-    <button id="note-select-toggle" onclick="toggleNoteSelect()">Select</button>
+    <button class="primary" id="new-note-btn">+ New Note</button>
+    <button id="note-select-toggle">Select</button>
   </div>
   <div id="note-bulk-bar" style="display:none;padding:10px 16px;margin-bottom:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);align-items:center;gap:8px;font-size:13px;">
     <span id="note-bulk-count">0 selected</span>
-    <button onclick="noteBulkAction('delete')" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
-    <button onclick="noteSelectAll()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
+    <button id="note-bulk-del-btn" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
+    <button id="note-select-all-btn" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
   </div>
 
   <div class="notes-grid" id="notes-grid"></div>
@@ -4229,13 +4375,13 @@ ${themeScript()}
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
       <label style="margin:0;">Content</label>
       <label style="display:inline;cursor:pointer;font-size:11px;margin:0;">
-        <input type="checkbox" id="n-markdown" style="width:auto;margin-right:4px;" onchange="toggleMdPreview()"> Markdown
+        <input type="checkbox" id="n-markdown" style="width:auto;margin-right:4px;"> Markdown
       </label>
-      <button id="n-preview-btn" onclick="toggleMdPreview()" style="display:none;padding:2px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;">Preview</button>
+      <button id="n-preview-btn" style="display:none;padding:2px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;">Preview</button>
     </div>
     <div style="position:relative;">
       <textarea id="n-content" style="min-height:200px" placeholder="Write your note... (supports **bold**, *italic*, - lists, > quotes, [links](url))"></textarea>
-      <button onclick="startVoiceInput('n-content')" title="Voice input" style="position:absolute;top:10px;right:10px;padding:6px 10px;font-size:14px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:var(--surface);color:var(--warm);z-index:1;">&#127908;</button>
+      <button id="note-voice-btn" title="Voice input" style="position:absolute;top:10px;right:10px;padding:6px 10px;font-size:14px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:var(--surface);color:var(--warm);z-index:1;">&#127908;</button>
     </div>
     <div id="n-md-preview" style="display:none;min-height:100px;max-height:300px;overflow-y:auto;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);font-size:13px;line-height:1.6;margin-bottom:12px;"></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
@@ -4251,17 +4397,17 @@ ${themeScript()}
       </label>
     </div>
     <div style="margin-top:12px;">
-      <label>Tags <button onclick="suggestTags()" id="suggest-tags-btn" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Suggest</button></label>
+      <label>Tags <button id="suggest-tags-btn" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Suggest</button></label>
       <div id="n-tags-list" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;"></div>
       <div style="display:flex;gap:8px;">
-        <input type="text" id="n-tag-input" placeholder="Add tag..." style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();addTag();}">
-        <button onclick="addTag()" style="padding:8px 12px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:6px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
+        <input type="text" id="n-tag-input" placeholder="Add tag..." style="flex:1">
+        <button id="add-tag-btn" style="padding:8px 12px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:6px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
       </div>
     </div>
     <div class="modal-actions">
-      <button onclick="closeNote()">Cancel</button>
-      <button class="primary" onclick="saveNote()">Save</button>
-      <button class="danger" id="n-delete-btn" style="display:none" onclick="deleteNote()">Delete</button>
+      <button id="close-note-btn">Cancel</button>
+      <button class="primary" id="save-note-btn">Save</button>
+      <button class="danger" id="n-delete-btn" style="display:none">Delete</button>
     </div>
   </div>
 </div>
@@ -4288,7 +4434,7 @@ async function noteBulkAction(action) {
 
 function renderTags() {
   document.getElementById('n-tags-list').innerHTML = currentTags.map((t,i) =>
-    '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:500;background:var(--surface-2);border:1px solid var(--border);color:var(--text-muted);">'+esc(t)+'<span onclick="removeTag('+i+')" style="cursor:pointer;color:var(--red);font-size:12px;">&times;</span></span>'
+    '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:500;background:var(--surface-2);border:1px solid var(--border);color:var(--text-muted);">'+esc(t)+'<span data-action="remove-tag" data-idx="'+i+'" style="cursor:pointer;color:var(--red);font-size:12px;">&times;</span></span>'
   ).join('');
 }
 function addTag() {
@@ -4320,8 +4466,8 @@ async function load() {
   document.getElementById('notes-grid').innerHTML = notes.map(n => {
     var borderStyle = n.pinned ? 'border-color:'+(colorMap[n.color]||'var(--warm)') : (n.color!=='default'?'border-color:'+colorMap[n.color]:'');
     var tagsHtml = n.tags && n.tags.length ? '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px;">'+n.tags.map(t=>'<span style="padding:2px 8px;border-radius:12px;font-size:9px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-muted);">'+esc(t)+'</span>').join('')+'</div>' : '';
-    return '<div class="note-card'+(n.pinned?' pinned':'')+'" style="position:relative;'+borderStyle+'" onclick="openEditNote('+n.id+')">'+
-      '<input type="checkbox" class="note-bulk-check" data-id="'+n.id+'" style="display:'+(noteSelectMode?'block':'none')+';position:absolute;top:10px;right:10px;accent-color:var(--warm);cursor:pointer;z-index:2;" onclick="event.stopPropagation()" onchange="toggleNoteBulkItem('+n.id+',this.checked,event)">'+
+    return '<div class="note-card'+(n.pinned?' pinned':'')+'" style="position:relative;'+borderStyle+'" data-action="open-note" data-id="'+n.id+'">'+
+      '<input type="checkbox" class="note-bulk-check" data-id="'+n.id+'" style="display:'+(noteSelectMode?'block':'none')+';position:absolute;top:10px;right:10px;accent-color:var(--warm);cursor:pointer;z-index:2;">'+
       (n.pinned?'<div style="font-size:10px;color:var(--warm);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">&#128204; Pinned</div>':'')+
       (n.title?'<div class="note-title">'+esc(n.title)+(n.format==='markdown'?'<span class="md-badge">MD</span>':'')+'</div>':(!n.title && n.format==='markdown'?'<div style="margin-bottom:4px;"><span class="md-badge">MD</span></div>':''))+
       '<div class="note-preview'+(n.format==='markdown'?' md':'')+'">'+(n.format==='markdown'?renderMd(n.content):esc(n.content))+'</div>'+
@@ -4415,6 +4561,33 @@ async function deleteNote() {
 }
 
 
+// Bind notes events
+bindEvents([
+  ['new-note-btn','click',openNote],
+  ['note-select-toggle','click',toggleNoteSelect],
+  ['note-bulk-del-btn','click',function(){noteBulkAction('delete');}],
+  ['note-select-all-btn','click',noteSelectAll],
+  ['n-markdown','change',toggleMdPreview],
+  ['n-preview-btn','click',toggleMdPreview],
+  ['note-voice-btn','click',function(){startVoiceInput('n-content');}],
+  ['suggest-tags-btn','click',suggestTags],
+  ['add-tag-btn','click',addTag],
+  ['close-note-btn','click',closeNote],
+  ['save-note-btn','click',saveNote],
+  ['n-delete-btn','click',deleteNote],
+]);
+document.getElementById('n-tag-input').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();addTag();}});
+document.addEventListener('click',function(e){
+  var btn=e.target.closest('[data-action]');
+  if(!btn)return;
+  var act=btn.dataset.action,id=parseInt(btn.dataset.id);
+  if(act==='open-note'){openEditNote(id);}
+  else if(act==='remove-tag'){removeTag(parseInt(btn.dataset.idx));}
+});
+document.addEventListener('change',function(e){
+  if(e.target.classList.contains('note-bulk-check')){e.stopPropagation();toggleNoteBulkItem(parseInt(e.target.dataset.id),e.target.checked,{stopPropagation:function(){}});}
+});
+
 load();
 </script>
 </body></html>`);
@@ -4433,9 +4606,9 @@ ${themeScript()}
   <p class="subtitle">Manage your email contacts for quick lookup</p>
 
   <div class="actions">
-    <button class="primary" onclick="openAdd()">+ Add Contact</button>
-    <button onclick="document.getElementById('csv-file').click()">Import CSV</button>
-    <input type="file" id="csv-file" accept=".csv" style="display:none" onchange="importCSV(this)">
+    <button class="primary" id="btn-add-contact">+ Add Contact</button>
+    <button id="btn-import-csv">Import CSV</button>
+    <input type="file" id="csv-file" accept=".csv" style="display:none">
   </div>
 
   <div class="section">
@@ -4453,9 +4626,9 @@ ${themeScript()}
     <label>Email</label>
     <input type="email" id="c-email" placeholder="email@example.com">
     <div class="modal-actions">
-      <button onclick="closeContact()">Cancel</button>
-      <button class="primary" onclick="saveContact()">Save</button>
-      <button class="danger" id="c-delete-btn" style="display:none" onclick="deleteContact()">Delete</button>
+      <button id="btn-cancel-contact">Cancel</button>
+      <button class="primary" id="btn-save-contact">Save</button>
+      <button class="danger" id="c-delete-btn" style="display:none">Delete</button>
     </div>
   </div>
 </div>
@@ -4465,7 +4638,7 @@ async function load() {
   var contacts = await fetch('/api/contacts').then(r=>r.json());
   if (!contacts.length) { document.getElementById('contact-list').innerHTML = '<div class="empty-msg">No contacts yet. Add contacts to use quick email addressing.</div>'; return; }
   document.getElementById('contact-list').innerHTML = '<table><thead><tr><th>Name</th><th>Email</th><th>Actions</th></tr></thead><tbody>' +
-    contacts.map(c => '<tr><td>'+esc(c.name)+'</td><td>'+esc(c.email)+'</td><td><div class="todo-actions"><button onclick="openEdit('+c.id+')">&#9998;</button><button class="delete" onclick="deleteDirect('+c.id+')">&#10005;</button></div></td></tr>').join('') +
+    contacts.map(c => '<tr><td>'+esc(c.name)+'</td><td>'+esc(c.email)+'</td><td><div class="todo-actions"><button data-action="editContact" data-id="'+c.id+'">&#9998;</button><button class="delete" data-action="deleteContact" data-id="'+c.id+'">&#10005;</button></div></td></tr>').join('') +
     '</tbody></table>';
 }
 
@@ -4545,6 +4718,17 @@ function importCSV(input) {
   input.value = '';
 }
 
+bindEvents([
+  ['btn-add-contact','click',openAdd],
+  ['btn-import-csv','click',function(){document.getElementById('csv-file').click();}],
+  ['csv-file','change',function(){importCSV(this);}],
+  ['btn-cancel-contact','click',closeContact],
+  ['btn-save-contact','click',saveContact],
+  ['c-delete-btn','click',deleteContact]
+]);
+onDelegate('contact-list','click','[data-action="editContact"]',function(){openEdit(parseInt(this.dataset.id));});
+onDelegate('contact-list','click','[data-action="deleteContact"]',function(){deleteDirect(parseInt(this.dataset.id));});
+
 load();
 </script>
 </body></html>`);
@@ -4564,11 +4748,11 @@ ${themeScript()}
   <p class="subtitle">Tasks, emails, and reminders at a glance</p>
 
   <div class="actions">
-    <button onclick="prevMonth()">&larr; Previous</button>
+    <button id="btn-prev-month">&larr; Previous</button>
     <span id="cal-title" style="font-size:18px;font-weight:300;padding:0 16px;"></span>
-    <button onclick="nextMonth()">Next &rarr;</button>
+    <button id="btn-next-month">Next &rarr;</button>
     <a href="/api/calendar.ics" class="btn" style="margin-left:auto;" download>Export iCal</a>
-    <button onclick="goToday()" style="margin-left:auto;">Today</button>
+    <button id="btn-today" style="margin-left:auto;">Today</button>
   </div>
 
   <div class="section">
@@ -4585,6 +4769,12 @@ var calYear = new Date().getFullYear();
 function prevMonth() { calMonth--; if (calMonth<0){calMonth=11;calYear--;} load(); }
 function nextMonth() { calMonth++; if (calMonth>11){calMonth=0;calYear++;} load(); }
 function goToday() { calMonth=new Date().getMonth(); calYear=new Date().getFullYear(); load(); }
+
+bindEvents([
+  ['btn-prev-month','click',prevMonth],
+  ['btn-next-month','click',nextMonth],
+  ['btn-today','click',goToday]
+]);
 
 async function load() {
   var months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -4727,10 +4917,10 @@ ${themeScript()}
   <p class="subtitle">Productivity insights and trends</p>
 
   <div class="filters" id="period-filters">
-    <button onclick="setPeriod(this,'week')" class="active">This Week</button>
-    <button onclick="setPeriod(this,'month')">This Month</button>
-    <button onclick="setPeriod(this,'quarter')">Quarter</button>
-    <button onclick="setPeriod(this,'year')">Year</button>
+    <button data-period="week" class="active">This Week</button>
+    <button data-period="month">This Month</button>
+    <button data-period="quarter">Quarter</button>
+    <button data-period="year">Year</button>
   </div>
 
   <div class="top-cards" id="overview-cards"></div>
@@ -4776,6 +4966,8 @@ ${themeScript()}
 <script>
 var curPeriod = 'week';
 function setPeriod(btn, p) { curPeriod = p; document.querySelectorAll('#period-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
+
+onDelegate('period-filters','click','[data-period]',function(){setPeriod(this,this.dataset.period);});
 
 async function load() {
   var data = await fetch('/api/analytics?period='+curPeriod).then(r=>r.json());
@@ -4880,7 +5072,7 @@ ${themeScript()}
     <h2>Appearance</h2>
     <div style="display:flex;gap:12px;align-items:center;">
       <label style="margin:0;font-size:13px;color:var(--text);">Theme</label>
-      <select id="s-theme" onchange="saveSettings()" style="width:auto;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
+      <select id="s-theme" style="width:auto;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
         <option value="dark">Night Mode</option>
         <option value="light">Day Mode</option>
         <option value="auto">Auto (System)</option>
@@ -4893,13 +5085,13 @@ ${themeScript()}
     <div style="display:flex;gap:12px;align-items:center;">
       <label style="margin:0;font-size:13px;color:var(--text);">Timeout (minutes)</label>
       <input type="number" id="s-timeout" min="1" max="1440" style="width:100px;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
-      <button onclick="saveSettings()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save</button>
+      <button id="save-timeout-btn" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save</button>
     </div>
   </div>
 
   <div class="section">
     <h2>Default Task Horizon</h2>
-    <select id="s-horizon" onchange="saveSettings()" style="width:auto;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
+    <select id="s-horizon" style="width:auto;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
       <option value="short">Short-term</option>
       <option value="medium">Medium-term</option>
       <option value="long">Long-term</option>
@@ -4911,7 +5103,7 @@ ${themeScript()}
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Link to your Perfin (personal finance tracker) instance</p>
     <div style="display:flex;gap:12px;align-items:center;">
       <input type="url" id="s-perfin" placeholder="https://your-perfin-instance.onrender.com" style="flex:1;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
-      <button onclick="saveSettings()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save</button>
+      <button id="save-perfin-btn" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save</button>
     </div>
   </div>
 
@@ -4923,31 +5115,31 @@ ${themeScript()}
       <div style="display:grid;gap:12px;">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
           <div><div style="font-size:13px;font-weight:400;">Email Drafting</div><div style="font-size:10px;color:var(--text-muted);">AI-compose emails from a prompt</div></div>
-          <select id="aim-email_draft" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+          <select id="aim-email_draft" class="aim-select" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
           <div><div style="font-size:13px;font-weight:400;">Task Breakdown</div><div style="font-size:10px;color:var(--text-muted);">Auto-generate subtasks from task title</div></div>
-          <select id="aim-task_breakdown" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+          <select id="aim-task_breakdown" class="aim-select" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
           <div><div style="font-size:13px;font-weight:400;">Smart Quick Add</div><div style="font-size:10px;color:var(--text-muted);">AI-parse natural language into structured tasks</div></div>
-          <select id="aim-quick_add" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+          <select id="aim-quick_add" class="aim-select" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
           <div><div style="font-size:13px;font-weight:400;">Weekly Review Summary</div><div style="font-size:10px;color:var(--text-muted);">AI-written narrative of your week</div></div>
-          <select id="aim-review_summary" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+          <select id="aim-review_summary" class="aim-select" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
           <div><div style="font-size:13px;font-weight:400;">Email Tone Adjustment</div><div style="font-size:10px;color:var(--text-muted);">Rewrite emails in different tones</div></div>
-          <select id="aim-email_tone" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+          <select id="aim-email_tone" class="aim-select" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
           <div><div style="font-size:13px;font-weight:400;">Daily Briefing</div><div style="font-size:10px;color:var(--text-muted);">AI summary of your day on the dashboard</div></div>
-          <select id="aim-daily_briefing" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+          <select id="aim-daily_briefing" class="aim-select" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;">
           <div><div style="font-size:13px;font-weight:400;">Note Auto-Tagging</div><div style="font-size:10px;color:var(--text-muted);">Suggest tags when creating notes</div></div>
-          <select id="aim-note_tagging" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+          <select id="aim-note_tagging" class="aim-select" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
         </div>
       </div>
     </div>
@@ -4962,7 +5154,7 @@ ${themeScript()}
     <h2>Browser Notifications</h2>
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Get notified about reminders and overdue tasks</p>
     <div class="actions" style="margin-bottom:0;">
-      <button onclick="enableNotifications()" id="notif-btn">Enable Notifications</button>
+      <button id="notif-btn">Enable Notifications</button>
     </div>
   </div>
 
@@ -4982,10 +5174,10 @@ ${themeScript()}
   <div class="section">
     <h2>Data Export</h2>
     <div class="actions" style="margin-bottom:0;">
-      <button onclick="exportData('todos')">Export Todos</button>
-      <button onclick="exportData('emails')">Export Emails</button>
-      <button onclick="exportData('notes')">Export Notes</button>
-      <button onclick="exportData('contacts')">Export Contacts</button>
+      <button data-export="todos">Export Todos</button>
+      <button data-export="emails">Export Emails</button>
+      <button data-export="notes">Export Notes</button>
+      <button data-export="contacts">Export Contacts</button>
     </div>
   </div>
 
@@ -4994,8 +5186,8 @@ ${themeScript()}
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Deleted items are kept for 30 days before permanent removal.</p>
     <div id="trash-list" style="margin-bottom:10px;"></div>
     <div class="actions" style="margin-bottom:0;">
-      <button onclick="loadTrash()">View Trash</button>
-      <button class="danger" style="border-color:var(--red);color:var(--red);" onclick="emptyTrash()">Empty Trash</button>
+      <button id="view-trash-btn">View Trash</button>
+      <button class="danger" style="border-color:var(--red);color:var(--red);" id="empty-trash-btn">Empty Trash</button>
     </div>
   </div>
 
@@ -5003,14 +5195,14 @@ ${themeScript()}
     <h2>Automations</h2>
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Create rules that trigger actions automatically when events occur.</p>
     <div id="automations-list" style="margin-bottom:12px;"></div>
-    <button onclick="openAutoModal()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;text-transform:uppercase;">+ New Rule</button>
+    <button id="new-auto-btn" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;text-transform:uppercase;">+ New Rule</button>
   </div>
 
   <div class="section">
     <h2>Webhooks</h2>
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Configure external webhook endpoints to receive event notifications.</p>
     <div id="webhooks-list" style="margin-bottom:12px;"></div>
-    <button onclick="openWebhookModal()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;text-transform:uppercase;">+ New Webhook</button>
+    <button id="new-webhook-btn" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;text-transform:uppercase;">+ New Webhook</button>
   </div>
 
   <div class="section">
@@ -5018,11 +5210,11 @@ ${themeScript()}
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Add a Slack Incoming Webhook URL to receive notifications in Slack.</p>
     <div style="display:flex;gap:12px;align-items:center;">
       <input type="url" id="s-slack" placeholder="https://hooks.slack.com/services/..." style="flex:1;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
-      <button onclick="saveSlack()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save</button>
+      <button id="save-slack-btn" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save</button>
     </div>
   </div>
 
-  ${AUTH_SECRET ? '<div class="section"><h2>Session</h2><div class="actions" style="margin-bottom:0;"><button class="danger" style="border-color:var(--red);color:var(--red);" onclick="logout()">Log Out</button></div></div>' : ''}
+  ${AUTH_SECRET ? '<div class="section"><h2>Session</h2><div class="actions" style="margin-bottom:0;"><button class="danger" style="border-color:var(--red);color:var(--red);" id="logout-btn">Log Out</button></div></div>' : ''}
 </div>
 
 <!-- Automation Modal -->
@@ -5053,7 +5245,7 @@ ${themeScript()}
       <input type="text" id="auto-cond-value" placeholder="Value..." style="padding:8px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);">
     </div>
     <label>Then (Action)</label>
-    <select id="auto-action" style="width:100%;padding:10px 14px;font-size:14px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);" onchange="updateActionFields()">
+    <select id="auto-action" style="width:100%;padding:10px 14px;font-size:14px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
       <option value="set_priority">Set Priority</option>
       <option value="set_category">Set Category</option>
       <option value="set_horizon">Set Horizon</option>
@@ -5063,9 +5255,9 @@ ${themeScript()}
     <label>Action Value</label>
     <input type="text" id="auto-action-value" placeholder="e.g. urgent, work, short...">
     <div class="modal-actions">
-      <button onclick="closeAutoModal()">Cancel</button>
-      <button class="primary" onclick="saveAutomation()">Save</button>
-      <button class="danger" id="auto-delete-btn" style="display:none" onclick="deleteAutomation()">Delete</button>
+      <button id="auto-cancel-btn">Cancel</button>
+      <button class="primary" id="auto-save-btn">Save</button>
+      <button class="danger" id="auto-delete-btn" style="display:none">Delete</button>
     </div>
   </div>
 </div>
@@ -5088,9 +5280,9 @@ ${themeScript()}
       <label style="display:inline;font-size:11px;cursor:pointer;"><input type="checkbox" value="streak_milestone" style="width:auto;margin-right:4px;">Streak Milestone</label>
     </div>
     <div class="modal-actions">
-      <button onclick="closeWebhookModal()">Cancel</button>
-      <button class="primary" onclick="saveWebhook()">Save</button>
-      <button class="danger" id="wh-delete-btn" style="display:none" onclick="deleteWebhook()">Delete</button>
+      <button id="wh-cancel-btn">Cancel</button>
+      <button class="primary" id="wh-save-btn">Save</button>
+      <button class="danger" id="wh-delete-btn" style="display:none">Delete</button>
     </div>
   </div>
 </div>
@@ -5193,8 +5385,8 @@ async function loadTrash() {
     return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;">'
       +'<div><span style="color:var(--text-muted);font-size:11px;margin-right:8px;">'+item.type+'</span>'+esc(item.title||'Untitled')+'<span style="color:var(--text-muted);font-size:11px;margin-left:8px;">deleted '+d+'</span></div>'
       +'<div style="display:flex;gap:6px;">'
-      +'<button onclick="restoreItem(\''+item.type+'\','+item.id+')" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Restore</button>'
-      +'<button onclick="permanentDelete(\''+item.type+'\','+item.id+')" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Delete</button>'
+      +'<button data-action="restore" data-type="'+item.type+'" data-id="'+item.id+'" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Restore</button>'
+      +'<button data-action="perm-delete" data-type="'+item.type+'" data-id="'+item.id+'" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Delete</button>'
       +'</div></div>';
   }).join('');
 }
@@ -5237,8 +5429,8 @@ async function loadAutomations() {
       +'<div style="flex:1;"><div style="font-weight:400;">'+esc(a.name)+'</div>'
       +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">'+a.trigger_type+condText+' &rarr; '+a.action_type+'</div></div>'
       +'<div style="display:flex;gap:6px;align-items:center;">'
-      +'<button onclick="toggleAutomation('+a.id+','+!a.enabled+')" style="background:'+(a.enabled?'var(--green-bg)':'var(--surface-2)')+';color:'+(a.enabled?'var(--green)':'var(--text-muted)')+';border:1px solid '+(a.enabled?'var(--green)':'var(--border)')+';padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(a.enabled?'On':'Off')+'</button>'
-      +'<button onclick="editAutomation('+a.id+')" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Edit</button>'
+      +'<button data-action="toggle-auto" data-id="'+a.id+'" data-enabled="'+!a.enabled+'" style="background:'+(a.enabled?'var(--green-bg)':'var(--surface-2)')+';color:'+(a.enabled?'var(--green)':'var(--text-muted)')+';border:1px solid '+(a.enabled?'var(--green)':'var(--border)')+';padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(a.enabled?'On':'Off')+'</button>'
+      +'<button data-action="edit-auto" data-id="'+a.id+'" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Edit</button>'
       +'</div></div>';
   }).join('');
 }
@@ -5315,9 +5507,9 @@ async function loadWebhooks() {
     +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">'+esc(w.url.substring(0,50))+(w.url.length>50?'...':'')+'</div>'
     +'<div style="font-size:9px;color:var(--text-muted);margin-top:2px;">Events: '+(w.events||[]).join(', ')+(w.last_status?' &middot; Last: '+w.last_status:'')+'</div></div>'
     +'<div style="display:flex;gap:6px;align-items:center;">'
-    +'<button onclick="testWebhook('+w.id+')" style="background:none;border:1px solid var(--teal);color:var(--teal);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Test</button>'
-    +'<button onclick="toggleWebhook('+w.id+','+!w.enabled+')" style="background:'+(w.enabled?'var(--green-bg)':'var(--surface-2)')+';color:'+(w.enabled?'var(--green)':'var(--text-muted)')+';border:1px solid '+(w.enabled?'var(--green)':'var(--border)')+';padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(w.enabled?'On':'Off')+'</button>'
-    +'<button onclick="editWebhook('+w.id+')" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Edit</button>'
+    +'<button data-action="test-wh" data-id="'+w.id+'" style="background:none;border:1px solid var(--teal);color:var(--teal);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Test</button>'
+    +'<button data-action="toggle-wh" data-id="'+w.id+'" data-enabled="'+!w.enabled+'" style="background:'+(w.enabled?'var(--green-bg)':'var(--surface-2)')+';color:'+(w.enabled?'var(--green)':'var(--text-muted)')+';border:1px solid '+(w.enabled?'var(--green)':'var(--border)')+';padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(w.enabled?'On':'Off')+'</button>'
+    +'<button data-action="edit-wh" data-id="'+w.id+'" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Edit</button>'
     +'</div></div>'
   ).join('');
 }
@@ -5378,6 +5570,53 @@ async function logout() {
   await fetch('/api/logout', {method:'POST'});
   location.href = '/login';
 }
+
+// Bind static events
+bindEvents([
+  ['s-theme','change',saveSettings],
+  ['s-horizon','change',saveSettings],
+  ['save-timeout-btn','click',saveSettings],
+  ['save-perfin-btn','click',saveSettings],
+  ['notif-btn','click',enableNotifications],
+  ['view-trash-btn','click',loadTrash],
+  ['empty-trash-btn','click',emptyTrash],
+  ['new-auto-btn','click',openAutoModal],
+  ['new-webhook-btn','click',openWebhookModal],
+  ['save-slack-btn','click',saveSlack],
+  ['logout-btn','click',logout],
+  ['auto-action','change',updateActionFields],
+  ['auto-cancel-btn','click',closeAutoModal],
+  ['auto-save-btn','click',saveAutomation],
+  ['auto-delete-btn','click',deleteAutomation],
+  ['wh-cancel-btn','click',closeWebhookModal],
+  ['wh-save-btn','click',saveWebhook],
+  ['wh-delete-btn','click',deleteWebhook],
+]);
+// AI model selects
+document.querySelectorAll('.aim-select').forEach(function(el){el.addEventListener('change',saveAIModels);});
+// Export buttons
+document.addEventListener('click',function(e){
+  var exp=e.target.closest('[data-export]');if(exp)exportData(exp.dataset.export);
+});
+// Dynamic trash list delegation
+onDelegate('trash-list','click','[data-action]',function(){
+  var id=this.dataset.id,type=this.dataset.type;
+  if(this.dataset.action==='restore')restoreItem(type,id);
+  else if(this.dataset.action==='perm-delete')permanentDelete(type,id);
+});
+// Dynamic automations list delegation
+onDelegate('automations-list','click','[data-action]',function(){
+  var id=parseInt(this.dataset.id);
+  if(this.dataset.action==='toggle-auto')toggleAutomation(id,this.dataset.enabled==='true');
+  else if(this.dataset.action==='edit-auto')editAutomation(id);
+});
+// Dynamic webhooks list delegation
+onDelegate('webhooks-list','click','[data-action]',function(){
+  var id=parseInt(this.dataset.id);
+  if(this.dataset.action==='test-wh')testWebhook(id);
+  else if(this.dataset.action==='toggle-wh')toggleWebhook(id,this.dataset.enabled==='true');
+  else if(this.dataset.action==='edit-wh')editWebhook(id);
+});
 
 load();
 loadAutomations();
