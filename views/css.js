@@ -25,21 +25,63 @@ module.exports = `
       font-family: 'Inter', system-ui, sans-serif; background: var(--bg);
       color: var(--text); min-height: 100vh; position: relative; overflow-x: hidden;
     }
+    /* Mountain + Aurora blended background */
     body::before {
-      content: ''; position: fixed; top: -30%; right: -20%; width: 90vw; height: 90vh;
-      background: radial-gradient(ellipse at 50% 30%, rgba(139,123,200,0.25) 0%, rgba(107,93,180,0.15) 25%, rgba(107,159,159,0.10) 50%, transparent 75%);
-      pointer-events: none; z-index: 0; filter: blur(50px);
+      content: ''; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background:
+        /* Aurora flow — vibrant gradient waves at top */
+        radial-gradient(ellipse at 30% 10%, rgba(80,200,200,0.18) 0%, transparent 50%),
+        radial-gradient(ellipse at 70% 5%, rgba(200,160,80,0.15) 0%, transparent 40%),
+        radial-gradient(ellipse at 50% 20%, rgba(120,100,200,0.20) 0%, transparent 45%),
+        /* Sunset glow */
+        radial-gradient(ellipse at 50% 35%, rgba(200,140,100,0.10) 0%, transparent 50%);
+      pointer-events: none; z-index: 0; filter: blur(40px);
+      animation: auroraShift 20s ease-in-out infinite alternate;
+    }
+    @keyframes auroraShift {
+      0% { opacity: 0.8; transform: translateY(0); }
+      50% { opacity: 1; transform: translateY(-10px); }
+      100% { opacity: 0.85; transform: translateY(5px); }
     }
     body::after {
-      content: ''; position: fixed; bottom: -20%; left: -15%; width: 80vw; height: 70vh;
-      background: radial-gradient(ellipse at 40% 60%, rgba(107,159,159,0.18) 0%, rgba(160,140,212,0.10) 35%, rgba(120,100,170,0.05) 60%, transparent 80%);
-      pointer-events: none; z-index: 0; filter: blur(60px);
+      content: ''; position: fixed; bottom: 0; left: 0; right: 0; height: 45vh;
+      background:
+        /* Mountain silhouette layers */
+        linear-gradient(170deg, transparent 20%,
+          rgba(60,50,80,0.25) 35%, rgba(60,50,80,0.25) 36%, transparent 36.5%,
+          transparent 40%,
+          rgba(50,40,70,0.30) 48%, rgba(50,40,70,0.30) 49%, transparent 49.5%,
+          transparent 55%,
+          rgba(40,35,60,0.35) 62%, rgba(40,35,60,0.35) 63%, transparent 63.5%),
+        linear-gradient(190deg, transparent 25%,
+          rgba(55,45,75,0.22) 40%, rgba(55,45,75,0.22) 41%, transparent 41.5%,
+          transparent 50%,
+          rgba(45,38,65,0.28) 58%, rgba(45,38,65,0.28) 59%, transparent 59.5%),
+        /* Base mountain gradient */
+        linear-gradient(to top, rgba(30,25,50,0.40) 0%, rgba(50,40,70,0.15) 40%, transparent 70%);
+      pointer-events: none; z-index: 0;
     }
     [data-theme="light"] body::before {
-      background: radial-gradient(ellipse at 50% 30%, rgba(107,91,160,0.12) 0%, rgba(74,122,122,0.06) 50%, transparent 75%);
+      background:
+        radial-gradient(ellipse at 30% 10%, rgba(60,180,180,0.10) 0%, transparent 50%),
+        radial-gradient(ellipse at 70% 5%, rgba(200,160,80,0.08) 0%, transparent 40%),
+        radial-gradient(ellipse at 50% 20%, rgba(100,80,180,0.10) 0%, transparent 45%),
+        radial-gradient(ellipse at 50% 35%, rgba(200,140,100,0.06) 0%, transparent 50%);
+      filter: blur(40px);
     }
     [data-theme="light"] body::after {
-      background: radial-gradient(ellipse at 40% 60%, rgba(74,122,122,0.10) 0%, rgba(107,91,160,0.05) 35%, transparent 80%);
+      background:
+        linear-gradient(170deg, transparent 20%,
+          rgba(100,90,130,0.10) 35%, rgba(100,90,130,0.10) 36%, transparent 36.5%,
+          transparent 40%,
+          rgba(90,80,120,0.12) 48%, rgba(90,80,120,0.12) 49%, transparent 49.5%,
+          transparent 55%,
+          rgba(80,70,110,0.15) 62%, rgba(80,70,110,0.15) 63%, transparent 63.5%),
+        linear-gradient(190deg, transparent 25%,
+          rgba(95,85,125,0.08) 40%, rgba(95,85,125,0.08) 41%, transparent 41.5%,
+          transparent 50%,
+          rgba(85,75,115,0.12) 58%, rgba(85,75,115,0.12) 59%, transparent 59.5%),
+        linear-gradient(to top, rgba(80,70,110,0.12) 0%, rgba(90,80,120,0.06) 40%, transparent 70%);
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .btn-loading { position: relative; color: transparent !important; pointer-events: none; }

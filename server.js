@@ -17,6 +17,7 @@ const { pool, runMigrations } = require("./db");
 const { advanceRecurrence } = require("./helpers");
 const middleware = require("./middleware");
 const views = require("./views");
+const { startKeepAlive } = require("./services/keep-alive");
 
 let nodemailer;
 try { nodemailer = require("nodemailer"); } catch { nodemailer = null; }
@@ -158,6 +159,10 @@ async function start() {
     if (config.PERFIN_URL) console.log(`Linked to Perfin: ${config.PERFIN_URL}`);
     if (config.AUTH_SECRET) console.log(`Authentication: ${config.AUTH_MODE} mode`);
     if (process.env.SMTP_HOST) console.log("SMTP configured for email sending");
+
+    // Start keep-alive self-ping (Render free tier)
+    startKeepAlive(PORT);
+    console.log("Keep-alive service started (pings every 14 min when enabled)");
   });
 
   // Graceful shutdown — drain connections and stop cron jobs

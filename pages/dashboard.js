@@ -42,44 +42,57 @@ ${themeScript()}
           <div class="tree-particle"></div>
           <div class="tree-particle"></div>
           <svg class="tree-svg" id="tree-svg" viewBox="0 0 280 280" xmlns="http://www.w3.org/2000/svg">
-            <!-- Isometric base platform -->
             <defs>
               <linearGradient id="platform-grad" x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" style="stop-color:rgba(107,159,159,0.3)"/>
                 <stop offset="100%" style="stop-color:rgba(160,140,212,0.2)"/>
               </linearGradient>
-              <linearGradient id="trunk-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+              <linearGradient id="trunk-grad" x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" style="stop-color:#8b6b4a"/>
                 <stop offset="100%" style="stop-color:#5c4632"/>
               </linearGradient>
+              <linearGradient id="pot-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" style="stop-color:rgba(107,159,159,0.35)"/>
+                <stop offset="100%" style="stop-color:rgba(80,120,120,0.25)"/>
+              </linearGradient>
               <radialGradient id="leaf-glow" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" style="stop-color:rgba(111,207,151,0.6)"/>
+                <stop offset="0%" style="stop-color:rgba(111,207,151,0.5)"/>
                 <stop offset="100%" style="stop-color:rgba(111,207,151,0)"/>
               </radialGradient>
               <filter id="glow-filter">
-                <feGaussianBlur stdDeviation="3" result="blur"/>
+                <feGaussianBlur stdDeviation="2.5" result="blur"/>
                 <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
               </filter>
             </defs>
-            <!-- Platform (isometric diamond) -->
-            <polygon points="140,240 60,210 140,180 220,210" fill="url(#platform-grad)" stroke="rgba(107,159,159,0.4)" stroke-width="1"/>
-            <polygon points="140,240 60,210 60,218 140,248" fill="rgba(107,159,159,0.15)" stroke="none"/>
-            <polygon points="140,240 220,210 220,218 140,248" fill="rgba(160,140,212,0.12)" stroke="none"/>
-            <!-- Trunk -->
-            <rect x="133" y="150" width="14" height="60" rx="3" fill="url(#trunk-grad)"/>
-            <rect x="136" y="155" width="3" height="50" rx="1" fill="rgba(255,255,255,0.08)"/>
-            <!-- Branch left -->
-            <line x1="140" y1="170" x2="118" y2="155" stroke="#6b4d35" stroke-width="3" stroke-linecap="round"/>
-            <!-- Branch right -->
-            <line x1="140" y1="165" x2="165" y2="148" stroke="#6b4d35" stroke-width="3" stroke-linecap="round"/>
-            <!-- Leaf cluster group (populated by JS based on productivity) -->
+            <!-- Isometric platform -->
+            <polygon points="140,252 50,218 140,184 230,218" fill="url(#platform-grad)" stroke="rgba(107,159,159,0.4)" stroke-width="0.5"/>
+            <polygon points="140,252 50,218 50,225 140,259" fill="rgba(107,159,159,0.12)"/>
+            <polygon points="140,252 230,218 230,225 140,259" fill="rgba(160,140,212,0.10)"/>
+            <!-- Bonsai pot (isometric) -->
+            <polygon points="140,230 108,218 112,200 168,200 172,218" fill="url(#pot-grad)" stroke="rgba(107,159,159,0.5)" stroke-width="0.8"/>
+            <polygon points="112,200 168,200 165,196 115,196" fill="rgba(107,159,159,0.2)" stroke="rgba(107,159,159,0.3)" stroke-width="0.5"/>
+            <!-- Pot soil -->
+            <ellipse cx="140" cy="199" rx="25" ry="4" fill="rgba(92,70,50,0.6)"/>
+            <!-- Bonsai trunk — elegant curved shape -->
+            <path d="M140,196 C140,185 138,175 130,165 C122,155 118,148 120,138 C122,128 128,122 135,118" stroke="url(#trunk-grad)" stroke-width="8" fill="none" stroke-linecap="round"/>
+            <!-- Main trunk highlight -->
+            <path d="M140,196 C140,187 138,177 131,167 C124,158 120,150 122,140 C124,130 129,124 136,120" stroke="rgba(255,255,255,0.06)" stroke-width="3" fill="none" stroke-linecap="round"/>
+            <!-- Branch right — sweeping up -->
+            <path d="M130,160 C140,152 152,148 162,140" stroke="#6b4d35" stroke-width="4" fill="none" stroke-linecap="round"/>
+            <!-- Branch right-upper -->
+            <path d="M155,145 C160,138 168,132 172,125" stroke="#6b4d35" stroke-width="3" fill="none" stroke-linecap="round"/>
+            <!-- Small branch left-down -->
+            <path d="M125,150 C118,152 110,148 105,144" stroke="#6b4d35" stroke-width="3" fill="none" stroke-linecap="round"/>
+            <!-- Branch top-left -->
+            <path d="M133,125 C125,118 118,112 112,108" stroke="#6b4d35" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+            <!-- Leaf cluster group (populated by JS) -->
             <g id="tree-leaves" filter="url(#glow-filter)"></g>
-            <!-- Streak fire effect at top (shown when streak > 0) -->
+            <!-- Streak fire at top -->
             <g id="tree-streak" style="display:none">
-              <circle cx="140" cy="68" r="10" fill="rgba(232,200,109,0.3)">
+              <circle cx="135" cy="85" r="10" fill="rgba(232,200,109,0.3)">
                 <animate attributeName="r" values="8;12;8" dur="2s" repeatCount="indefinite"/>
               </circle>
-              <text x="140" y="72" text-anchor="middle" font-size="14" fill="#e8c86d">&#x1F525;</text>
+              <text x="135" y="89" text-anchor="middle" font-size="14" fill="#e8c86d">&#x1F525;</text>
             </g>
           </svg>
         </div>
@@ -156,6 +169,23 @@ ${themeScript()}
           <h2>Scheduled Emails</h2>
           <div id="scheduled-emails"></div>
         </div>
+      </div>
+    </div>
+
+    <!-- Mini Calendar widget -->
+    <div class="dash-widget" data-widget="mini_cal" draggable="true">
+      <div class="section" style="margin-bottom:24px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h2 style="margin-bottom:0;">Calendar</h2>
+          <a href="/calendar" style="font-size:10px;text-transform:uppercase;letter-spacing:1px;">Full View &rarr;</a>
+        </div>
+        <div id="mini-cal-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <button id="mini-cal-prev" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:4px 8px;font-family:inherit;">&larr;</button>
+          <span id="mini-cal-title" style="font-size:13px;font-weight:400;"></span>
+          <button id="mini-cal-next" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:4px 8px;font-family:inherit;">&rarr;</button>
+        </div>
+        <div id="mini-cal-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center;font-size:11px;"></div>
+        <div id="mini-cal-events" style="margin-top:12px;max-height:120px;overflow-y:auto;"></div>
       </div>
     </div>
 
@@ -308,6 +338,9 @@ async function load() {
   try { streakData = await fetch('/api/streaks').then(r=>r.json()); } catch {}
   updateTree(stats, streakData);
 
+  // Render mini calendar
+  renderMiniCal();
+
   allTodos = await fetch('/api/todos?completed=false&limit=50').then(r=>r.json());
   renderDashTasks();
 
@@ -386,14 +419,21 @@ async function askAI() {
 }
 
 // Dashboard widget customization
-var widgetNames = {search:'Search',tree:'Productivity Tree',cards:'Stats Cards',briefing:'AI Briefing',suggestions:'Smart Suggestions',ai_query:'Ask AI',tasks:'Task Overview',upcoming_emails:'Upcoming & Emails',perfin:'Perfin',shortcuts:'Shortcuts'};
-var dashLayout = {widgets:['search','tree','cards','briefing','suggestions','ai_query','tasks','upcoming_emails','perfin','shortcuts'],hidden:[]};
+var widgetNames = {search:'Search',tree:'Productivity Tree',cards:'Stats Cards',briefing:'AI Briefing',suggestions:'Smart Suggestions',ai_query:'Ask AI',tasks:'Task Overview',upcoming_emails:'Upcoming & Emails',mini_cal:'Mini Calendar',perfin:'Perfin',shortcuts:'Shortcuts'};
+var dashLayout = {widgets:['search','tree','cards','briefing','suggestions','ai_query','tasks','upcoming_emails','mini_cal','perfin','shortcuts'],hidden:[]};
 var wdragSrcWidget = null;
 
 async function loadLayout() {
   try {
     var settings = await fetch('/api/settings').then(r=>r.json());
-    if (settings.dashboard_layout) dashLayout = settings.dashboard_layout;
+    if (settings.dashboard_layout) {
+      dashLayout = settings.dashboard_layout;
+      // Ensure any new widgets not in saved layout are appended
+      var allWidgetIds = Array.from(document.querySelectorAll('.dash-widget')).map(function(w){return w.dataset.widget;});
+      allWidgetIds.forEach(function(id) {
+        if (dashLayout.widgets.indexOf(id) === -1) dashLayout.widgets.push(id);
+      });
+    }
   } catch {}
   applyLayout();
 }
@@ -436,7 +476,7 @@ function toggleCustomize() {
 }
 
 function resetLayout() {
-  dashLayout = {widgets:['search','cards','briefing','tasks','upcoming_emails','perfin','shortcuts'],hidden:[]};
+  dashLayout = {widgets:['search','tree','cards','briefing','suggestions','ai_query','tasks','upcoming_emails','mini_cal','perfin','shortcuts'],hidden:[]};
   applyLayout();
   saveLayout();
 }
@@ -486,29 +526,36 @@ function updateTree(stats, streakData) {
     });
   }
 
-  // Determine leaf count and color based on health (5-25 leaves)
-  var leafCount = Math.max(5, Math.round(health / 4));
-  var baseHue = health > 60 ? 145 : health > 30 ? 80 : 20; // green -> yellow -> brown
+  // Bonsai leaf clusters on branch tips
+  var baseHue = health > 60 ? 145 : health > 30 ? 80 : 20;
   var baseSat = health > 50 ? '60%' : '40%';
   var baseLight = health > 50 ? '55%' : '40%';
+  var leafDensity = Math.max(2, Math.round(health / 12)); // 2-8 leaves per cluster
 
-  // Generate leaves in a natural canopy shape
+  // Bonsai cluster centers (at branch tips)
+  var clusters = [
+    {x:135, y:110, r:22}, // top of trunk
+    {x:112, y:105, r:18}, // top-left branch tip
+    {x:105, y:142, r:16}, // left-down branch tip
+    {x:162, y:135, r:20}, // right branch mid
+    {x:172, y:120, r:18}, // right-upper branch tip
+  ];
+
   var leaves = '';
-  var leafPositions = [];
-  for (var i = 0; i < leafCount; i++) {
-    var angle = (i / leafCount) * Math.PI * 2 + (Math.random() * 0.5);
-    var layer = Math.floor(i / 8); // 0, 1, 2 rings
-    var radius = 25 + layer * 20 + Math.random() * 15;
-    var cx = 140 + Math.cos(angle) * radius * 0.9;
-    var cy = 110 + Math.sin(angle) * radius * 0.5 - layer * 15;
-    var r = 12 + Math.random() * 8;
-    var hue = baseHue + Math.random() * 20 - 10;
-    var opacity = 0.5 + (health / 100) * 0.5;
-    leaves += '<ellipse class="tree-leaf" cx="'+cx.toFixed(1)+'" cy="'+cy.toFixed(1)+'" rx="'+r.toFixed(1)+'" ry="'+(r*0.7).toFixed(1)+'" fill="hsla('+Math.round(hue)+','+baseSat+','+baseLight+','+opacity.toFixed(2)+')" style="animation-delay:'+(Math.random()*-3).toFixed(1)+'s"/>';
-  }
-
-  // Top canopy highlight
-  leaves += '<ellipse cx="140" cy="95" rx="30" ry="20" fill="url(#leaf-glow)" opacity="'+(health/150).toFixed(2)+'"/>';
+  clusters.forEach(function(c) {
+    for (var i = 0; i < leafDensity; i++) {
+      var angle = (i / leafDensity) * Math.PI * 2 + Math.random() * 0.8;
+      var dist = Math.random() * c.r;
+      var lx = c.x + Math.cos(angle) * dist;
+      var ly = c.y + Math.sin(angle) * dist * 0.6;
+      var lr = 6 + Math.random() * 5;
+      var hue = baseHue + Math.random() * 25 - 12;
+      var opacity = 0.4 + (health / 100) * 0.5;
+      leaves += '<ellipse class="tree-leaf" cx="'+lx.toFixed(1)+'" cy="'+ly.toFixed(1)+'" rx="'+lr.toFixed(1)+'" ry="'+(lr*0.65).toFixed(1)+'" fill="hsla('+Math.round(hue)+','+baseSat+','+baseLight+','+opacity.toFixed(2)+')" style="animation-delay:'+(Math.random()*-3).toFixed(1)+'s"/>';
+    }
+    // Glow center for each cluster
+    leaves += '<ellipse cx="'+c.x+'" cy="'+c.y+'" rx="'+(c.r*0.6)+'" ry="'+(c.r*0.4)+'" fill="url(#leaf-glow)" opacity="'+(health/200).toFixed(2)+'"/>';
+  });
 
   leavesEl.innerHTML = leaves;
 
@@ -539,6 +586,106 @@ function updateTree(stats, streakData) {
   document.getElementById('tree-msg').textContent = msg;
 }
 
+// Mini Calendar
+var miniCalMonth = new Date().getMonth();
+var miniCalYear = new Date().getFullYear();
+var miniCalEvents = [];
+var miniCalSelectedDay = null;
+
+async function renderMiniCal() {
+  var grid = document.getElementById('mini-cal-grid');
+  var titleEl = document.getElementById('mini-cal-title');
+  if (!grid || !titleEl) return;
+
+  var monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  titleEl.textContent = monthNames[miniCalMonth] + ' ' + miniCalYear;
+
+  // Fetch events for this month
+  try {
+    miniCalEvents = await fetch('/api/calendar?month='+(miniCalMonth+1)+'&year='+miniCalYear).then(function(r){return r.json();});
+  } catch(e) { miniCalEvents = []; }
+
+  var today = new Date();
+  var firstDay = new Date(miniCalYear, miniCalMonth, 1).getDay();
+  var daysInMonth = new Date(miniCalYear, miniCalMonth + 1, 0).getDate();
+
+  var html = '';
+  // Day-of-week headers
+  ['S','M','T','W','T','F','S'].forEach(function(d) {
+    html += '<div style="font-weight:500;color:var(--text-muted);padding:4px 0;">'+d+'</div>';
+  });
+
+  // Empty cells before first day
+  for (var i = 0; i < firstDay; i++) {
+    html += '<div></div>';
+  }
+
+  // Day cells
+  for (var d = 1; d <= daysInMonth; d++) {
+    var isToday = (d === today.getDate() && miniCalMonth === today.getMonth() && miniCalYear === today.getFullYear());
+    var dateStr = miniCalYear + '-' + String(miniCalMonth+1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+    var hasEvents = miniCalEvents.some(function(ev) { return ev.date === dateStr; });
+    var style = 'padding:4px 0;cursor:pointer;border-radius:4px;';
+    if (isToday) style += 'color:var(--warm);font-weight:600;';
+    if (hasEvents) style += 'text-decoration:underline;';
+    if (miniCalSelectedDay === d) style += 'background:var(--surface-2);';
+    html += '<div data-cal-day="'+d+'" style="'+style+'">'+d+'</div>';
+  }
+
+  grid.innerHTML = html;
+
+  // Show events for selected day (or today by default on first load)
+  if (miniCalSelectedDay === null && miniCalMonth === today.getMonth() && miniCalYear === today.getFullYear()) {
+    showMiniCalEvents(today.getDate());
+  } else if (miniCalSelectedDay !== null) {
+    showMiniCalEvents(miniCalSelectedDay);
+  } else {
+    document.getElementById('mini-cal-events').innerHTML = '';
+  }
+}
+
+function showMiniCalEvents(day) {
+  miniCalSelectedDay = day;
+  var dateStr = miniCalYear + '-' + String(miniCalMonth+1).padStart(2,'0') + '-' + String(day).padStart(2,'0');
+  var eventsEl = document.getElementById('mini-cal-events');
+  var dayEvents = miniCalEvents.filter(function(ev) { return ev.date === dateStr; });
+
+  // Update selected highlight in grid
+  var grid = document.getElementById('mini-cal-grid');
+  if (grid) {
+    grid.querySelectorAll('[data-cal-day]').forEach(function(cell) {
+      if (parseInt(cell.dataset.calDay) === day) cell.style.background = 'var(--surface-2)';
+      else cell.style.background = '';
+    });
+  }
+
+  if (!dayEvents.length) {
+    eventsEl.innerHTML = '<div style="font-size:11px;color:var(--text-muted);padding:4px 0;">No events on this day</div>';
+    return;
+  }
+  eventsEl.innerHTML = dayEvents.slice(0, 5).map(function(ev) {
+    var typeColor = ev.type === 'todo' ? 'var(--warm)' : ev.type === 'email' ? 'var(--blue)' : 'var(--teal)';
+    return '<div style="padding:4px 0;font-size:11px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;"><span style="width:6px;height:6px;border-radius:50%;background:'+typeColor+';flex-shrink:0;"></span><span style="font-weight:300;">'+esc(ev.title||'Untitled')+'</span></div>';
+  }).join('');
+  if (dayEvents.length > 5) {
+    eventsEl.innerHTML += '<div style="font-size:10px;color:var(--text-muted);padding:4px 0;">+'+(dayEvents.length-5)+' more</div>';
+  }
+}
+
+function miniCalPrev() {
+  miniCalMonth--;
+  if (miniCalMonth < 0) { miniCalMonth = 11; miniCalYear--; }
+  miniCalSelectedDay = null;
+  renderMiniCal();
+}
+
+function miniCalNext() {
+  miniCalMonth++;
+  if (miniCalMonth > 11) { miniCalMonth = 0; miniCalYear++; }
+  miniCalSelectedDay = null;
+  renderMiniCal();
+}
+
 // Keyboard shortcuts
 document.addEventListener('keydown', function(e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
@@ -554,6 +701,8 @@ bindEvents([
   ['customize-btn','click',toggleCustomize],
   ['reset-layout-btn','click',resetLayout],
   ['ask-ai-btn','click',askAI],
+  ['mini-cal-prev','click',miniCalPrev],
+  ['mini-cal-next','click',miniCalNext],
 ]);
 var searchInput=document.getElementById('global-search');
 if(searchInput)searchInput.addEventListener('input',function(){doSearch(this.value);});
@@ -563,6 +712,8 @@ if(aiInput)aiInput.addEventListener('keydown',function(e){if(e.key==='Enter')ask
 onDelegate('dash-task-filters','click','button[data-view]',function(){setDashView(this,this.dataset.view);});
 // Widget toggles (dynamic)
 onDelegate('widget-toggles','click','[data-toggle-widget]',function(e){e.stopPropagation();toggleWidget(this.dataset.toggleWidget);});
+// Mini calendar day click delegation
+onDelegate('mini-cal-grid','click','[data-cal-day]',function(){showMiniCalEvents(parseInt(this.dataset.calDay));});
 // Drag-and-drop for widget reorder
 (function(){var c=document.getElementById('dash-widgets');if(!c)return;c.addEventListener('dragstart',function(e){var w=e.target.closest('.dash-widget');if(w)wdragStart(e,w);});c.addEventListener('dragover',wdragOver);c.addEventListener('dragend',wdragEnd);c.addEventListener('drop',wdrop);})();
 // Dynamic content delegation — dashboard actions
@@ -579,8 +730,7 @@ document.addEventListener('click',function(e){
   else if(act==='search-pin')searchTogglePin(id,btn.dataset.pinned==='true');
 });
 
-loadLayout();
-load();
+loadLayout().then(load);
 </script>
 </body></html>`);
   };

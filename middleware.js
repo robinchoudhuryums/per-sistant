@@ -93,7 +93,7 @@ function setup(app) {
 
 function requireAuth(req, res, next) {
   if (!AUTH_SECRET) return next();
-  if (["/login", "/api/login", "/manifest.json", "/sw.js", "/api/health"].includes(req.path)) return next();
+  if (["/login", "/api/login", "/manifest.json", "/sw.js", "/api/health", "/api/keep-alive-schedule"].includes(req.path)) return next();
   if (req.path.startsWith("/icon-")) return next();
   if (req.session && req.session.authenticated) {
     const timeout = (req.session.timeoutMinutes || 15) * 60 * 1000;
