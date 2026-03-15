@@ -349,4 +349,128 @@ module.exports = `
     @media (max-width: 768px) {
       .swipe-hint { display: block; font-size: 10px; color: var(--text-muted); text-align: center; padding: 4px; }
     }
+
+    /* ============================================================ */
+    /* Enhanced glassmorphism & glow effects                        */
+    /* ============================================================ */
+
+    /* Glow border on hover for cards and sections */
+    .card { position: relative; overflow: hidden; }
+    .card::before {
+      content: ''; position: absolute; top: -1px; left: -1px; right: -1px; bottom: -1px;
+      border-radius: var(--radius); opacity: 0; transition: opacity 0.4s ease;
+      background: linear-gradient(135deg, rgba(160,140,212,0.3), rgba(107,159,159,0.3), rgba(111,207,151,0.2));
+      z-index: -1; filter: blur(8px);
+    }
+    .card:hover::before { opacity: 1; }
+
+    .section { position: relative; overflow: hidden; }
+    .section::before {
+      content: ''; position: absolute; top: -1px; left: -1px; right: -1px; bottom: -1px;
+      border-radius: var(--radius); opacity: 0; transition: opacity 0.4s ease;
+      background: linear-gradient(135deg, rgba(160,140,212,0.15), rgba(107,159,159,0.15));
+      z-index: -1; filter: blur(12px);
+    }
+    .section:hover::before { opacity: 1; }
+
+    /* Enhanced modal glassmorphism */
+    .modal { backdrop-filter: blur(24px); background: rgba(10,11,20,0.85); }
+    [data-theme="light"] .modal { background: rgba(240,238,245,0.9); }
+
+    /* Glowing focus states */
+    input:focus, select:focus, textarea:focus {
+      box-shadow: 0 0 0 3px rgba(160,140,212,0.15), 0 0 20px rgba(160,140,212,0.1);
+    }
+    .search-bar input:focus { box-shadow: 0 0 0 3px rgba(160,140,212,0.15), 0 0 30px rgba(160,140,212,0.08); }
+
+    /* Subtle glow on primary buttons */
+    .actions button.primary { box-shadow: 0 0 12px rgba(160,140,212,0.15); }
+    .actions button.primary:hover:not(:disabled) { box-shadow: 0 0 20px rgba(160,140,212,0.25); }
+
+    /* ============================================================ */
+    /* Productivity Tree — Isometric 3D animated SVG                */
+    /* ============================================================ */
+
+    .tree-widget {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 32px 24px 24px; position: relative; overflow: visible;
+    }
+    .tree-container {
+      position: relative; width: 280px; height: 280px;
+      perspective: 800px; transform-style: preserve-3d;
+    }
+    .tree-svg {
+      width: 100%; height: 100%;
+      filter: drop-shadow(0 20px 40px rgba(107,159,159,0.2)) drop-shadow(0 8px 16px rgba(160,140,212,0.15));
+      animation: treeFloat 6s ease-in-out infinite;
+    }
+    @keyframes treeFloat {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-8px); }
+    }
+
+    /* Tree glow ring beneath */
+    .tree-glow {
+      position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+      width: 160px; height: 40px; border-radius: 50%;
+      background: radial-gradient(ellipse, rgba(111,207,151,0.25) 0%, rgba(107,159,159,0.15) 40%, transparent 70%);
+      filter: blur(10px); animation: glowPulse 4s ease-in-out infinite;
+    }
+    @keyframes glowPulse {
+      0%, 100% { opacity: 0.6; transform: translateX(-50%) scale(1); }
+      50% { opacity: 1; transform: translateX(-50%) scale(1.1); }
+    }
+
+    /* Tree leaf shimmer */
+    @keyframes leafShimmer {
+      0%, 100% { opacity: 0.7; }
+      50% { opacity: 1; }
+    }
+    .tree-leaf { animation: leafShimmer 3s ease-in-out infinite; }
+    .tree-leaf:nth-child(2n) { animation-delay: -1s; }
+    .tree-leaf:nth-child(3n) { animation-delay: -2s; }
+
+    /* Particle effect around tree */
+    @keyframes particleFloat {
+      0% { transform: translateY(0) translateX(0) scale(1); opacity: 0; }
+      20% { opacity: 1; }
+      80% { opacity: 1; }
+      100% { transform: translateY(-60px) translateX(20px) scale(0); opacity: 0; }
+    }
+    .tree-particle {
+      position: absolute; width: 4px; height: 4px; border-radius: 50%;
+      background: var(--green); animation: particleFloat 4s ease-out infinite;
+    }
+    .tree-particle:nth-child(1) { left: 35%; bottom: 40%; animation-delay: 0s; }
+    .tree-particle:nth-child(2) { left: 55%; bottom: 45%; animation-delay: -1.3s; background: var(--teal); }
+    .tree-particle:nth-child(3) { left: 45%; bottom: 35%; animation-delay: -2.6s; background: var(--warm); }
+
+    /* Stats beneath tree */
+    .tree-stats {
+      display: flex; gap: 24px; justify-content: center; margin-top: 16px;
+      font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;
+    }
+    .tree-stat-value { font-size: 20px; font-weight: 300; color: var(--text); display: block;
+                       margin-top: 4px; font-variant-numeric: tabular-nums; }
+    .tree-stat-value.glow-green { color: var(--green); text-shadow: 0 0 12px rgba(111,207,151,0.4); }
+    .tree-stat-value.glow-warm { color: var(--warm); text-shadow: 0 0 12px rgba(160,140,212,0.4); }
+    .tree-stat-value.glow-teal { color: var(--teal); text-shadow: 0 0 12px rgba(107,159,159,0.4); }
+
+    .tree-status-msg {
+      text-align: center; margin-top: 12px; font-size: 12px; font-weight: 300;
+      color: var(--text-muted); font-style: italic;
+    }
+
+    /* Light theme tree adjustments */
+    [data-theme="light"] .tree-glow {
+      background: radial-gradient(ellipse, rgba(45,159,95,0.2) 0%, rgba(74,122,122,0.12) 40%, transparent 70%);
+    }
+    [data-theme="light"] .tree-particle { opacity: 0.6; }
+
+    @media (max-width: 480px) {
+      .tree-container { width: 200px; height: 200px; }
+      .tree-stats { gap: 16px; font-size: 10px; }
+      .tree-stat-value { font-size: 16px; }
+      .tree-widget { padding: 20px 16px 16px; }
+    }
 `;

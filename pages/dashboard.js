@@ -33,6 +33,65 @@ ${themeScript()}
       <div class="section search-results" id="search-results" style="display:none;margin-bottom:24px;"></div>
     </div>
 
+    <!-- Productivity Tree widget -->
+    <div class="dash-widget" data-widget="tree" draggable="true">
+      <div class="section tree-widget" id="tree-section">
+        <div class="tree-container">
+          <div class="tree-glow" id="tree-glow"></div>
+          <div class="tree-particle"></div>
+          <div class="tree-particle"></div>
+          <div class="tree-particle"></div>
+          <svg class="tree-svg" id="tree-svg" viewBox="0 0 280 280" xmlns="http://www.w3.org/2000/svg">
+            <!-- Isometric base platform -->
+            <defs>
+              <linearGradient id="platform-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:rgba(107,159,159,0.3)"/>
+                <stop offset="100%" style="stop-color:rgba(160,140,212,0.2)"/>
+              </linearGradient>
+              <linearGradient id="trunk-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" style="stop-color:#8b6b4a"/>
+                <stop offset="100%" style="stop-color:#5c4632"/>
+              </linearGradient>
+              <radialGradient id="leaf-glow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" style="stop-color:rgba(111,207,151,0.6)"/>
+                <stop offset="100%" style="stop-color:rgba(111,207,151,0)"/>
+              </radialGradient>
+              <filter id="glow-filter">
+                <feGaussianBlur stdDeviation="3" result="blur"/>
+                <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+              </filter>
+            </defs>
+            <!-- Platform (isometric diamond) -->
+            <polygon points="140,240 60,210 140,180 220,210" fill="url(#platform-grad)" stroke="rgba(107,159,159,0.4)" stroke-width="1"/>
+            <polygon points="140,240 60,210 60,218 140,248" fill="rgba(107,159,159,0.15)" stroke="none"/>
+            <polygon points="140,240 220,210 220,218 140,248" fill="rgba(160,140,212,0.12)" stroke="none"/>
+            <!-- Trunk -->
+            <rect x="133" y="150" width="14" height="60" rx="3" fill="url(#trunk-grad)"/>
+            <rect x="136" y="155" width="3" height="50" rx="1" fill="rgba(255,255,255,0.08)"/>
+            <!-- Branch left -->
+            <line x1="140" y1="170" x2="118" y2="155" stroke="#6b4d35" stroke-width="3" stroke-linecap="round"/>
+            <!-- Branch right -->
+            <line x1="140" y1="165" x2="165" y2="148" stroke="#6b4d35" stroke-width="3" stroke-linecap="round"/>
+            <!-- Leaf cluster group (populated by JS based on productivity) -->
+            <g id="tree-leaves" filter="url(#glow-filter)"></g>
+            <!-- Streak fire effect at top (shown when streak > 0) -->
+            <g id="tree-streak" style="display:none">
+              <circle cx="140" cy="68" r="10" fill="rgba(232,200,109,0.3)">
+                <animate attributeName="r" values="8;12;8" dur="2s" repeatCount="indefinite"/>
+              </circle>
+              <text x="140" y="72" text-anchor="middle" font-size="14" fill="#e8c86d">&#x1F525;</text>
+            </g>
+          </svg>
+        </div>
+        <div class="tree-stats">
+          <div><span class="tree-stat-value glow-green" id="tree-done">-</span>Done Today</div>
+          <div><span class="tree-stat-value glow-warm" id="tree-streak-val">-</span>Streak</div>
+          <div><span class="tree-stat-value glow-teal" id="tree-score">-</span>Score</div>
+        </div>
+        <div class="tree-status-msg" id="tree-msg">Loading your tree...</div>
+      </div>
+    </div>
+
     <!-- Cards widget -->
     <div class="dash-widget" data-widget="cards" draggable="true">
       <div class="top-cards" id="cards"></div>
@@ -244,6 +303,11 @@ async function load() {
     {label:'Notes',value:stats.notes.total,cls:'warm'},
   ].map(c => '<div class="card"><div class="label">'+c.label+'</div><div class="value '+c.cls+'">'+c.value+'</div></div>').join('');
 
+  // Update productivity tree
+  var streakData = [];
+  try { streakData = await fetch('/api/streaks').then(r=>r.json()); } catch {}
+  updateTree(stats, streakData);
+
   allTodos = await fetch('/api/todos?completed=false&limit=50').then(r=>r.json());
   renderDashTasks();
 
@@ -322,8 +386,8 @@ async function askAI() {
 }
 
 // Dashboard widget customization
-var widgetNames = {search:'Search',cards:'Stats Cards',briefing:'AI Briefing',suggestions:'Smart Suggestions',ai_query:'Ask AI',tasks:'Task Overview',upcoming_emails:'Upcoming & Emails',perfin:'Perfin',shortcuts:'Shortcuts'};
-var dashLayout = {widgets:['search','cards','briefing','suggestions','ai_query','tasks','upcoming_emails','perfin','shortcuts'],hidden:[]};
+var widgetNames = {search:'Search',tree:'Productivity Tree',cards:'Stats Cards',briefing:'AI Briefing',suggestions:'Smart Suggestions',ai_query:'Ask AI',tasks:'Task Overview',upcoming_emails:'Upcoming & Emails',perfin:'Perfin',shortcuts:'Shortcuts'};
+var dashLayout = {widgets:['search','tree','cards','briefing','suggestions','ai_query','tasks','upcoming_emails','perfin','shortcuts'],hidden:[]};
 var wdragSrcWidget = null;
 
 async function loadLayout() {
@@ -396,6 +460,83 @@ function wdrop(e) {
     applyLayout();
     saveLayout();
   }
+}
+
+// Productivity Tree rendering
+function updateTree(stats, streakData) {
+  var leavesEl = document.getElementById('tree-leaves');
+  if (!leavesEl) return;
+
+  // Calculate tree health: 0-100
+  var done = stats.todos.done || 0;
+  var pending = stats.todos.pending || 0;
+  var overdue = stats.todos.overdue || 0;
+  var total = done + pending;
+  var completionRate = total > 0 ? Math.round((done / total) * 100) : 50;
+  var overdueRate = total > 0 ? Math.round((overdue / total) * 100) : 0;
+  var health = Math.max(0, Math.min(100, completionRate - overdueRate));
+
+  // Get best streak from streak data
+  var bestStreak = 0;
+  var currentStreak = 0;
+  if (streakData && streakData.length) {
+    streakData.forEach(function(s) {
+      if (s.streak_count > currentStreak) currentStreak = s.streak_count;
+      if (s.best_streak > bestStreak) bestStreak = s.best_streak;
+    });
+  }
+
+  // Determine leaf count and color based on health (5-25 leaves)
+  var leafCount = Math.max(5, Math.round(health / 4));
+  var baseHue = health > 60 ? 145 : health > 30 ? 80 : 20; // green -> yellow -> brown
+  var baseSat = health > 50 ? '60%' : '40%';
+  var baseLight = health > 50 ? '55%' : '40%';
+
+  // Generate leaves in a natural canopy shape
+  var leaves = '';
+  var leafPositions = [];
+  for (var i = 0; i < leafCount; i++) {
+    var angle = (i / leafCount) * Math.PI * 2 + (Math.random() * 0.5);
+    var layer = Math.floor(i / 8); // 0, 1, 2 rings
+    var radius = 25 + layer * 20 + Math.random() * 15;
+    var cx = 140 + Math.cos(angle) * radius * 0.9;
+    var cy = 110 + Math.sin(angle) * radius * 0.5 - layer * 15;
+    var r = 12 + Math.random() * 8;
+    var hue = baseHue + Math.random() * 20 - 10;
+    var opacity = 0.5 + (health / 100) * 0.5;
+    leaves += '<ellipse class="tree-leaf" cx="'+cx.toFixed(1)+'" cy="'+cy.toFixed(1)+'" rx="'+r.toFixed(1)+'" ry="'+(r*0.7).toFixed(1)+'" fill="hsla('+Math.round(hue)+','+baseSat+','+baseLight+','+opacity.toFixed(2)+')" style="animation-delay:'+(Math.random()*-3).toFixed(1)+'s"/>';
+  }
+
+  // Top canopy highlight
+  leaves += '<ellipse cx="140" cy="95" rx="30" ry="20" fill="url(#leaf-glow)" opacity="'+(health/150).toFixed(2)+'"/>';
+
+  leavesEl.innerHTML = leaves;
+
+  // Show streak fire
+  var streakEl = document.getElementById('tree-streak');
+  if (streakEl) streakEl.style.display = currentStreak > 0 ? 'block' : 'none';
+
+  // Update glow color based on health
+  var glowEl = document.getElementById('tree-glow');
+  if (glowEl) {
+    if (health > 70) glowEl.style.background = 'radial-gradient(ellipse, rgba(111,207,151,0.35) 0%, rgba(107,159,159,0.2) 40%, transparent 70%)';
+    else if (health > 40) glowEl.style.background = 'radial-gradient(ellipse, rgba(232,200,109,0.25) 0%, rgba(107,159,159,0.12) 40%, transparent 70%)';
+    else glowEl.style.background = 'radial-gradient(ellipse, rgba(235,107,107,0.2) 0%, rgba(160,140,212,0.1) 40%, transparent 70%)';
+  }
+
+  // Update stat displays
+  document.getElementById('tree-done').textContent = done;
+  document.getElementById('tree-streak-val').textContent = currentStreak;
+  document.getElementById('tree-score').textContent = health;
+
+  // Status message
+  var msg = '';
+  if (health >= 80) msg = 'Your tree is thriving! Keep up the amazing work.';
+  else if (health >= 60) msg = 'Looking good! A few more tasks and your tree will flourish.';
+  else if (health >= 40) msg = 'Your tree needs attention. Tackle some pending tasks!';
+  else if (health >= 20) msg = 'Your tree is wilting. Time to catch up on overdue items.';
+  else msg = 'Your tree is struggling. Start small — complete one task to begin recovery.';
+  document.getElementById('tree-msg').textContent = msg;
 }
 
 // Keyboard shortcuts
