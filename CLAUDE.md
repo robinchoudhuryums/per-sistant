@@ -9,7 +9,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **Database**: Neon PostgreSQL (schema in `db/`)
 - **Email**: nodemailer (SMTP) with scheduled sending via node-cron
 - **AI**: Anthropic Claude API — 9 AI features with per-feature model selection (Haiku/Sonnet/Off)
-- **Tests**: `tests/` (node:test runner, run with `npm test`, 176 tests)
+- **Tests**: `tests/` (node:test runner, run with `npm test`, 181 tests)
 - **Deployment**: `Dockerfile`, `fly.toml` (Fly.io), `render.yaml` (Render)
 
 ## Current State (as of March 2026)
@@ -71,6 +71,8 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **API Pagination**: `limit` and `offset` query params on todos, emails, and notes list endpoints
 - **Performance Indexes**: Database indexes on common query patterns (completed, due_date, priority, category, recurring, etc.)
 - **Rate Limiting**: General (200/15min), auth (10/15min), and AI (20/min) rate limiters
+- **CSRF Protection**: State-changing requests require `X-Requested-With` or JSON/multipart content-type; auto-injected by fetch wrapper in shared JS
+- **Postgres Sessions**: `connect-pg-simple` stores sessions in DB (survives restarts/deploys), auto-creates table, prunes expired sessions every 15 min
 - **Webhooks**: Configure external webhook endpoints to receive event notifications (task created/completed, email sent, streak milestones); test webhooks from Settings
 - **Slack Integration**: Add Slack Incoming Webhook URL in Settings for notifications
 - **AI API Optimization**: Singleton client reuse, prompt caching via system prompts with `cache_control`, response caching for briefing (10min) and suggestions (5min)
@@ -88,7 +90,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - `db/007_enhancements.sql` — custom recurrence, entity links, webhooks, notification preferences
 - `db/008_templates_performance.sql` — todo templates table, performance indexes
 - `uploads/` — local file attachment storage
-- `tests/api.test.js` — test suite (176 tests, 52 suites)
+- `tests/api.test.js` — test suite (181 tests, 52 suites)
 - `Dockerfile` / `docker-compose.yml` — container deployment
 - `fly.toml` — Fly.io config
 - `render.yaml` — Render blueprint
@@ -98,7 +100,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 # Install & run locally
 npm install && node server.js
 
-# Run tests (176 tests)
+# Run tests (181 tests)
 npm test
 
 # Pages

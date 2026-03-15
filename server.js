@@ -26,6 +26,7 @@ const { Pool } = require("pg");
 const fs = require("fs");
 const path = require("path");
 const session = require("express-session");
+const pgSession = require("connect-pg-simple")(session);
 const helmet = require("helmet");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
@@ -154,6 +155,12 @@ async function runMigrations() {
 // Session middleware
 // ---------------------------------------------------------------------------
 app.use(session({
+  store: new pgSession({
+    pool,
+    tableName: "session",
+    createTableIfMissing: true,
+    pruneSessionInterval: 60 * 15, // prune expired sessions every 15 min
+  }),
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
@@ -193,6 +200,15 @@ function requireAuth(req, res, next) {
   return res.redirect("/login");
 }
 app.use(requireAuth);
+
+// CSRF protection: require X-Requested-With or JSON content-type on state-changing requests
+app.use((req, res, next) => {
+  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return next();
+  if (req.path === "/api/login") return next();
+  const ct = (req.headers["content-type"] || "").toLowerCase();
+  if (req.headers["x-requested-with"] || ct.includes("application/json") || ct.includes("multipart/form-data")) return next();
+  return res.status(403).json({ error: "Forbidden: missing CSRF header" });
+});
 
 // ---------------------------------------------------------------------------
 // Security middleware
@@ -591,6 +607,12 @@ const SHARED_CSS = `
 // Shared JS utilities (included in all pages via pageHead)
 // ---------------------------------------------------------------------------
 const SHARED_JS = `
+// CSRF: auto-inject X-Requested-With on same-origin API calls
+(function(){var _f=window.fetch;window.fetch=function(url,opts){
+  opts=opts||{};var u=typeof url==='string'?url:(url&&url.url)||'';
+  if(u.startsWith('/api/')){opts.headers=opts.headers||{};if(!opts.headers['X-Requested-With'])opts.headers['X-Requested-With']='XMLHttpRequest';}
+  return _f.call(this,url,opts);
+};})();
 function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 function renderMd(s){
   if(!s)return'';
