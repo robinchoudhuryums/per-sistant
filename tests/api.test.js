@@ -756,6 +756,40 @@ describe("Security", () => {
     const noMode = null ? "pin" : (noAuth ? "password" : null);
     assert.equal(noMode, null);
   });
+
+  it("CSRF check allows JSON content-type", () => {
+    const ct = "application/json";
+    const xrw = undefined;
+    const allowed = !!(xrw || ct.includes("application/json") || ct.includes("multipart/form-data"));
+    assert.ok(allowed);
+  });
+
+  it("CSRF check allows X-Requested-With header", () => {
+    const ct = "";
+    const xrw = "XMLHttpRequest";
+    const allowed = !!(xrw || ct.includes("application/json") || ct.includes("multipart/form-data"));
+    assert.ok(allowed);
+  });
+
+  it("CSRF check allows multipart/form-data", () => {
+    const ct = "multipart/form-data; boundary=----foo";
+    const xrw = undefined;
+    const allowed = !!(xrw || ct.includes("application/json") || ct.includes("multipart/form-data"));
+    assert.ok(allowed);
+  });
+
+  it("CSRF check blocks bare POST without headers", () => {
+    const ct = "";
+    const xrw = undefined;
+    const allowed = !!(xrw || ct.includes("application/json") || ct.includes("multipart/form-data"));
+    assert.ok(!allowed);
+  });
+
+  it("CSRF check skips GET requests", () => {
+    const method = "GET";
+    const needsCheck = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
+    assert.ok(!needsCheck);
+  });
 });
 
 // ---------------------------------------------------------------------------

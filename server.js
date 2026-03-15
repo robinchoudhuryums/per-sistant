@@ -26,6 +26,7 @@ const { Pool } = require("pg");
 const fs = require("fs");
 const path = require("path");
 const session = require("express-session");
+const pgSession = require("connect-pg-simple")(session);
 const helmet = require("helmet");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
@@ -118,6 +119,7 @@ let envContacts = {};
 try { envContacts = JSON.parse(process.env.CONTACTS || "{}"); } catch { envContacts = {}; }
 
 const app = express();
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 
@@ -153,6 +155,12 @@ async function runMigrations() {
 // Session middleware
 // ---------------------------------------------------------------------------
 app.use(session({
+  store: new pgSession({
+    pool,
+    tableName: "session",
+    createTableIfMissing: true,
+    pruneSessionInterval: 60 * 15, // prune expired sessions every 15 min
+  }),
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
@@ -160,6 +168,7 @@ app.use(session({
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
+    maxAge: 24 * 60 * 60 * 1000,
   },
 }));
 
@@ -191,6 +200,15 @@ function requireAuth(req, res, next) {
   return res.redirect("/login");
 }
 app.use(requireAuth);
+
+// CSRF protection: require X-Requested-With or JSON content-type on state-changing requests
+app.use((req, res, next) => {
+  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return next();
+  if (req.path === "/api/login") return next();
+  const ct = (req.headers["content-type"] || "").toLowerCase();
+  if (req.headers["x-requested-with"] || ct.includes("application/json") || ct.includes("multipart/form-data")) return next();
+  return res.status(403).json({ error: "Forbidden: missing CSRF header" });
+});
 
 // ---------------------------------------------------------------------------
 // Security middleware
@@ -589,6 +607,12 @@ const SHARED_CSS = `
 // Shared JS utilities (included in all pages via pageHead)
 // ---------------------------------------------------------------------------
 const SHARED_JS = `
+// CSRF: auto-inject X-Requested-With on same-origin API calls
+(function(){var _f=window.fetch;window.fetch=function(url,opts){
+  opts=opts||{};var u=typeof url==='string'?url:(url&&url.url)||'';
+  if(u.startsWith('/api/')){opts.headers=opts.headers||{};if(!opts.headers['X-Requested-With'])opts.headers['X-Requested-With']='XMLHttpRequest';}
+  return _f.call(this,url,opts);
+};})();
 function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 function renderMd(s){
   if(!s)return'';
@@ -765,59 +789,169 @@ function themeScript() {
 app.get("/login", (req, res) => {
   if (!AUTH_SECRET) return res.redirect("/");
   const isPIN = AUTH_MODE === "pin";
+  const pinLen = 8; // fixed display length to avoid leaking actual PIN length
   res.send(`${pageHead("Login")}
 <body>
 ${themeScript()}
-<div class="container">
-  <div style="max-width:360px;margin:120px auto 0;">
-    <div style="text-align:center;margin-bottom:40px;">
-      <div style="font-size:13px;font-weight:300;letter-spacing:2px;text-transform:uppercase;color:var(--text-muted);">Per-sistant</div>
-    </div>
-    <div class="section" style="text-align:center;">
-      <h2>${isPIN ? "Enter PIN" : "Enter Password"}</h2>
-      <div id="error" class="status-msg" style="margin-top:12px;"></div>
-      ${isPIN ? `
-      <div id="dots" style="display:flex;gap:10px;justify-content:center;margin:24px 0;"></div>
-      <div style="display:grid;grid-template-columns:repeat(3,minmax(60px,72px));gap:12px;justify-content:center;max-width:260px;margin:0 auto;">
-        ${[1,2,3,4,5,6,7,8,9,'',0,'<'].map(k => k === '' ? '<div></div>' :
-          `<button onclick="${k === '<' ? 'pinDel()' : 'pinAdd('+k+')'}" style="width:100%;aspect-ratio:1;border-radius:50%;border:1px solid var(--border);background:transparent;color:var(--text);font-size:22px;font-weight:300;cursor:pointer;font-family:inherit;transition:all 0.2s;-webkit-tap-highlight-color:transparent;touch-action:manipulation;">${k === '<' ? '&#9003;' : k}</button>`
-        ).join('')}
-      </div>
-      <script>
-        var pin = '';
-        function pinAdd(d) { pin += d; renderDots(); if (pin.length >= ${SESSION_PIN ? SESSION_PIN.length : 4}) submit(); }
-        function pinDel() { pin = pin.slice(0,-1); renderDots(); }
-        function renderDots() {
-          var h = ''; for (var i = 0; i < pin.length; i++) h += '<div style="width:12px;height:12px;border-radius:50%;background:var(--warm);"></div>';
-          document.getElementById('dots').innerHTML = h;
-        }
-        function submit() {
-          fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:pin}) })
-            .then(r => r.json()).then(d => { if (d.ok) location.href='/'; else { pin=''; renderDots(); document.getElementById('error').className='status-msg error'; document.getElementById('error').textContent=d.error||'Invalid PIN'; } });
-        }
-      </script>
-      ` : `
-      <form onsubmit="event.preventDefault(); submit();" style="margin-top:20px;">
-        <input type="password" id="pw" placeholder="Password" style="width:100%;padding:12px 16px;font-size:15px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);outline:none;margin-bottom:12px;">
-        <button type="submit" class="primary" style="width:100%;padding:12px;font-size:13px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Log in</button>
-      </form>
-      <script>
-        function submit() {
-          fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:document.getElementById('pw').value}) })
-            .then(r => r.json()).then(d => { if (d.ok) location.href='/'; else { document.getElementById('error').className='status-msg error'; document.getElementById('error').textContent=d.error||'Invalid password'; } });
-        }
-      </script>
-      `}
-    </div>
+<style>
+  body { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  @keyframes scaleIn {
+    from { opacity: 0; transform: scale(0.96); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  @keyframes dotPop {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.3); }
+    100% { transform: scale(1); }
+  }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20%, 60% { transform: translateX(-6px); }
+    40%, 80% { transform: translateX(6px); }
+  }
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .login-card { position: relative; z-index: 1; width: 100%; max-width: 360px; padding: 44px 32px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+    backdrop-filter: blur(16px); text-align: center;
+    animation: scaleIn 0.4s ease both; }
+  .login-card .logo { font-weight: 300; font-size: 13px; letter-spacing: 2px; text-transform: uppercase;
+    color: var(--text-muted); margin-bottom: 28px; animation: fadeInUp 0.4s ease both; animation-delay: 0.1s; }
+  .login-card h1 { font-size: 26px; font-weight: 300; letter-spacing: -0.3px; margin-bottom: 6px;
+    animation: fadeInUp 0.4s ease both; animation-delay: 0.15s; }
+  .login-card p { color: var(--text-muted); font-size: 14px; font-weight: 300; margin-bottom: 24px;
+    animation: fadeInUp 0.4s ease both; animation-delay: 0.2s; }
+  .login-card input[type="password"] { width: 100%; padding: 12px 16px; font-size: 14px; font-weight: 300;
+    border: 1px solid var(--border); border-radius: 8px; background: transparent;
+    color: var(--text); font-family: inherit; box-sizing: border-box; }
+  .login-card input:focus { outline: none; border-color: var(--warm); }
+  .login-card button[type="submit"] { width: 100%; margin-top: 14px; padding: 12px; font-size: 13px; font-weight: 500;
+    border: 1px solid var(--warm); border-radius: 8px; cursor: pointer;
+    background: transparent; color: var(--warm); text-transform: uppercase;
+    letter-spacing: 1px; font-family: inherit; transition: all 0.2s; }
+  .login-card button[type="submit"]:hover { background: rgba(160,140,212,0.1); color: var(--text); }
+  .error-msg { margin-top: 14px; padding: 10px; border-radius: 6px;
+    background: var(--red-bg); color: var(--red); font-size: 13px; display: none; }
+  .pin-dots { display: flex; justify-content: center; gap: 12px; margin-bottom: 24px;
+    animation: fadeInUp 0.4s ease both; animation-delay: 0.25s; }
+  .pin-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border);
+    transition: all 0.2s; }
+  .pin-dot.filled { background: var(--warm); border-color: var(--warm); animation: dotPop 0.2s ease; }
+  .pin-dot.error { border-color: var(--red); background: var(--red); }
+  .pin-dots.shake { animation: shake 0.4s ease; }
+  .pin-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; max-width: 240px; margin: 0 auto;
+    animation: fadeInUp 0.4s ease both; animation-delay: 0.3s; }
+  .pin-key { padding: 16px; font-size: 22px; font-weight: 300; border: 1px solid var(--border);
+    border-radius: 10px; background: transparent; color: var(--text); cursor: pointer;
+    font-family: inherit; transition: all 0.15s; user-select: none; -webkit-user-select: none;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  .pin-key:hover { border-color: var(--warm); }
+  .pin-key:active { background: rgba(160,140,212,0.1); transform: scale(0.95); }
+  .pin-key.fn { font-size: 12px; font-weight: 400; letter-spacing: 0.5px; text-transform: uppercase;
+    color: var(--text-muted); border-color: transparent; }
+  .pin-key.fn:hover { color: var(--text); }
+</style>
+  <div class="login-card">
+    <div class="logo">Per-sistant</div>
+    <h1>Welcome back</h1>
+    ${isPIN ? `
+    <p>Enter your PIN</p>
+    <div class="pin-dots" id="pin-dots"></div>
+    <div class="pin-pad" id="pin-pad"></div>
+    <div id="error" class="error-msg"></div>
+    ` : `
+    <p>Enter your password to continue</p>
+    <form id="login-form">
+      <input type="password" id="pw" placeholder="Password" autofocus required>
+      <button type="submit">Sign In</button>
+    </form>
+    <div id="error" class="error-msg"></div>
+    `}
   </div>
-</div>
+  <script>
+    var errEl = document.getElementById('error');
+    async function doLogin(value) {
+      try {
+        var res = await fetch('/api/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: value }),
+        });
+        var data = await res.json();
+        if (res.ok) { window.location.href = '/'; return null; }
+        else return data.error || 'Invalid credentials';
+      } catch(e) { return 'Connection error'; }
+    }
+    ${isPIN ? `
+    (function() {
+      var pinLen = ${pinLen};
+      var pin = '';
+      var submitting = false;
+      var dotsEl = document.getElementById('pin-dots');
+      var dotsHtml = '';
+      for (var i = 0; i < pinLen; i++) dotsHtml += '<div class="pin-dot" id="dot-' + i + '"></div>';
+      dotsEl.innerHTML = dotsHtml;
+      var padEl = document.getElementById('pin-pad');
+      var padHtml = '';
+      [1,2,3,4,5,6,7,8,9].forEach(function(n) {
+        padHtml += '<button class="pin-key" type="button" data-digit="' + n + '">' + n + '</button>';
+      });
+      padHtml += '<button class="pin-key fn" type="button" data-action="clear">Clear</button>';
+      padHtml += '<button class="pin-key" type="button" data-digit="0">0</button>';
+      padHtml += '<button class="pin-key fn" type="button" data-action="submit" style="color:var(--warm);">Go</button>';
+      padEl.innerHTML = padHtml;
+      function updateDots() {
+        for (var i = 0; i < pinLen; i++) {
+          document.getElementById('dot-' + i).className = 'pin-dot' + (i < pin.length ? ' filled' : '');
+        }
+      }
+      function handleDigit(n) {
+        if (pin.length >= pinLen || submitting) return;
+        pin += n;
+        updateDots();
+        errEl.style.display = 'none';
+      }
+      async function submitPin() {
+        if (!pin.length || submitting) return;
+        submitting = true;
+        var err = await doLogin(pin);
+        if (err) {
+          for (var i = 0; i < pinLen; i++) {
+            if (i < pin.length) document.getElementById('dot-' + i).className = 'pin-dot error';
+          }
+          dotsEl.classList.add('shake');
+          errEl.textContent = err; errEl.style.display = 'block';
+          setTimeout(function() { pin = ''; submitting = false; updateDots(); dotsEl.classList.remove('shake'); }, 600);
+        }
+      }
+      padEl.addEventListener('click', function(e) {
+        var btn = e.target.closest('button');
+        if (!btn) return;
+        e.preventDefault();
+        if (btn.dataset.digit !== undefined) handleDigit(btn.dataset.digit);
+        else if (btn.dataset.action === 'clear') { pin = ''; updateDots(); errEl.style.display = 'none'; }
+        else if (btn.dataset.action === 'submit') submitPin();
+      });
+    })();
+    ` : `
+    document.getElementById('login-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      var err = await doLogin(document.getElementById('pw').value);
+      if (err) { errEl.textContent = err; errEl.style.display = 'block'; }
+    });
+    `}
+  </script>
 </body></html>`);
 });
 
 app.post("/api/login", async (req, res) => {
   const { password } = req.body;
   if (!AUTH_SECRET) return res.json({ ok: true });
-  if (password === AUTH_SECRET) {
+  if (!password) return res.status(400).json({ error: (AUTH_MODE === "pin" ? "PIN" : "Password") + " required" });
+  const providedBuf = Buffer.from(String(password));
+  const expectedBuf = Buffer.from(AUTH_SECRET);
+  if (providedBuf.length === expectedBuf.length && crypto.timingSafeEqual(providedBuf, expectedBuf)) {
     let timeout = 15;
     try {
       const r = await pool.query("SELECT session_timeout_minutes FROM user_settings WHERE id = 1");
@@ -828,7 +962,7 @@ app.post("/api/login", async (req, res) => {
     req.session.timeoutMinutes = timeout;
     return res.json({ ok: true });
   }
-  return res.status(401).json({ error: "Invalid credentials." });
+  return res.status(401).json({ error: AUTH_MODE === "pin" ? "Invalid PIN" : "Invalid password" });
 });
 
 app.post("/api/logout", (req, res) => {
