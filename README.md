@@ -389,5 +389,5 @@ npm test
 | `SMTP_PASS` | SMTP password |
 | `SMTP_FROM` | From email address |
 | `CONTACTS` | JSON map of name→email |
-| `ANTHROPIC_API_KEY` | Claude API key for AI email drafting (optional) |
+| `ANTHROPIC_API_KEY` | Claude API key for all 9 AI features (optional) |
 | `PERFIN_URL` | URL to linked Perfin instance |

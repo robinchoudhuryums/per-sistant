@@ -5,15 +5,21 @@ Personal assistant tool for task management, email scheduling, and note-taking.
 Companion app to **Perfin** (personal finance tracker) — same design system, cross-linked navigation.
 
 ## Architecture
-- **Server**: `server.js` (Express, port 3001, bound to 0.0.0.0)
-- **Database**: Neon PostgreSQL (schema in `db/`)
+- **Entry point**: `server.js` (Express, port 3001, bound to 0.0.0.0) — slim ~180 lines
+- **Config**: `config.js` (constants, env parsing, validation arrays)
+- **Database**: `db.js` (pool + migrations), Neon PostgreSQL (schema in `db/`)
+- **Middleware**: `middleware.js` (auth, CSRF, rate limiting, session)
+- **AI**: `ai.js` (Anthropic Claude client, model helpers, caching) — 9 features with per-feature model selection
+- **Helpers**: `helpers.js` (recurrence, webhooks, Slack, automations)
+- **Views**: `views.js` + `views/css.js` + `views/js.js` (shared HTML/CSS/JS helpers)
+- **Routes**: `routes/` (21 route modules — auth, todos, emails, notes, contacts, settings, etc.)
+- **Pages**: `pages/` (9 page modules — dashboard, todos, emails, notes, contacts, calendar, review, analytics, settings)
 - **Email**: nodemailer (SMTP) with scheduled sending via node-cron
-- **AI**: Anthropic Claude API — 9 AI features with per-feature model selection (Haiku/Sonnet/Off)
-- **Tests**: `tests/` (node:test runner, run with `npm test`, 181 tests)
+- **Tests**: `tests/` (node:test runner, `npm test`, 181 unit tests + integration tests)
 - **Deployment**: `Dockerfile`, `fly.toml` (Fly.io), `render.yaml` (Render)
 
 ## Current State (as of March 2026)
-- Full Express server with inline HTML (matches Perfin aesthetic exactly)
+- Modular Express server with separated routes, pages, and middleware (matches Perfin aesthetic exactly)
 - **Authentication**: Set `SESSION_PASSWORD` (text) or `SESSION_PIN` (numeric PIN pad) env var
 - **Dark/Light theme**: Toggle in Settings, persisted to DB + localStorage
 - **To-Do Lists**: Short/medium/long-term horizons, 4 priority levels, categories, due dates
@@ -83,7 +89,15 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 ## Key Files
 - `.env` — all secrets (never commit)
 - `.env.example` — template with setup instructions
-- `server.js` — main server (all routes + inline HTML)
+- `server.js` — entry point (~180 lines: wires modules, starts server, cron jobs)
+- `config.js` — constants, validation arrays, env var parsing
+- `db.js` — database pool and migration runner
+- `ai.js` — Anthropic client, callAI, model helpers, response caching
+- `middleware.js` — session, auth, CSRF, helmet, rate limiting
+- `helpers.js` — advanceRecurrence, webhooks, Slack, automations
+- `views.js` — pageHead, navBar, themeScript (imports from `views/`)
+- `routes/` — 21 API route modules (auth, todos, emails, notes, contacts, etc.)
+- `pages/` — 9 page rendering modules (dashboard, todos, emails, notes, etc.)
 - `db/001_schema.sql` — database schema (todos, emails, notes, contacts, settings)
 - `db/002_features.sql` — enhancement migration (recurring, subtasks, templates, reviews)
 - `db/003_ai_features.sql` — AI model preferences & note tags migration
@@ -93,7 +107,8 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - `db/007_enhancements.sql` — custom recurrence, entity links, webhooks, notification preferences
 - `db/008_templates_performance.sql` — todo templates table, performance indexes
 - `uploads/` — local file attachment storage
-- `tests/api.test.js` — test suite (181 tests, 52 suites)
+- `tests/api.test.js` — unit test suite (181 tests, 52 suites)
+- `tests/integration.test.js` — integration tests (requires DB, auto-skips without)
 - `Dockerfile` / `docker-compose.yml` — container deployment
 - `fly.toml` — Fly.io config
 - `render.yaml` — Render blueprint
