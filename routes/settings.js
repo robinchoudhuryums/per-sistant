@@ -1,9 +1,25 @@
 const express = require("express");
 const { isAIAvailable } = require("../ai");
+const { loadKeepAliveConfig } = require("../services/keep-alive");
 
 module.exports = function ({ pool, config }) {
   const router = express.Router();
   const { AUTH_MODE, PERFIN_URL } = config;
+
+  // Keep-alive schedule — no auth required (used by GitHub Actions cron)
+  router.get("/api/keep-alive-schedule", async (req, res) => {
+    try {
+      const cfg = await loadKeepAliveConfig();
+      res.json({
+        enabled: cfg.keep_alive_enabled,
+        start: cfg.keep_alive_start,
+        end: cfg.keep_alive_end,
+        timezone: cfg.keep_alive_timezone,
+      });
+    } catch (err) {
+      res.json({ enabled: false });
+    }
+  });
 
   router.get("/api/settings", async (req, res) => {
     try {
@@ -20,7 +36,7 @@ module.exports = function ({ pool, config }) {
 
   router.patch("/api/settings", async (req, res) => {
     try {
-      const { theme, session_timeout_minutes, default_horizon, perfin_url, dashboard_layout, slack_webhook_url } = req.body;
+      const { theme, session_timeout_minutes, default_horizon, perfin_url, dashboard_layout, slack_webhook_url, keep_alive_enabled, keep_alive_start, keep_alive_end, keep_alive_timezone } = req.body;
       const fields = [];
       const params = [];
       let idx = 1;
@@ -30,6 +46,10 @@ module.exports = function ({ pool, config }) {
       if (perfin_url !== undefined) { fields.push(`perfin_url = $${idx++}`); params.push(perfin_url || null); }
       if (dashboard_layout !== undefined) { fields.push(`dashboard_layout = $${idx++}`); params.push(JSON.stringify(dashboard_layout)); }
       if (slack_webhook_url !== undefined) { fields.push(`slack_webhook_url = $${idx++}`); params.push(slack_webhook_url || null); }
+      if (keep_alive_enabled !== undefined) { fields.push(`keep_alive_enabled = $${idx++}`); params.push(!!keep_alive_enabled); }
+      if (keep_alive_start !== undefined) { fields.push(`keep_alive_start = $${idx++}`); params.push(parseInt(keep_alive_start) || 0); }
+      if (keep_alive_end !== undefined) { fields.push(`keep_alive_end = $${idx++}`); params.push(parseInt(keep_alive_end) || 0); }
+      if (keep_alive_timezone !== undefined) { fields.push(`keep_alive_timezone = $${idx++}`); params.push(keep_alive_timezone || "America/New_York"); }
       if (!fields.length) return res.status(400).json({ error: "No fields to update." });
       const r = await pool.query(`UPDATE user_settings SET ${fields.join(", ")} WHERE id = 1 RETURNING *`, params);
       if (theme && req.session) req.session.theme = theme;

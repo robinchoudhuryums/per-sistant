@@ -158,6 +158,44 @@ ${themeScript()}
     </div>
   </div>
 
+  <div class="section">
+    <h2>Keep-Alive (Render)</h2>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Prevent Render free tier from sleeping by pinging the server every 14 minutes during active hours.</p>
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <label style="margin:0;font-size:13px;color:var(--text);white-space:nowrap;">Enable</label>
+        <input type="checkbox" id="ka-enabled" style="width:auto;">
+      </div>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+        <label style="margin:0;font-size:13px;color:var(--text);white-space:nowrap;">Active from</label>
+        <select id="ka-start" style="width:auto;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);"></select>
+        <label style="margin:0;font-size:13px;color:var(--text);white-space:nowrap;">to</label>
+        <select id="ka-end" style="width:auto;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);"></select>
+      </div>
+      <div style="display:flex;gap:12px;align-items:center;">
+        <label style="margin:0;font-size:13px;color:var(--text);white-space:nowrap;">Timezone</label>
+        <select id="ka-tz" style="width:auto;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
+          <option value="America/New_York">Eastern (ET)</option>
+          <option value="America/Chicago">Central (CT)</option>
+          <option value="America/Denver">Mountain (MT)</option>
+          <option value="America/Los_Angeles">Pacific (PT)</option>
+          <option value="America/Anchorage">Alaska (AKT)</option>
+          <option value="Pacific/Honolulu">Hawaii (HT)</option>
+          <option value="Europe/London">London (GMT/BST)</option>
+          <option value="Europe/Berlin">Berlin (CET)</option>
+          <option value="Asia/Tokyo">Tokyo (JST)</option>
+          <option value="Asia/Kolkata">India (IST)</option>
+          <option value="Australia/Sydney">Sydney (AEST)</option>
+          <option value="UTC">UTC</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:12px;align-items:center;">
+        <button id="save-keepalive-btn" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save</button>
+        <span id="ka-estimate" style="font-size:11px;color:var(--text-muted);"></span>
+      </div>
+    </div>
+  </div>
+
   ${AUTH_SECRET ? '<div class="section"><h2>Session</h2><div class="actions" style="margin-bottom:0;"><button class="danger" style="border-color:var(--red);color:var(--red);" id="logout-btn">Log Out</button></div></div>' : ''}
 </div>
 
@@ -263,6 +301,12 @@ async function load() {
     } catch {}
   }
   document.getElementById('s-slack').value = s.slack_webhook_url || '';
+  // Keep-alive
+  document.getElementById('ka-enabled').checked = !!s.keep_alive_enabled;
+  document.getElementById('ka-start').value = s.keep_alive_start != null ? s.keep_alive_start : 6;
+  document.getElementById('ka-end').value = s.keep_alive_end != null ? s.keep_alive_end : 0;
+  document.getElementById('ka-tz').value = s.keep_alive_timezone || 'America/New_York';
+  updateKAEstimate();
   if ('Notification' in window && Notification.permission === 'granted') {
     document.getElementById('notif-btn').textContent = 'Notifications Enabled';
     document.getElementById('notif-btn').disabled = true;
@@ -515,6 +559,39 @@ async function logout() {
   location.href = '/login';
 }
 
+// Keep-alive hour selectors
+(function(){
+  var startSel=document.getElementById('ka-start');
+  var endSel=document.getElementById('ka-end');
+  for(var h=0;h<24;h++){
+    var label=h===0?'12 AM':h<12?h+' AM':h===12?'12 PM':(h-12)+' PM';
+    startSel.innerHTML+='<option value="'+h+'">'+label+'</option>';
+    endSel.innerHTML+='<option value="'+h+'">'+label+'</option>';
+  }
+  startSel.value='6'; endSel.value='0';
+})();
+function updateKAEstimate(){
+  var start=parseInt(document.getElementById('ka-start').value);
+  var end=parseInt(document.getElementById('ka-end').value);
+  var el=document.getElementById('ka-estimate');
+  if(start===end){el.textContent='24/7 — ~103 pings/day';return;}
+  var hours=start<end?end-start:24-start+end;
+  var pings=Math.ceil(hours*60/14);
+  el.textContent=hours+'h active — ~'+pings+' pings/day';
+}
+document.getElementById('ka-start').addEventListener('change',updateKAEstimate);
+document.getElementById('ka-end').addEventListener('change',updateKAEstimate);
+async function saveKeepAlive(){
+  var data={
+    keep_alive_enabled:document.getElementById('ka-enabled').checked,
+    keep_alive_start:parseInt(document.getElementById('ka-start').value),
+    keep_alive_end:parseInt(document.getElementById('ka-end').value),
+    keep_alive_timezone:document.getElementById('ka-tz').value,
+  };
+  await fetch('/api/settings',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  var el=document.getElementById('status');el.className='status-msg success';el.textContent='Keep-alive settings saved.';
+  setTimeout(function(){el.className='status-msg';},3000);
+}
 load();
 loadAutomations();
 loadWebhooks();
@@ -529,6 +606,7 @@ bindEvents([
   ['new-auto-btn','click',openAutoModal],
   ['new-webhook-btn','click',openWebhookModal],
   ['save-slack-btn','click',saveSlack],
+  ['save-keepalive-btn','click',saveKeepAlive],
   ['logout-btn','click',logout],
   ['auto-action','change',updateActionFields],
   ['auto-cancel-btn','click',closeAutoModal],
