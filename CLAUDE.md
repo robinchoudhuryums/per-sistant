@@ -9,7 +9,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **Database**: Neon PostgreSQL (schema in `db/`)
 - **Email**: nodemailer (SMTP) with scheduled sending via node-cron
 - **AI**: Anthropic Claude API — 9 AI features with per-feature model selection (Haiku/Sonnet/Off)
-- **Tests**: `tests/` (node:test runner, run with `npm test`, 115 tests)
+- **Tests**: `tests/` (node:test runner, run with `npm test`, 144 tests)
 - **Deployment**: `Dockerfile`, `fly.toml` (Fly.io), `render.yaml` (Render)
 
 ## Current State (as of March 2026)
@@ -19,7 +19,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **To-Do Lists**: Short/medium/long-term horizons, 4 priority levels, categories, due dates
 - **Todo Categories**: Preset categories (work, personal, health, finance, errands, home, learning) + custom; filterable on todos page and dashboard
 - **Dashboard Task Views**: All / By Category / By Urgency / Due Soon tabs
-- **Recurring Tasks**: Daily, weekly, monthly, yearly, weekdays recurrence rules with auto-generation and streak/habit tracking
+- **Recurring Tasks**: Daily, weekly, monthly, yearly, weekdays + custom intervals (every N days/weeks/months) with auto-generation, streak/habit tracking, skip, and snooze
 - **Subtasks**: Checklists within tasks with progress tracking
 - **Natural Language Quick Add**: Create todos from natural language with auto-detected priority/horizon/due date (AI-enhanced when enabled)
 - **Email Drafting**: Compose, schedule, send; natural language "Quick Send" parser
@@ -59,6 +59,11 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **Bulk Actions**: Multi-select mode on todos, emails, and notes for batch operations
 - **System Theme Auto-Detection**: Auto option follows OS dark/light preference via prefers-color-scheme
 - **Backend Validation**: Server-side enum validation for priority, horizon, recurrence rules, note colors, email format
+- **Cross-Entity Links**: Link todos, emails, and notes to each other; create todos from notes or emails with auto-linking
+- **Notification System**: Centralized notification check for due tasks, overdue items, streaks at risk, and note reminders; browser push notifications on dashboard load
+- **Analytics Dashboard**: Productivity insights with completion trends, day-of-week analysis, priority/category breakdowns, average completion time, streak leaderboard; filterable by week/month/quarter/year
+- **Webhooks**: Configure external webhook endpoints to receive event notifications (task created/completed, email sent, streak milestones); test webhooks from Settings
+- **Slack Integration**: Add Slack Incoming Webhook URL in Settings for notifications
 
 ## Key Files
 - `.env` — all secrets (never commit)
@@ -70,8 +75,9 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - `db/004_soft_delete.sql` — soft delete columns for trash/undo
 - `db/005_dependencies_streaks_markdown.sql` — task dependencies, streak tracking, note format migration
 - `db/006_dashboard_automations.sql` — dashboard layout, automations, attachments, location reminders
+- `db/007_enhancements.sql` — custom recurrence, entity links, webhooks, notification preferences
 - `uploads/` — local file attachment storage
-- `tests/api.test.js` — test suite (115 tests, 36 suites)
+- `tests/api.test.js` — test suite (144 tests, 43 suites)
 - `Dockerfile` / `docker-compose.yml` — container deployment
 - `fly.toml` — Fly.io config
 - `render.yaml` — Render blueprint
@@ -81,7 +87,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 # Install & run locally
 npm install && node server.js
 
-# Run tests (88 tests)
+# Run tests (144 tests)
 npm test
 
 # Pages
@@ -93,6 +99,7 @@ GET  /contacts             # Contact management page
 GET  /settings             # Settings page
 GET  /calendar             # Calendar view
 GET  /review               # Weekly review page
+GET  /analytics            # Analytics/insights dashboard
 GET  /login                # Authentication
 
 # Core API
@@ -102,6 +109,8 @@ PATCH  /api/todos/:id       # Update todo
 DELETE /api/todos/:id       # Delete todo
 POST   /api/todos/reorder   # Reorder todos (drag-and-drop)
 POST   /api/todos/:id/complete-recurring  # Complete recurring task & generate next (with streak tracking)
+POST   /api/todos/:id/skip-recurring     # Skip recurring task (preserves streak)
+POST   /api/todos/:id/snooze             # Snooze task (postpone due date)
 GET    /api/todo-categories  # List all categories (defaults + custom)
 GET    /api/todos/:id/dependencies  # Get task dependencies (blocked_by + blocking)
 POST   /api/todos/:id/dependencies  # Add dependency (depends_on_id)
@@ -149,6 +158,26 @@ GET    /api/attachments/:type/:id       # List attachments for entity
 POST   /api/attachments/:type/:id       # Upload file attachment (multipart)
 GET    /api/attachments/download/:id    # Download attachment
 DELETE /api/attachments/:id             # Delete attachment
+
+# Cross-Entity Links
+GET    /api/links/:type/:id        # Get links for an entity
+POST   /api/links                  # Create a link between entities
+DELETE /api/links/:id              # Remove a link
+POST   /api/notes/:id/create-todo  # Create todo from note (with auto-link)
+POST   /api/emails/:id/create-todo # Create todo from email (with auto-link)
+
+# Webhooks API
+GET    /api/webhooks               # List webhooks
+POST   /api/webhooks               # Create webhook
+PATCH  /api/webhooks/:id           # Update webhook
+DELETE /api/webhooks/:id           # Delete webhook
+POST   /api/webhooks/:id/test      # Test a webhook
+
+# Notifications
+GET    /api/notifications/check    # Check for due tasks, overdue, streaks at risk, reminders
+
+# Analytics
+GET    /api/analytics              # Productivity analytics (query: period=week|month|quarter|year)
 
 # Calendar Export
 GET    /api/calendar.ics           # iCal export of tasks and scheduled emails

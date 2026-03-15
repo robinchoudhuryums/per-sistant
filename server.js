@@ -53,7 +53,7 @@ const AI_MODELS = {
 // Validation constants
 const VALID_PRIORITIES = ["low", "medium", "high", "urgent"];
 const VALID_HORIZONS = ["short", "medium", "long"];
-const VALID_RECURRENCE_RULES = ["daily", "weekly", "monthly", "yearly", "weekdays"];
+const VALID_RECURRENCE_RULES = ["daily", "weekly", "monthly", "yearly", "weekdays", "custom_days", "custom_weeks", "custom_months"];
 const VALID_NOTE_COLORS = ["default", "warm", "teal", "green", "blue"];
 const VALID_EMAIL_STATUSES = ["draft", "scheduled", "sent", "failed"];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -596,7 +596,7 @@ document.addEventListener('touchstart',function(e){_touchStartX=e.changedTouches
 document.addEventListener('touchend',function(e){
   var dx=e.changedTouches[0].screenX-_touchStartX,dy=e.changedTouches[0].screenY-_touchStartY;
   if(Math.abs(dx)>100&&Math.abs(dx)>Math.abs(dy)*1.5){
-    var pages=['/','/todos','/emails','/notes','/calendar','/contacts','/review','/settings'];
+    var pages=['/','/todos','/emails','/notes','/calendar','/contacts','/review','/analytics','/settings'];
     var cur=pages.indexOf(location.pathname);if(cur<0)return;
     if(dx<0&&cur<pages.length-1)location.href=pages[cur+1];
     else if(dx>0&&cur>0)location.href=pages[cur-1];
@@ -668,6 +668,7 @@ function navBar(activePage) {
     { href: "/calendar", label: "Calendar", icon: "&#128197;" },
     { href: "/contacts", label: "Contacts", icon: "&#128100;" },
     { href: "/review", label: "Review", icon: "&#128202;" },
+    { href: "/analytics", label: "Analytics", icon: "&#128200;" },
     { href: "/settings", label: "Settings", icon: "&#9881;" },
   ];
   const bottomLinks = links.slice(0, 5); // Dashboard, Todos, Emails, Notes, Calendar
@@ -803,16 +804,17 @@ app.get("/api/todos", async (req, res) => {
 
 app.post("/api/todos", async (req, res) => {
   try {
-    const { title, description, priority, horizon, category, due_date, recurring, recurrence_rule } = req.body;
+    const { title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_interval } = req.body;
     if (!title) return res.status(400).json({ error: "Title is required." });
     if (priority && !VALID_PRIORITIES.includes(priority)) return res.status(400).json({ error: "Invalid priority. Must be: " + VALID_PRIORITIES.join(", ") });
     if (horizon && !VALID_HORIZONS.includes(horizon)) return res.status(400).json({ error: "Invalid horizon. Must be: " + VALID_HORIZONS.join(", ") });
     if (recurrence_rule && !VALID_RECURRENCE_RULES.includes(recurrence_rule)) return res.status(400).json({ error: "Invalid recurrence rule. Must be: " + VALID_RECURRENCE_RULES.join(", ") });
     const r = await pool.query(
-      `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [title, description || null, priority || "medium", horizon || "short", category || null, due_date || null, recurring || false, recurrence_rule || null]
+      `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_interval) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [title, description || null, priority || "medium", horizon || "short", category || null, due_date || null, recurring || false, recurrence_rule || null, recurrence_interval || 1]
     );
     runAutomations('todo_created', r.rows[0], 'todo').catch(() => {});
+    fireWebhooks('todo_created', r.rows[0]).catch(() => {});
     res.json(r.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -837,6 +839,8 @@ app.patch("/api/todos/:id", async (req, res) => {
     if (sort_order !== undefined) { fields.push(`sort_order = $${idx++}`); params.push(sort_order); }
     if (recurring !== undefined) { fields.push(`recurring = $${idx++}`); params.push(recurring); }
     if (recurrence_rule !== undefined) { fields.push(`recurrence_rule = $${idx++}`); params.push(recurrence_rule); }
+    if (req.body.recurrence_interval !== undefined) { fields.push(`recurrence_interval = $${idx++}`); params.push(req.body.recurrence_interval); }
+    if (req.body.snoozed_until !== undefined) { fields.push(`snoozed_until = $${idx++}`); params.push(req.body.snoozed_until); }
     if (req.body.location_name !== undefined) { fields.push(`location_name = $${idx++}`); params.push(req.body.location_name); }
     if (req.body.location_lat !== undefined) { fields.push(`location_lat = $${idx++}`); params.push(req.body.location_lat); }
     if (req.body.location_lng !== undefined) { fields.push(`location_lng = $${idx++}`); params.push(req.body.location_lng); }
@@ -849,7 +853,10 @@ app.patch("/api/todos/:id", async (req, res) => {
     params.push(req.params.id);
     const r = await pool.query(`UPDATE todos SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, params);
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
-    if (completed) runAutomations('todo_completed', r.rows[0], 'todo').catch(() => {});
+    if (completed) {
+      runAutomations('todo_completed', r.rows[0], 'todo').catch(() => {});
+      fireWebhooks('todo_completed', r.rows[0]).catch(() => {});
+    }
     res.json(r.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1168,7 +1175,7 @@ app.get("/api/settings", async (req, res) => {
 
 app.patch("/api/settings", async (req, res) => {
   try {
-    const { theme, session_timeout_minutes, default_horizon, perfin_url, dashboard_layout } = req.body;
+    const { theme, session_timeout_minutes, default_horizon, perfin_url, dashboard_layout, slack_webhook_url } = req.body;
     const fields = [];
     const params = [];
     let idx = 1;
@@ -1177,6 +1184,7 @@ app.patch("/api/settings", async (req, res) => {
     if (default_horizon !== undefined) { fields.push(`default_horizon = $${idx++}`); params.push(default_horizon); }
     if (perfin_url !== undefined) { fields.push(`perfin_url = $${idx++}`); params.push(perfin_url || null); }
     if (dashboard_layout !== undefined) { fields.push(`dashboard_layout = $${idx++}`); params.push(JSON.stringify(dashboard_layout)); }
+    if (slack_webhook_url !== undefined) { fields.push(`slack_webhook_url = $${idx++}`); params.push(slack_webhook_url || null); }
     if (!fields.length) return res.status(400).json({ error: "No fields to update." });
     const r = await pool.query(`UPDATE user_settings SET ${fields.join(", ")} WHERE id = 1 RETURNING *`, params);
     if (theme && req.session) req.session.theme = theme;
@@ -1269,26 +1277,73 @@ app.post("/api/todos/:id/complete-recurring", async (req, res) => {
     // Mark current as completed with streak info
     await pool.query("UPDATE todos SET completed = true, completed_at = now(), streak_count = $2, best_streak = $3, last_streak_date = $4 WHERE id = $1",
       [todo.id, newStreak, newBest, today]);
-    // Calculate next due date
+    // Calculate next due date using interval
     const rule = todo.recurrence_rule;
+    const interval = todo.recurrence_interval || 1;
     let nextDue = todo.due_date ? new Date(todo.due_date) : new Date();
-    if (rule === "daily") nextDue.setDate(nextDue.getDate() + 1);
-    else if (rule === "weekdays") {
-      do { nextDue.setDate(nextDue.getDate() + 1); } while (nextDue.getDay() === 0 || nextDue.getDay() === 6);
-    } else if (rule === "weekly") nextDue.setDate(nextDue.getDate() + 7);
-    else if (rule === "monthly") nextDue.setMonth(nextDue.getMonth() + 1);
-    else if (rule === "yearly") nextDue.setFullYear(nextDue.getFullYear() + 1);
+    nextDue = advanceRecurrence(nextDue, rule, interval);
     // Create next instance with streak carried forward
     const n = await pool.query(
-      `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_parent_id, streak_count, best_streak, last_streak_date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_interval, recurrence_parent_id, streak_count, best_streak, last_streak_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [todo.title, todo.description, todo.priority, todo.horizon, todo.category,
-       nextDue.toISOString().split("T")[0], true, rule, todo.recurrence_parent_id || todo.id,
+       nextDue.toISOString().split("T")[0], true, rule, interval, todo.recurrence_parent_id || todo.id,
        newStreak, newBest, today]
     );
+    fireWebhooks('todo_completed', todo).catch(() => {});
     res.json({ completed: todo, next: n.rows[0], streak: newStreak, best_streak: newBest });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// Skip recurring task (mark skipped, create next without breaking streak)
+app.post("/api/todos/:id/skip-recurring", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM todos WHERE id = $1", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    const todo = r.rows[0];
+    if (!todo.recurring || !todo.recurrence_rule) return res.status(400).json({ error: "Not a recurring task." });
+    // Mark as completed but increment skip counter (streak preserved but not incremented)
+    await pool.query("UPDATE todos SET completed = true, completed_at = now(), skipped_count = COALESCE(skipped_count,0) + 1 WHERE id = $1", [todo.id]);
+    const rule = todo.recurrence_rule;
+    const interval = todo.recurrence_interval || 1;
+    let nextDue = todo.due_date ? new Date(todo.due_date) : new Date();
+    nextDue = advanceRecurrence(nextDue, rule, interval);
+    const n = await pool.query(
+      `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_interval, recurrence_parent_id, streak_count, best_streak, last_streak_date, skipped_count)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+      [todo.title, todo.description, todo.priority, todo.horizon, todo.category,
+       nextDue.toISOString().split("T")[0], true, rule, interval, todo.recurrence_parent_id || todo.id,
+       todo.streak_count || 0, todo.best_streak || 0, todo.last_streak_date, (todo.skipped_count || 0) + 1]
+    );
+    res.json({ skipped: todo, next: n.rows[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Snooze recurring task (postpone due date)
+app.post("/api/todos/:id/snooze", async (req, res) => {
+  try {
+    const { until } = req.body;
+    if (!until) return res.status(400).json({ error: "Snooze date (until) is required." });
+    const r = await pool.query("UPDATE todos SET snoozed_until = $1, due_date = $1 WHERE id = $2 AND deleted_at IS NULL RETURNING *", [until, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Helper: advance a date by recurrence rule and interval
+function advanceRecurrence(date, rule, interval) {
+  const d = new Date(date);
+  const n = interval || 1;
+  if (rule === "daily" || rule === "custom_days") d.setDate(d.getDate() + n);
+  else if (rule === "weekdays") {
+    let count = 0;
+    while (count < n) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) count++; }
+  }
+  else if (rule === "weekly" || rule === "custom_weeks") d.setDate(d.getDate() + 7 * n);
+  else if (rule === "monthly" || rule === "custom_months") d.setMonth(d.getMonth() + n);
+  else if (rule === "yearly") d.setFullYear(d.getFullYear() + n);
+  return d;
+}
 
 // ============================================================================
 // API — Streak/Habit Stats
@@ -1359,6 +1414,277 @@ app.delete("/api/automations/:id", async (req, res) => {
     const r = await pool.query("DELETE FROM automations WHERE id = $1 RETURNING id", [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Cross-Entity Links
+// ============================================================================
+app.get("/api/links/:type/:id", async (req, res) => {
+  try {
+    const { type, id } = req.params;
+    if (!["todo", "email", "note"].includes(type)) return res.status(400).json({ error: "Invalid entity type." });
+    const [outgoing, incoming] = await Promise.all([
+      pool.query(`SELECT el.*,
+        CASE el.target_type
+          WHEN 'todo' THEN (SELECT title FROM todos WHERE id = el.target_id)
+          WHEN 'email' THEN (SELECT subject FROM emails WHERE id = el.target_id)
+          WHEN 'note' THEN (SELECT COALESCE(title, LEFT(content,50)) FROM notes WHERE id = el.target_id)
+        END as target_title
+        FROM entity_links el WHERE el.source_type = $1 AND el.source_id = $2`, [type, id]),
+      pool.query(`SELECT el.*,
+        CASE el.source_type
+          WHEN 'todo' THEN (SELECT title FROM todos WHERE id = el.source_id)
+          WHEN 'email' THEN (SELECT subject FROM emails WHERE id = el.source_id)
+          WHEN 'note' THEN (SELECT COALESCE(title, LEFT(content,50)) FROM notes WHERE id = el.source_id)
+        END as source_title
+        FROM entity_links el WHERE el.target_type = $1 AND el.target_id = $2`, [type, id]),
+    ]);
+    res.json({ outgoing: outgoing.rows, incoming: incoming.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/links", async (req, res) => {
+  try {
+    const { source_type, source_id, target_type, target_id } = req.body;
+    if (!["todo", "email", "note"].includes(source_type) || !["todo", "email", "note"].includes(target_type)) {
+      return res.status(400).json({ error: "Invalid entity type." });
+    }
+    if (source_type === target_type && parseInt(source_id) === parseInt(target_id)) {
+      return res.status(400).json({ error: "Cannot link an entity to itself." });
+    }
+    const r = await pool.query(
+      "INSERT INTO entity_links (source_type, source_id, target_type, target_id) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING *",
+      [source_type, source_id, target_type, target_id]
+    );
+    if (!r.rows.length) return res.status(409).json({ error: "Link already exists." });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/links/:id", async (req, res) => {
+  try {
+    const r = await pool.query("DELETE FROM entity_links WHERE id = $1 RETURNING id", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Create todo from note
+app.post("/api/notes/:id/create-todo", async (req, res) => {
+  try {
+    const note = await pool.query("SELECT * FROM notes WHERE id = $1 AND deleted_at IS NULL", [req.params.id]);
+    if (!note.rows.length) return res.status(404).json({ error: "Note not found." });
+    const n = note.rows[0];
+    const { priority, horizon } = req.body;
+    const todo = await pool.query(
+      "INSERT INTO todos (title, description, priority, horizon) VALUES ($1, $2, $3, $4) RETURNING *",
+      [n.title || n.content.substring(0, 100), n.content, priority || "medium", horizon || "short"]
+    );
+    // Create cross-entity link
+    await pool.query("INSERT INTO entity_links (source_type, source_id, target_type, target_id) VALUES ('note', $1, 'todo', $2) ON CONFLICT DO NOTHING",
+      [n.id, todo.rows[0].id]);
+    res.json(todo.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Create todo from email
+app.post("/api/emails/:id/create-todo", async (req, res) => {
+  try {
+    const email = await pool.query("SELECT * FROM emails WHERE id = $1 AND deleted_at IS NULL", [req.params.id]);
+    if (!email.rows.length) return res.status(404).json({ error: "Email not found." });
+    const e = email.rows[0];
+    const { priority, horizon } = req.body;
+    const todo = await pool.query(
+      "INSERT INTO todos (title, description, priority, horizon) VALUES ($1, $2, $3, $4) RETURNING *",
+      [e.subject, `Follow up on email to ${e.recipient_name || e.recipient_email}: ${e.body.substring(0, 200)}`, priority || "medium", horizon || "short"]
+    );
+    await pool.query("INSERT INTO entity_links (source_type, source_id, target_type, target_id) VALUES ('email', $1, 'todo', $2) ON CONFLICT DO NOTHING",
+      [e.id, todo.rows[0].id]);
+    res.json(todo.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Webhooks
+// ============================================================================
+const VALID_WEBHOOK_EVENTS = ['todo_created', 'todo_completed', 'email_sent', 'note_created', 'reminder_due', 'streak_milestone'];
+
+app.get("/api/webhooks", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM webhooks ORDER BY created_at DESC");
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/webhooks", async (req, res) => {
+  try {
+    const { name, url, events, headers } = req.body;
+    if (!name || !url) return res.status(400).json({ error: "Name and URL are required." });
+    if (events && !events.every(e => VALID_WEBHOOK_EVENTS.includes(e))) {
+      return res.status(400).json({ error: "Invalid events. Must be: " + VALID_WEBHOOK_EVENTS.join(", ") });
+    }
+    const r = await pool.query(
+      "INSERT INTO webhooks (name, url, events, headers) VALUES ($1,$2,$3,$4) RETURNING *",
+      [name, url, events || [], headers || {}]
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch("/api/webhooks/:id", async (req, res) => {
+  try {
+    const { name, url, events, headers, enabled } = req.body;
+    const fields = []; const params = []; let idx = 1;
+    if (name !== undefined) { fields.push(`name = $${idx++}`); params.push(name); }
+    if (url !== undefined) { fields.push(`url = $${idx++}`); params.push(url); }
+    if (events !== undefined) { fields.push(`events = $${idx++}`); params.push(events); }
+    if (headers !== undefined) { fields.push(`headers = $${idx++}`); params.push(JSON.stringify(headers)); }
+    if (enabled !== undefined) { fields.push(`enabled = $${idx++}`); params.push(enabled); }
+    if (!fields.length) return res.status(400).json({ error: "No fields." });
+    params.push(req.params.id);
+    const r = await pool.query(`UPDATE webhooks SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, params);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/webhooks/:id", async (req, res) => {
+  try {
+    const r = await pool.query("DELETE FROM webhooks WHERE id = $1 RETURNING id", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Test a webhook
+app.post("/api/webhooks/:id/test", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM webhooks WHERE id = $1", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    const webhook = r.rows[0];
+    const payload = { event: "test", timestamp: new Date().toISOString(), message: "Per-sistant webhook test" };
+    const result = await sendWebhook(webhook, payload);
+    res.json({ ok: result.ok, status: result.status });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+async function sendWebhook(webhook, payload) {
+  try {
+    const headers = { "Content-Type": "application/json", ...(webhook.headers || {}) };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const r = await fetch(webhook.url, {
+      method: "POST", headers, body: JSON.stringify(payload), signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    await pool.query("UPDATE webhooks SET last_triggered = now(), last_status = $1 WHERE id = $2", [r.status, webhook.id]);
+    return { ok: r.ok, status: r.status };
+  } catch (err) {
+    await pool.query("UPDATE webhooks SET last_triggered = now(), last_status = 0 WHERE id = $1", [webhook.id]);
+    return { ok: false, status: 0, error: err.message };
+  }
+}
+
+async function fireWebhooks(eventType, data) {
+  try {
+    const webhooks = await pool.query("SELECT * FROM webhooks WHERE enabled = true AND $1 = ANY(events)", [eventType]);
+    for (const wh of webhooks.rows) {
+      sendWebhook(wh, { event: eventType, timestamp: new Date().toISOString(), data }).catch(() => {});
+    }
+  } catch {}
+}
+
+// Slack notification helper
+async function sendSlackNotification(message) {
+  try {
+    const settings = await pool.query("SELECT slack_webhook_url FROM user_settings WHERE id = 1");
+    const url = settings.rows[0]?.slack_webhook_url;
+    if (!url) return;
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: message }),
+    });
+  } catch {}
+}
+
+// ============================================================================
+// API — Notifications (push notification preferences + trigger check)
+// ============================================================================
+app.get("/api/notifications/check", async (req, res) => {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const [dueSoon, overdue, streaksAtRisk, reminders] = await Promise.all([
+      pool.query("SELECT id, title, due_date FROM todos WHERE deleted_at IS NULL AND completed = false AND due_date = $1", [today]),
+      pool.query("SELECT id, title, due_date FROM todos WHERE deleted_at IS NULL AND completed = false AND due_date < $1", [today]),
+      pool.query("SELECT id, title, streak_count, due_date FROM todos WHERE deleted_at IS NULL AND completed = false AND recurring = true AND streak_count >= 3 AND due_date = $1", [today]),
+      pool.query("SELECT id, COALESCE(title, LEFT(content,50)) as title, reminder_at FROM notes WHERE deleted_at IS NULL AND reminder_at IS NOT NULL AND DATE(reminder_at) = $1", [today]),
+    ]);
+    const notifications = [];
+    dueSoon.rows.forEach(t => notifications.push({ type: "due_today", title: t.title, id: t.id, entity: "todo" }));
+    overdue.rows.forEach(t => notifications.push({ type: "overdue", title: t.title, id: t.id, entity: "todo" }));
+    streaksAtRisk.rows.forEach(t => notifications.push({ type: "streak_at_risk", title: `${t.title} (${t.streak_count} streak)`, id: t.id, entity: "todo" }));
+    reminders.rows.forEach(n => notifications.push({ type: "reminder", title: n.title, id: n.id, entity: "note" }));
+    res.json({ notifications, counts: { due_today: dueSoon.rows.length, overdue: overdue.rows.length, streaks_at_risk: streaksAtRisk.rows.length, reminders: reminders.rows.length } });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Analytics / Insights
+// ============================================================================
+app.get("/api/analytics", async (req, res) => {
+  try {
+    const { period } = req.query; // "week", "month", "quarter", "year"
+    const now = new Date();
+    let startDate;
+    if (period === "year") { startDate = new Date(now.getFullYear(), 0, 1); }
+    else if (period === "quarter") { startDate = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1); }
+    else if (period === "month") { startDate = new Date(now.getFullYear(), now.getMonth(), 1); }
+    else { // default week
+      startDate = new Date(now);
+      const dayOfWeek = now.getDay();
+      startDate.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    }
+    startDate.setHours(0,0,0,0);
+    const sd = startDate.toISOString().split("T")[0];
+    const ed = now.toISOString().split("T")[0];
+
+    const [completedByDay, createdByDay, completionRate, priorityBreakdown, categoryBreakdown, avgCompletionTime, streakLeaders, productivityByDow] = await Promise.all([
+      // Completed tasks per day
+      pool.query(`SELECT DATE(completed_at) as day, COUNT(*) as count FROM todos WHERE deleted_at IS NULL AND completed = true AND completed_at >= $1 GROUP BY DATE(completed_at) ORDER BY day`, [sd]),
+      // Created tasks per day
+      pool.query(`SELECT DATE(created_at) as day, COUNT(*) as count FROM todos WHERE deleted_at IS NULL AND created_at >= $1 GROUP BY DATE(created_at) ORDER BY day`, [sd]),
+      // Completion rate
+      pool.query(`SELECT COUNT(*) FILTER (WHERE completed) as done, COUNT(*) as total FROM todos WHERE deleted_at IS NULL AND created_at >= $1`, [sd]),
+      // Priority breakdown of active tasks
+      pool.query(`SELECT priority, COUNT(*) as count FROM todos WHERE deleted_at IS NULL AND completed = false GROUP BY priority ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END`),
+      // Category breakdown
+      pool.query(`SELECT COALESCE(category, 'uncategorized') as category, COUNT(*) as count, COUNT(*) FILTER (WHERE completed) as completed FROM todos WHERE deleted_at IS NULL AND created_at >= $1 GROUP BY category ORDER BY count DESC`, [sd]),
+      // Average time to complete (in hours)
+      pool.query(`SELECT AVG(EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600) as avg_hours FROM todos WHERE deleted_at IS NULL AND completed = true AND completed_at >= $1`, [sd]),
+      // Top streaks
+      pool.query(`SELECT title, streak_count, best_streak, recurrence_rule FROM todos WHERE deleted_at IS NULL AND recurring = true AND completed = false AND streak_count > 0 ORDER BY streak_count DESC LIMIT 5`),
+      // Productivity by day of week
+      pool.query(`SELECT EXTRACT(DOW FROM completed_at) as dow, COUNT(*) as count FROM todos WHERE deleted_at IS NULL AND completed = true AND completed_at >= $1 GROUP BY dow ORDER BY dow`, [sd]),
+    ]);
+
+    const rate = completionRate.rows[0];
+    res.json({
+      period: period || "week",
+      start_date: sd,
+      end_date: ed,
+      completed_by_day: completedByDay.rows,
+      created_by_day: createdByDay.rows,
+      completion_rate: rate.total > 0 ? Math.round((rate.done / rate.total) * 100) : 0,
+      total_completed: parseInt(rate.done),
+      total_created: parseInt(rate.total),
+      priority_breakdown: priorityBreakdown.rows,
+      category_breakdown: categoryBreakdown.rows,
+      avg_completion_hours: avgCompletionTime.rows[0]?.avg_hours ? Math.round(avgCompletionTime.rows[0].avg_hours * 10) / 10 : null,
+      streak_leaders: streakLeaders.rows,
+      productivity_by_dow: productivityByDow.rows,
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2247,6 +2573,16 @@ async function load() {
     }
   } catch {}
 
+  // Check notifications and show browser alerts
+  fetch('/api/notifications/check').then(r=>r.json()).then(d => {
+    if (d.notifications && d.notifications.length && 'Notification' in window && Notification.permission === 'granted') {
+      var important = d.notifications.filter(n => n.type === 'overdue' || n.type === 'streak_at_risk');
+      important.slice(0,3).forEach(n => {
+        new Notification('Per-sistant', { body: (n.type==='overdue'?'Overdue: ':'Streak at risk: ')+n.title, icon: '/icon-192.svg' });
+      });
+    }
+  }).catch(function(){});
+
   // Load AI daily briefing (non-blocking)
   fetch('/api/ai/daily-briefing').then(r=>r.json()).then(d => {
     if (d.briefing) {
@@ -2466,7 +2802,15 @@ ${themeScript()}
       </div>
       <div id="f-recurrence" style="display:none;">
         <label>Repeat</label>
-        <select id="f-recurrence-rule"><option value="daily">Daily</option><option value="weekdays">Weekdays</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select>
+        <select id="f-recurrence-rule" onchange="document.getElementById('f-interval-row').style.display=this.value.startsWith('custom')?'flex':'none'">
+          <option value="daily">Daily</option><option value="weekdays">Weekdays</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option>
+          <option value="custom_days">Every N Days</option><option value="custom_weeks">Every N Weeks</option><option value="custom_months">Every N Months</option>
+        </select>
+        <div id="f-interval-row" style="display:none;gap:8px;align-items:center;margin-top:6px;">
+          <label style="margin:0;font-size:11px;white-space:nowrap;">Every</label>
+          <input type="number" id="f-interval" min="1" max="365" value="2" style="width:60px;font-size:12px;">
+          <span id="f-interval-unit" style="font-size:11px;color:var(--text-muted);">days</span>
+        </div>
       </div>
     </div>
     <div id="subtasks-section" style="display:none;margin-top:16px;">
@@ -2621,7 +2965,18 @@ async function load() {
     if (deps.blocking.length) depBadges += '<span class="badge blocking" title="Blocking: '+deps.blocking.map(d=>esc(d.title)).join(', ')+'">blocking ('+deps.blocking.length+')</span>';
     if (t.streak_count > 0) depBadges += '<span class="badge streak" title="Best: '+t.best_streak+'">&#x1F525; '+t.streak_count+' streak</span>';
     if (t.location_name) depBadges += '<span title="'+esc(t.location_name)+'" style="font-size:10px;color:var(--teal);">&#128205; '+esc(t.location_name)+'</span>';
-    return '<div class="todo-item'+(isBlocked?' todo-blocked':'')+'" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><input type="checkbox" class="bulk-check" data-id="'+t.id+'" style="display:'+(selectMode?'inline-block':'none')+';accent-color:var(--warm);margin-right:4px;cursor:pointer;" onchange="toggleBulkItem('+t.id+',this.checked)"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" onclick="toggleTodo('+t.id+','+!t.completed+','+!!t.recurring+')"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+(t.recurring?'<span class="badge recurring">'+t.recurrence_rule+'</span>':'')+depBadges+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions"><button onclick="openEdit('+t.id+')">&#9998;</button></div></div>';
+    if (t.snoozed_until) depBadges += '<span style="font-size:10px;color:var(--yellow);" title="Snoozed until '+t.snoozed_until+'">&#128164; snoozed</span>';
+    var recurInfo = '';
+    if (t.recurring) {
+      var ruleLabel = t.recurrence_rule;
+      if (t.recurrence_rule && t.recurrence_rule.startsWith('custom') && t.recurrence_interval > 1) {
+        var unit = t.recurrence_rule.replace('custom_','');
+        ruleLabel = 'every '+t.recurrence_interval+' '+unit;
+      }
+      recurInfo = '<span class="badge recurring">'+ruleLabel+'</span>';
+    }
+    var skipSnoozeButtons = t.recurring && !t.completed ? '<button onclick="event.stopPropagation();skipTodo('+t.id+')" title="Skip this occurrence" style="font-size:10px;padding:2px 6px;">Skip</button><button onclick="event.stopPropagation();snoozeTodo('+t.id+')" title="Snooze" style="font-size:10px;padding:2px 6px;">&#128164;</button>' : '';
+    return '<div class="todo-item'+(isBlocked?' todo-blocked':'')+'" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><input type="checkbox" class="bulk-check" data-id="'+t.id+'" style="display:'+(selectMode?'inline-block':'none')+';accent-color:var(--warm);margin-right:4px;cursor:pointer;" onchange="toggleBulkItem('+t.id+',this.checked)"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" onclick="toggleTodo('+t.id+','+!t.completed+','+!!t.recurring+')"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+recurInfo+depBadges+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions">'+skipSnoozeButtons+'<button onclick="openEdit('+t.id+')">&#9998;</button></div></div>';
   }).join('');
 }
 
@@ -2775,6 +3130,8 @@ async function openEdit(id) {
   document.getElementById('f-recurring').checked = t.recurring||false;
   document.getElementById('f-recurrence').style.display = t.recurring ? 'block' : 'none';
   document.getElementById('f-recurrence-rule').value = t.recurrence_rule || 'weekly';
+  document.getElementById('f-interval').value = t.recurrence_interval || 1;
+  document.getElementById('f-interval-row').style.display = (t.recurrence_rule||'').startsWith('custom') ? 'flex' : 'none';
   document.getElementById('delete-btn').style.display = 'inline-block';
   document.getElementById('subtasks-section').style.display = 'block';
   document.getElementById('deps-section').style.display = 'block';
@@ -2803,6 +3160,7 @@ async function saveTodo() {
     due_date: document.getElementById('f-due').value || null,
     recurring: isRecurring,
     recurrence_rule: isRecurring ? document.getElementById('f-recurrence-rule').value : null,
+    recurrence_interval: isRecurring ? (parseInt(document.getElementById('f-interval').value) || 1) : 1,
     location_name: document.getElementById('f-location-name').value || null,
     location_lat: parseFloat(document.getElementById('f-location-lat').value) || null,
     location_lng: parseFloat(document.getElementById('f-location-lng').value) || null,
@@ -2830,6 +3188,18 @@ async function toggleTodo(id, completed, isRecurring) {
   } else {
     await fetch('/api/todos/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({completed})});
   }
+  load();
+}
+
+async function skipTodo(id) {
+  await fetch('/api/todos/'+id+'/skip-recurring', {method:'POST'});
+  load();
+}
+
+async function snoozeTodo(id) {
+  var until = prompt('Snooze until (YYYY-MM-DD):');
+  if (!until) return;
+  await fetch('/api/todos/'+id+'/snooze', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({until:until})});
   load();
 }
 
@@ -3898,6 +4268,122 @@ load();
 });
 
 // ============================================================================
+// Page — Analytics
+// ============================================================================
+app.get("/analytics", (req, res) => {
+  res.send(`${pageHead("Analytics")}
+<body>
+${themeScript()}
+<div class="container">
+  ${navBar("/analytics")}
+  <h1>Analytics</h1>
+  <p class="subtitle">Productivity insights and trends</p>
+
+  <div class="filters" id="period-filters">
+    <button onclick="setPeriod(this,'week')" class="active">This Week</button>
+    <button onclick="setPeriod(this,'month')">This Month</button>
+    <button onclick="setPeriod(this,'quarter')">Quarter</button>
+    <button onclick="setPeriod(this,'year')">Year</button>
+  </div>
+
+  <div class="top-cards" id="overview-cards"></div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px;" class="dash-two-col">
+    <div class="section">
+      <h2>Completion Trend</h2>
+      <div id="completion-chart" style="height:200px;display:flex;align-items:flex-end;gap:4px;padding-top:24px;"></div>
+    </div>
+    <div class="section">
+      <h2>Productivity by Day</h2>
+      <div id="dow-chart" style="height:200px;display:flex;align-items:flex-end;gap:8px;justify-content:space-around;padding-top:24px;"></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px;" class="dash-two-col">
+    <div class="section">
+      <h2>Priority Breakdown</h2>
+      <div id="priority-chart"></div>
+    </div>
+    <div class="section">
+      <h2>Category Performance</h2>
+      <div id="category-chart"></div>
+    </div>
+  </div>
+
+  <div class="section" style="margin-bottom:24px;">
+    <h2>Streak Leaders</h2>
+    <div id="streak-leaders"></div>
+  </div>
+</div>
+<script>
+var curPeriod = 'week';
+function setPeriod(btn, p) { curPeriod = p; document.querySelectorAll('#period-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
+
+async function load() {
+  var data = await fetch('/api/analytics?period='+curPeriod).then(r=>r.json());
+
+  // Overview cards
+  document.getElementById('overview-cards').innerHTML = [
+    {label:'Tasks Completed',value:data.total_completed,cls:'green'},
+    {label:'Tasks Created',value:data.total_created,cls:'warm'},
+    {label:'Completion Rate',value:data.completion_rate+'%',cls:data.completion_rate>=70?'green':data.completion_rate>=40?'yellow':'red'},
+    {label:'Avg. Completion Time',value:data.avg_completion_hours?data.avg_completion_hours+'h':'N/A',cls:'teal'},
+  ].map(c => '<div class="card"><div class="label">'+c.label+'</div><div class="value '+c.cls+'">'+c.value+'</div></div>').join('');
+
+  // Completion trend bar chart
+  var days = data.completed_by_day || [];
+  var maxDay = Math.max(...days.map(d=>parseInt(d.count)), 1);
+  document.getElementById('completion-chart').innerHTML = days.length
+    ? days.map(d => {
+        var h = Math.max((parseInt(d.count)/maxDay)*160, 4);
+        var label = new Date(d.day).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
+        return '<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0;"><div style="background:var(--green);width:100%;max-width:40px;height:'+h+'px;border-radius:4px 4px 0 0;transition:height 0.3s;"></div><div style="font-size:9px;color:var(--text-muted);margin-top:4px;text-align:center;white-space:nowrap;">'+label+'</div><div style="font-size:11px;font-weight:500;margin-top:2px;">'+d.count+'</div></div>';
+      }).join('')
+    : '<div class="empty-msg">No data yet</div>';
+
+  // Productivity by day of week
+  var dowNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  var dowData = new Array(7).fill(0);
+  (data.productivity_by_dow||[]).forEach(d => { dowData[parseInt(d.dow)] = parseInt(d.count); });
+  var maxDow = Math.max(...dowData, 1);
+  document.getElementById('dow-chart').innerHTML = dowData.map((count,i) => {
+    var h = Math.max((count/maxDow)*160, 4);
+    return '<div style="display:flex;flex-direction:column;align-items:center;flex:1;"><div style="background:var(--teal);width:100%;max-width:36px;height:'+h+'px;border-radius:4px 4px 0 0;"></div><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">'+dowNames[i]+'</div><div style="font-size:11px;font-weight:500;margin-top:2px;">'+count+'</div></div>';
+  }).join('');
+
+  // Priority breakdown
+  var priColors = {urgent:'var(--red)',high:'var(--yellow)',medium:'var(--blue)',low:'var(--green)'};
+  var priTotal = (data.priority_breakdown||[]).reduce((s,p)=>s+parseInt(p.count),0) || 1;
+  document.getElementById('priority-chart').innerHTML = (data.priority_breakdown||[]).length
+    ? (data.priority_breakdown||[]).map(p => {
+        var pct = Math.round(parseInt(p.count)/priTotal*100);
+        return '<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="width:70px;font-size:12px;font-weight:400;text-transform:capitalize;">'+p.priority+'</div><div style="flex:1;height:20px;background:var(--surface-2);border-radius:4px;overflow:hidden;"><div style="height:100%;width:'+pct+'%;background:'+priColors[p.priority]+';border-radius:4px;transition:width 0.3s;"></div></div><div style="width:50px;text-align:right;font-size:12px;font-weight:500;">'+p.count+'</div></div>';
+      }).join('')
+    : '<div class="empty-msg">No active tasks</div>';
+
+  // Category breakdown
+  document.getElementById('category-chart').innerHTML = (data.category_breakdown||[]).length
+    ? (data.category_breakdown||[]).map(c => {
+        var total = parseInt(c.count), done = parseInt(c.completed);
+        var pct = total > 0 ? Math.round(done/total*100) : 0;
+        return '<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="width:100px;font-size:12px;font-weight:400;text-transform:capitalize;">'+esc(c.category)+'</div><div style="flex:1;height:20px;background:var(--surface-2);border-radius:4px;overflow:hidden;"><div style="height:100%;width:'+pct+'%;background:var(--warm);border-radius:4px;"></div></div><div style="width:80px;text-align:right;font-size:11px;color:var(--text-muted);">'+done+'/'+total+' ('+pct+'%)</div></div>';
+      }).join('')
+    : '<div class="empty-msg">No data yet</div>';
+
+  // Streak leaders
+  document.getElementById('streak-leaders').innerHTML = (data.streak_leaders||[]).length
+    ? (data.streak_leaders||[]).map((s,i) =>
+        '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="font-size:18px;font-weight:300;color:var(--text-muted);width:30px;text-align:center;">'+(i+1)+'</div><div style="flex:1;"><div style="font-size:14px;font-weight:400;">'+esc(s.title)+'</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+s.recurrence_rule+' &middot; Best: '+s.best_streak+'</div></div><div style="text-align:right;"><span class="badge streak">&#x1F525; '+s.streak_count+'</span></div></div>'
+      ).join('')
+    : '<div class="empty-msg">No streaks yet. Complete recurring tasks to build streaks!</div>';
+}
+
+load();
+</script>
+</body></html>`);
+});
+
+// ============================================================================
 // Page — Settings
 // ============================================================================
 app.get("/settings", (req, res) => {
@@ -4041,6 +4527,22 @@ ${themeScript()}
     <button onclick="openAutoModal()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;text-transform:uppercase;">+ New Rule</button>
   </div>
 
+  <div class="section">
+    <h2>Webhooks</h2>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Configure external webhook endpoints to receive event notifications.</p>
+    <div id="webhooks-list" style="margin-bottom:12px;"></div>
+    <button onclick="openWebhookModal()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;text-transform:uppercase;">+ New Webhook</button>
+  </div>
+
+  <div class="section">
+    <h2>Slack Integration</h2>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Add a Slack Incoming Webhook URL to receive notifications in Slack.</p>
+    <div style="display:flex;gap:12px;align-items:center;">
+      <input type="url" id="s-slack" placeholder="https://hooks.slack.com/services/..." style="flex:1;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
+      <button onclick="saveSlack()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save</button>
+    </div>
+  </div>
+
   ${AUTH_SECRET ? '<div class="section"><h2>Session</h2><div class="actions" style="margin-bottom:0;"><button class="danger" style="border-color:var(--red);color:var(--red);" onclick="logout()">Log Out</button></div></div>' : ''}
 </div>
 
@@ -4089,6 +4591,31 @@ ${themeScript()}
   </div>
 </div>
 
+<!-- Webhook Modal -->
+<div class="modal-overlay" id="webhook-modal">
+  <div class="modal">
+    <h2 id="wh-modal-title">New Webhook</h2>
+    <input type="hidden" id="wh-id">
+    <label>Name</label>
+    <input type="text" id="wh-name" placeholder="e.g. Slack notifications, Zapier">
+    <label>URL</label>
+    <input type="url" id="wh-url" placeholder="https://example.com/webhook">
+    <label>Events</label>
+    <div id="wh-events" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">
+      <label style="display:inline;font-size:11px;cursor:pointer;"><input type="checkbox" value="todo_created" style="width:auto;margin-right:4px;">Task Created</label>
+      <label style="display:inline;font-size:11px;cursor:pointer;"><input type="checkbox" value="todo_completed" style="width:auto;margin-right:4px;">Task Completed</label>
+      <label style="display:inline;font-size:11px;cursor:pointer;"><input type="checkbox" value="email_sent" style="width:auto;margin-right:4px;">Email Sent</label>
+      <label style="display:inline;font-size:11px;cursor:pointer;"><input type="checkbox" value="note_created" style="width:auto;margin-right:4px;">Note Created</label>
+      <label style="display:inline;font-size:11px;cursor:pointer;"><input type="checkbox" value="streak_milestone" style="width:auto;margin-right:4px;">Streak Milestone</label>
+    </div>
+    <div class="modal-actions">
+      <button onclick="closeWebhookModal()">Cancel</button>
+      <button class="primary" onclick="saveWebhook()">Save</button>
+      <button class="danger" id="wh-delete-btn" style="display:none" onclick="deleteWebhook()">Delete</button>
+    </div>
+  </div>
+</div>
+
 <script>
 function applyTheme(t) {
   var effective = t;
@@ -4120,6 +4647,7 @@ async function load() {
       });
     } catch {}
   }
+  document.getElementById('s-slack').value = s.slack_webhook_url || '';
   if ('Notification' in window && Notification.permission === 'granted') {
     document.getElementById('notif-btn').textContent = 'Notifications Enabled';
     document.getElementById('notif-btn').disabled = true;
@@ -4297,6 +4825,76 @@ async function toggleAutomation(id, enabled) {
 }
 function updateActionFields() {}
 
+// Webhooks
+async function loadWebhooks() {
+  var whs = await fetch('/api/webhooks').then(r=>r.json());
+  var el = document.getElementById('webhooks-list');
+  if (!whs.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">No webhooks configured.</div>'; return; }
+  el.innerHTML = whs.map(w =>
+    '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px;">'
+    +'<div style="flex:1;"><div style="font-weight:400;">'+esc(w.name)+'</div>'
+    +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">'+esc(w.url.substring(0,50))+(w.url.length>50?'...':'')+'</div>'
+    +'<div style="font-size:9px;color:var(--text-muted);margin-top:2px;">Events: '+(w.events||[]).join(', ')+(w.last_status?' &middot; Last: '+w.last_status:'')+'</div></div>'
+    +'<div style="display:flex;gap:6px;align-items:center;">'
+    +'<button onclick="testWebhook('+w.id+')" style="background:none;border:1px solid var(--teal);color:var(--teal);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Test</button>'
+    +'<button onclick="toggleWebhook('+w.id+','+!w.enabled+')" style="background:'+(w.enabled?'var(--green-bg)':'var(--surface-2)')+';color:'+(w.enabled?'var(--green)':'var(--text-muted)')+';border:1px solid '+(w.enabled?'var(--green)':'var(--border)')+';padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(w.enabled?'On':'Off')+'</button>'
+    +'<button onclick="editWebhook('+w.id+')" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Edit</button>'
+    +'</div></div>'
+  ).join('');
+}
+function openWebhookModal() {
+  document.getElementById('wh-modal-title').textContent='New Webhook';
+  document.getElementById('wh-id').value='';
+  document.getElementById('wh-name').value='';
+  document.getElementById('wh-url').value='';
+  document.querySelectorAll('#wh-events input').forEach(cb=>cb.checked=false);
+  document.getElementById('wh-delete-btn').style.display='none';
+  document.getElementById('webhook-modal').classList.add('active');
+}
+function closeWebhookModal() { document.getElementById('webhook-modal').classList.remove('active'); }
+async function editWebhook(id) {
+  var whs = await fetch('/api/webhooks').then(r=>r.json());
+  var w = whs.find(x=>x.id===id); if (!w) return;
+  document.getElementById('wh-modal-title').textContent='Edit Webhook';
+  document.getElementById('wh-id').value=id;
+  document.getElementById('wh-name').value=w.name;
+  document.getElementById('wh-url').value=w.url;
+  document.querySelectorAll('#wh-events input').forEach(cb=>{cb.checked=(w.events||[]).includes(cb.value);});
+  document.getElementById('wh-delete-btn').style.display='inline-block';
+  document.getElementById('webhook-modal').classList.add('active');
+}
+async function saveWebhook() {
+  var events=[];document.querySelectorAll('#wh-events input:checked').forEach(cb=>events.push(cb.value));
+  var data={name:document.getElementById('wh-name').value,url:document.getElementById('wh-url').value,events:events};
+  if(!data.name||!data.url)return alert('Name and URL required');
+  var id=document.getElementById('wh-id').value;
+  if(id) await fetch('/api/webhooks/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  else await fetch('/api/webhooks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  closeWebhookModal();loadWebhooks();
+}
+async function deleteWebhook() {
+  var id=document.getElementById('wh-id').value;
+  await fetch('/api/webhooks/'+id,{method:'DELETE'});
+  closeWebhookModal();loadWebhooks();
+}
+async function toggleWebhook(id,enabled) {
+  await fetch('/api/webhooks/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})});
+  loadWebhooks();
+}
+async function testWebhook(id) {
+  var r=await fetch('/api/webhooks/'+id+'/test',{method:'POST'}).then(r=>r.json());
+  alert(r.ok?'Webhook test successful (status: '+r.status+')':'Webhook test failed'+(r.status?' (status: '+r.status+')':''));
+  loadWebhooks();
+}
+
+// Slack
+async function saveSlack() {
+  var url=document.getElementById('s-slack').value||null;
+  await fetch('/api/settings',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({slack_webhook_url:url})});
+  var el=document.getElementById('status');el.className='status-msg success';el.textContent='Slack webhook saved.';
+  setTimeout(function(){el.className='status-msg';},3000);
+}
+
 async function logout() {
   await fetch('/api/logout', {method:'POST'});
   location.href = '/login';
@@ -4304,6 +4902,7 @@ async function logout() {
 
 load();
 loadAutomations();
+loadWebhooks();
 </script>
 </body></html>`);
 });
@@ -4330,7 +4929,7 @@ app.get("/manifest.json", (req, res) => {
 app.get("/sw.js", (req, res) => {
   res.type("application/javascript").send(`
     const CACHE = 'per-sistant-v2';
-    const PAGES = ['/', '/todos', '/emails', '/notes', '/calendar', '/contacts', '/review', '/settings'];
+    const PAGES = ['/', '/todos', '/emails', '/notes', '/calendar', '/contacts', '/review', '/analytics', '/settings'];
     const OFFLINE_KEY = 'per-sistant-offline-queue';
 
     self.addEventListener('install', e => {
@@ -4470,22 +5069,16 @@ async function start() {
           // Auto-complete and reset streak (overdue = missed)
           await pool.query("UPDATE todos SET completed = true, completed_at = now(), streak_count = 0 WHERE id = $1", [todo.id]);
           const rule = todo.recurrence_rule;
+          const interval = todo.recurrence_interval || 1;
           let nextDue = new Date(todo.due_date);
-          if (rule === "daily") nextDue.setDate(nextDue.getDate() + 1);
-          else if (rule === "weekdays") { do { nextDue.setDate(nextDue.getDate() + 1); } while (nextDue.getDay() === 0 || nextDue.getDay() === 6); }
-          else if (rule === "weekly") nextDue.setDate(nextDue.getDate() + 7);
-          else if (rule === "monthly") nextDue.setMonth(nextDue.getMonth() + 1);
-          else if (rule === "yearly") nextDue.setFullYear(nextDue.getFullYear() + 1);
+          nextDue = advanceRecurrence(nextDue, rule, interval);
           let catchupLimit = 365;
           while (nextDue <= new Date() && catchupLimit-- > 0) {
-            if (rule === "daily") nextDue.setDate(nextDue.getDate() + 1);
-            else if (rule === "weekly") nextDue.setDate(nextDue.getDate() + 7);
-            else if (rule === "monthly") nextDue.setMonth(nextDue.getMonth() + 1);
-            else break;
+            nextDue = advanceRecurrence(nextDue, rule, interval);
           }
           await pool.query(
-            "INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_parent_id, streak_count, best_streak) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10)",
-            [todo.title, todo.description, todo.priority, todo.horizon, todo.category, nextDue.toISOString().split("T")[0], true, rule, todo.recurrence_parent_id || todo.id, todo.best_streak || 0]
+            "INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_interval, recurrence_parent_id, streak_count, best_streak) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,0,$11)",
+            [todo.title, todo.description, todo.priority, todo.horizon, todo.category, nextDue.toISOString().split("T")[0], true, rule, interval, todo.recurrence_parent_id || todo.id, todo.best_streak || 0]
           );
         }
         if (r.rows.length) console.log(`Processed ${r.rows.length} recurring tasks`);

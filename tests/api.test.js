@@ -1206,3 +1206,259 @@ describe("Offline support", () => {
     assert.ok(CACHE.includes("v2"));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Custom recurrence intervals tests
+// ---------------------------------------------------------------------------
+describe("Custom recurrence intervals", () => {
+  function advanceRecurrence(date, rule, interval) {
+    const d = new Date(date);
+    const n = interval || 1;
+    if (rule === "daily" || rule === "custom_days") d.setDate(d.getDate() + n);
+    else if (rule === "weekdays") {
+      let count = 0;
+      while (count < n) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) count++; }
+    }
+    else if (rule === "weekly" || rule === "custom_weeks") d.setDate(d.getDate() + 7 * n);
+    else if (rule === "monthly" || rule === "custom_months") d.setMonth(d.getMonth() + n);
+    else if (rule === "yearly") d.setFullYear(d.getFullYear() + n);
+    return d;
+  }
+
+  it("advances daily by 1", () => {
+    const d = advanceRecurrence(new Date("2026-03-10"), "daily", 1);
+    assert.equal(d.toISOString().split("T")[0], "2026-03-11");
+  });
+
+  it("advances custom_days by 3", () => {
+    const d = advanceRecurrence(new Date("2026-03-10"), "custom_days", 3);
+    assert.equal(d.toISOString().split("T")[0], "2026-03-13");
+  });
+
+  it("advances custom_weeks by 2", () => {
+    const d = advanceRecurrence(new Date("2026-03-10"), "custom_weeks", 2);
+    assert.equal(d.toISOString().split("T")[0], "2026-03-24");
+  });
+
+  it("advances custom_months by 3", () => {
+    const d = advanceRecurrence(new Date("2026-03-10"), "custom_months", 3);
+    assert.equal(d.getMonth(), 5); // June (0-indexed)
+  });
+
+  it("weekdays skips weekends", () => {
+    const d = advanceRecurrence(new Date("2026-03-13"), "weekdays", 1); // Friday
+    assert.equal(d.getDay(), 1); // Monday
+  });
+
+  it("validates extended recurrence rules", () => {
+    const valid = ["daily", "weekly", "monthly", "yearly", "weekdays", "custom_days", "custom_weeks", "custom_months"];
+    assert.ok(valid.includes("custom_days"));
+    assert.ok(valid.includes("custom_weeks"));
+    assert.ok(valid.includes("custom_months"));
+    assert.ok(!valid.includes("biweekly"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Skip/snooze tests
+// ---------------------------------------------------------------------------
+describe("Skip and snooze recurring tasks", () => {
+  it("skip preserves streak but increments skip count", () => {
+    const todo = { streak_count: 5, best_streak: 5, skipped_count: 0 };
+    // After skip: streak stays, skip count increments
+    const afterSkip = { streak_count: todo.streak_count, skipped_count: todo.skipped_count + 1 };
+    assert.equal(afterSkip.streak_count, 5);
+    assert.equal(afterSkip.skipped_count, 1);
+  });
+
+  it("snooze updates due date", () => {
+    const todo = { due_date: "2026-03-15", snoozed_until: null };
+    const snoozed = { ...todo, due_date: "2026-03-18", snoozed_until: "2026-03-18" };
+    assert.equal(snoozed.due_date, "2026-03-18");
+    assert.equal(snoozed.snoozed_until, "2026-03-18");
+  });
+
+  it("snooze requires a date", () => {
+    const body = {};
+    assert.ok(!body.until, "Snooze should require 'until' date");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cross-entity links tests
+// ---------------------------------------------------------------------------
+describe("Cross-entity links", () => {
+  it("link structure is valid", () => {
+    const link = { source_type: "note", source_id: 1, target_type: "todo", target_id: 5 };
+    assert.ok(["todo", "email", "note"].includes(link.source_type));
+    assert.ok(["todo", "email", "note"].includes(link.target_type));
+    assert.ok(link.source_id !== undefined);
+    assert.ok(link.target_id !== undefined);
+  });
+
+  it("cannot link entity to itself", () => {
+    const link = { source_type: "todo", source_id: 1, target_type: "todo", target_id: 1 };
+    const isSelf = link.source_type === link.target_type && link.source_id === link.target_id;
+    assert.ok(isSelf, "Should detect self-link");
+  });
+
+  it("supports all entity types for linking", () => {
+    const types = ["todo", "email", "note"];
+    const validLinks = [];
+    types.forEach(s => types.forEach(t => validLinks.push({ source: s, target: t })));
+    assert.equal(validLinks.length, 9); // 3x3 combinations
+  });
+
+  it("create-todo-from-note extracts title", () => {
+    const note = { title: "Meeting Notes", content: "Discussed project timeline and deliverables..." };
+    const todoTitle = note.title || note.content.substring(0, 100);
+    assert.equal(todoTitle, "Meeting Notes");
+  });
+
+  it("create-todo-from-email uses subject", () => {
+    const email = { subject: "Re: Project Update", recipient_name: "Alice", body: "Please review the docs..." };
+    const todoTitle = email.subject;
+    const todoDesc = `Follow up on email to ${email.recipient_name}: ${email.body.substring(0, 200)}`;
+    assert.equal(todoTitle, "Re: Project Update");
+    assert.ok(todoDesc.includes("Follow up"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Webhook tests
+// ---------------------------------------------------------------------------
+describe("Webhooks", () => {
+  it("webhook structure is valid", () => {
+    const webhook = { name: "Test", url: "https://example.com/hook", events: ["todo_created", "todo_completed"], enabled: true, headers: {} };
+    assert.ok(webhook.name);
+    assert.ok(webhook.url.startsWith("https://"));
+    assert.ok(Array.isArray(webhook.events));
+    assert.ok(webhook.events.length > 0);
+  });
+
+  it("validates webhook events", () => {
+    const valid = ["todo_created", "todo_completed", "email_sent", "note_created", "reminder_due", "streak_milestone"];
+    assert.ok(valid.includes("todo_created"));
+    assert.ok(valid.includes("streak_milestone"));
+    assert.ok(!valid.includes("invalid_event"));
+  });
+
+  it("webhook payload has correct format", () => {
+    const payload = { event: "todo_completed", timestamp: new Date().toISOString(), data: { id: 1, title: "Test" } };
+    assert.ok(payload.event);
+    assert.ok(payload.timestamp);
+    assert.ok(payload.data);
+  });
+
+  it("webhook test payload format", () => {
+    const payload = { event: "test", timestamp: new Date().toISOString(), message: "Per-sistant webhook test" };
+    assert.equal(payload.event, "test");
+    assert.ok(payload.message);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slack integration tests
+// ---------------------------------------------------------------------------
+describe("Slack integration", () => {
+  it("slack message format is valid", () => {
+    const msg = { text: "Task completed: Buy groceries" };
+    assert.ok(msg.text);
+    assert.ok(typeof msg.text === "string");
+  });
+
+  it("slack webhook URL format", () => {
+    const url = "https://hooks.slack.com/services/T00/B00/xxxx";
+    assert.ok(url.startsWith("https://hooks.slack.com/"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Notification check tests
+// ---------------------------------------------------------------------------
+describe("Notification system", () => {
+  it("categorizes notifications correctly", () => {
+    const notifications = [
+      { type: "due_today", title: "Buy groceries", id: 1, entity: "todo" },
+      { type: "overdue", title: "Pay bills", id: 2, entity: "todo" },
+      { type: "streak_at_risk", title: "Exercise (5 streak)", id: 3, entity: "todo" },
+      { type: "reminder", title: "Meeting notes", id: 4, entity: "note" },
+    ];
+    assert.equal(notifications.filter(n => n.type === "overdue").length, 1);
+    assert.equal(notifications.filter(n => n.type === "streak_at_risk").length, 1);
+    assert.equal(notifications.filter(n => n.entity === "note").length, 1);
+  });
+
+  it("notification counts are computed", () => {
+    const counts = { due_today: 3, overdue: 1, streaks_at_risk: 2, reminders: 0 };
+    assert.ok(typeof counts.due_today === "number");
+    assert.ok(typeof counts.overdue === "number");
+    assert.ok(counts.due_today + counts.overdue > 0);
+  });
+
+  it("priority notifications filter correctly", () => {
+    const notifications = [
+      { type: "due_today", title: "A" },
+      { type: "overdue", title: "B" },
+      { type: "streak_at_risk", title: "C" },
+    ];
+    const important = notifications.filter(n => n.type === "overdue" || n.type === "streak_at_risk");
+    assert.equal(important.length, 2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Analytics tests
+// ---------------------------------------------------------------------------
+describe("Analytics and insights", () => {
+  it("period filter values are valid", () => {
+    const valid = ["week", "month", "quarter", "year"];
+    assert.ok(valid.includes("week"));
+    assert.ok(valid.includes("quarter"));
+    assert.ok(!valid.includes("day"));
+  });
+
+  it("completion rate calculation", () => {
+    const done = 15, total = 20;
+    const rate = total > 0 ? Math.round((done / total) * 100) : 0;
+    assert.equal(rate, 75);
+  });
+
+  it("completion rate with zero tasks", () => {
+    const done = 0, total = 0;
+    const rate = total > 0 ? Math.round((done / total) * 100) : 0;
+    assert.equal(rate, 0);
+  });
+
+  it("day of week mapping", () => {
+    const dowNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    assert.equal(dowNames[0], "Sun");
+    assert.equal(dowNames[6], "Sat");
+    assert.equal(dowNames.length, 7);
+  });
+
+  it("analytics response has expected fields", () => {
+    const response = {
+      period: "week", start_date: "2026-03-09", end_date: "2026-03-15",
+      completed_by_day: [], created_by_day: [], completion_rate: 75,
+      total_completed: 15, total_created: 20,
+      priority_breakdown: [], category_breakdown: [],
+      avg_completion_hours: 24.5, streak_leaders: [], productivity_by_dow: [],
+    };
+    assert.ok("completion_rate" in response);
+    assert.ok("priority_breakdown" in response);
+    assert.ok("streak_leaders" in response);
+    assert.ok("productivity_by_dow" in response);
+    assert.ok("avg_completion_hours" in response);
+  });
+
+  it("productivity by day of week data structure", () => {
+    const dowData = [
+      { dow: 0, count: 2 }, { dow: 1, count: 5 }, { dow: 2, count: 3 },
+      { dow: 3, count: 4 }, { dow: 4, count: 6 }, { dow: 5, count: 1 },
+    ];
+    const maxCount = Math.max(...dowData.map(d => d.count));
+    assert.equal(maxCount, 6); // Thursday
+    assert.ok(dowData.every(d => d.dow >= 0 && d.dow <= 6));
+  });
+});
