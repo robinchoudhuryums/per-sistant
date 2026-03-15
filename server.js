@@ -72,7 +72,7 @@ app.get("/contacts", require("./pages/contacts")());
 app.get("/calendar", require("./pages/calendar")());
 app.get("/review", require("./pages/review")());
 app.get("/analytics", require("./pages/analytics")());
-app.get("/settings", require("./pages/settings")());
+app.get("/settings", require("./pages/settings")(config.AUTH_SECRET));
 
 // ---------------------------------------------------------------------------
 // Email Scheduler
