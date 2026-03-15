@@ -1,4 +1,5 @@
 const express = require("express");
+const { isAIAvailable } = require("../ai");
 
 module.exports = function ({ pool, config }) {
   const router = express.Router();
@@ -9,7 +10,7 @@ module.exports = function ({ pool, config }) {
       const r = await pool.query("SELECT * FROM user_settings WHERE id = 1");
       const settings = r.rows[0] || { theme: "dark", session_timeout_minutes: 15, default_horizon: "short" };
       settings.smtp_configured = !!(process.env.SMTP_HOST && process.env.SMTP_USER);
-      settings.ai_configured = !!(Anthropic && process.env.ANTHROPIC_API_KEY);
+      settings.ai_configured = isAIAvailable();
       settings.perfin_url = PERFIN_URL || settings.perfin_url || null;
       res.json(settings);
     } catch (err) {

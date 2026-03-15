@@ -26,29 +26,28 @@ ${themeScript()}
     <button id="select-all-btn" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
   </div>
 
-  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;font-weight:500;">
-    <span style="padding:6px 0;">View:</span>
-  </div>
-  <div class="filters" id="horizon-filters">
-    <button class="active" data-horizon="">All</button>
-    <button data-horizon="short">Short-term</button>
-    <button data-horizon="medium">Medium-term</button>
-    <button data-horizon="long">Long-term</button>
-  </div>
-  <div class="filters" id="status-filters">
-    <button class="active" data-status="pending">Pending</button>
-    <button data-status="all">All</button>
-    <button data-status="done">Completed</button>
-  </div>
-  <div class="filters" id="priority-filters">
-    <button class="active" data-priority="">Any Priority</button>
-    <button data-priority="urgent">Urgent</button>
-    <button data-priority="high">High</button>
-    <button data-priority="medium">Medium</button>
-    <button data-priority="low">Low</button>
-  </div>
-  <div class="filters" id="category-filters">
-    <button class="active" data-cat="">All Categories</button>
+  <div class="filter-bar" style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;align-items:center;">
+    <select id="filter-horizon" style="padding:6px 12px;font-size:11px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:20px;color:var(--text);cursor:pointer;outline:none;appearance:none;-webkit-appearance:none;padding-right:24px;background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 12 12%22><path fill=%22%23999%22 d=%22M3 5l3 3 3-3%22/></svg>');background-repeat:no-repeat;background-position:right 8px center;">
+      <option value="">All Horizons</option>
+      <option value="short">Short-term</option>
+      <option value="medium">Medium-term</option>
+      <option value="long">Long-term</option>
+    </select>
+    <select id="filter-status" style="padding:6px 12px;font-size:11px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:20px;color:var(--text);cursor:pointer;outline:none;appearance:none;-webkit-appearance:none;padding-right:24px;background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 12 12%22><path fill=%22%23999%22 d=%22M3 5l3 3 3-3%22/></svg>');background-repeat:no-repeat;background-position:right 8px center;">
+      <option value="pending">Pending</option>
+      <option value="all">All Status</option>
+      <option value="done">Completed</option>
+    </select>
+    <select id="filter-priority" style="padding:6px 12px;font-size:11px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:20px;color:var(--text);cursor:pointer;outline:none;appearance:none;-webkit-appearance:none;padding-right:24px;background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 12 12%22><path fill=%22%23999%22 d=%22M3 5l3 3 3-3%22/></svg>');background-repeat:no-repeat;background-position:right 8px center;">
+      <option value="">Any Priority</option>
+      <option value="urgent">Urgent</option>
+      <option value="high">High</option>
+      <option value="medium">Medium</option>
+      <option value="low">Low</option>
+    </select>
+    <select id="filter-category" style="padding:6px 12px;font-size:11px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:20px;color:var(--text);cursor:pointer;outline:none;appearance:none;-webkit-appearance:none;padding-right:24px;background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 12 12%22><path fill=%22%23999%22 d=%22M3 5l3 3 3-3%22/></svg>');background-repeat:no-repeat;background-position:right 8px center;">
+      <option value="">All Categories</option>
+    </select>
   </div>
 
   <div class="section">
@@ -206,19 +205,19 @@ async function bulkAction(action, data) {
   await fetch('/api/bulk/todos', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:Array.from(selectedIds),action:action,data:data||{}})});
   selectedIds.clear(); updateBulkCount(); load();
 }
-function setHorizon(btn, h) { curHorizon = h; document.querySelectorAll('#horizon-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
-function setStatus(btn, s) { curStatus = s; document.querySelectorAll('#status-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
-function setPriority(btn, p) { curPriority = p; document.querySelectorAll('#priority-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
-function setCategory(btn, c) { curCategory = c; document.querySelectorAll('#category-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
+function setHorizon(v) { curHorizon = v; load(); }
+function setStatus(v) { curStatus = v; load(); }
+function setPriority(v) { curPriority = v; load(); }
+function setCategory(v) { curCategory = v; load(); }
 
 async function loadCategories() {
   try {
     var cats = await fetch('/api/todo-categories').then(r=>r.json());
-    var container = document.getElementById('category-filters');
-    var existing = container.querySelector('button.active');
-    var html = '<button class="'+(curCategory===''?'active':'')+'" data-cat="">All Categories</button>';
-    cats.forEach(c => { html += '<button class="'+(curCategory===c?'active':'')+'" data-cat="'+c+'">'+c.charAt(0).toUpperCase()+c.slice(1)+'</button>'; });
-    container.innerHTML = html;
+    // Populate filter dropdown
+    var filterSel = document.getElementById('filter-category');
+    var html = '<option value="">All Categories</option>';
+    cats.forEach(c => { html += '<option value="'+c+'"'+(curCategory===c?' selected':'')+'>'+c.charAt(0).toUpperCase()+c.slice(1)+'</option>'; });
+    filterSel.innerHTML = html;
     // Also populate category select in modal
     var sel = document.getElementById('f-category-select');
     var curVal = sel.value;
@@ -765,10 +764,10 @@ document.getElementById('f-category-select').addEventListener('change',function(
 document.getElementById('f-recurring').addEventListener('change',function(){document.getElementById('f-recurrence').style.display=this.checked?'block':'none';});
 document.getElementById('f-recurrence-rule').addEventListener('change',function(){document.getElementById('f-interval-row').style.display=this.value.startsWith('custom')?'flex':'none';});
 document.getElementById('qt-input').addEventListener('keydown',function(e){if(e.key==='Enter')parseQuickTodo();});
-onDelegate('horizon-filters','click','button[data-horizon]',function(){setHorizon(this,this.dataset.horizon);});
-onDelegate('status-filters','click','button[data-status]',function(){setStatus(this,this.dataset.status);});
-onDelegate('priority-filters','click','button[data-priority]',function(){setPriority(this,this.dataset.priority);});
-onDelegate('category-filters','click','button[data-cat]',function(){setCategory(this,this.dataset.cat);});
+document.getElementById('filter-horizon').addEventListener('change',function(){setHorizon(this.value);});
+document.getElementById('filter-status').addEventListener('change',function(){setStatus(this.value);});
+document.getElementById('filter-priority').addEventListener('change',function(){setPriority(this.value);});
+document.getElementById('filter-category').addEventListener('change',function(){setCategory(this.value);});
 document.addEventListener('click',function(e){
   var btn=e.target.closest('[data-action]');
   if(!btn)return;
