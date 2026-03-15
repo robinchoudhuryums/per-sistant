@@ -767,7 +767,7 @@ function themeScript() {
 app.get("/login", (req, res) => {
   if (!AUTH_SECRET) return res.redirect("/");
   const isPIN = AUTH_MODE === "pin";
-  const pinLen = SESSION_PIN ? SESSION_PIN.length : 4;
+  const pinLen = 8; // fixed display length to avoid leaking actual PIN length
   res.send(`${pageHead("Login")}
 <body>
 ${themeScript()}
