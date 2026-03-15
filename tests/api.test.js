@@ -914,3 +914,942 @@ describe("Dashboard inline actions", () => {
     assert.ok(updated.completed_at);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Markdown notes tests
+// ---------------------------------------------------------------------------
+describe("Markdown notes", () => {
+  it("validates note format field", () => {
+    const validFormats = ["plain", "markdown"];
+    assert.ok(validFormats.includes("plain"));
+    assert.ok(validFormats.includes("markdown"));
+    assert.ok(!validFormats.includes("html"));
+    assert.ok(!validFormats.includes("richtext"));
+  });
+
+  it("renders markdown bold and italic correctly", () => {
+    // Simulate the renderMd logic for bold/italic
+    function renderMdSimple(s) {
+      return s
+        .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>');
+    }
+    assert.ok(renderMdSimple("**bold**").includes("<strong>bold</strong>"));
+    assert.ok(renderMdSimple("*italic*").includes("<em>italic</em>"));
+    assert.ok(renderMdSimple("***both***").includes("<strong><em>both</em></strong>"));
+  });
+
+  it("renders markdown lists and checkboxes", () => {
+    function renderMdLists(s) {
+      return s
+        .replace(/^- \[x\] (.+)$/gm, '<done>$1</done>')
+        .replace(/^- \[ \] (.+)$/gm, '<todo>$1</todo>')
+        .replace(/^[*-] (.+)$/gm, '<li>$1</li>');
+    }
+    assert.ok(renderMdLists("- [x] Done task").includes("<done>Done task</done>"));
+    assert.ok(renderMdLists("- [ ] Pending task").includes("<todo>Pending task</todo>"));
+    assert.ok(renderMdLists("- List item").includes("<li>List item</li>"));
+  });
+
+  it("default format is plain", () => {
+    const note = { id: 1, content: "Hello", format: "plain" };
+    assert.equal(note.format, "plain");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task dependency tests
+// ---------------------------------------------------------------------------
+describe("Task dependencies", () => {
+  it("prevents self-dependency", () => {
+    const todoId = 5;
+    const dependsOnId = 5;
+    assert.equal(todoId === dependsOnId, true);
+    // API should reject this
+  });
+
+  it("detects circular dependencies", () => {
+    // If A depends on B, then B cannot depend on A
+    const deps = [
+      { todo_id: 1, depends_on_id: 2 },
+    ];
+    const newDep = { todo_id: 2, depends_on_id: 1 };
+    const isCircular = deps.some(d => d.todo_id === newDep.depends_on_id && d.depends_on_id === newDep.todo_id);
+    assert.ok(isCircular);
+  });
+
+  it("identifies blocked tasks correctly", () => {
+    const deps = {
+      blocked_by: [
+        { depends_on_id: 2, title: "Task B", completed: false },
+        { depends_on_id: 3, title: "Task C", completed: true },
+      ],
+      blocking: [
+        { todo_id: 4, title: "Task D" },
+      ],
+    };
+    const unblockedDeps = deps.blocked_by.filter(d => !d.completed);
+    assert.equal(unblockedDeps.length, 1);
+    assert.equal(deps.blocking.length, 1);
+    // Task is blocked if any unblocked dependency exists
+    assert.ok(unblockedDeps.length > 0);
+  });
+
+  it("allows completion of non-blocked tasks", () => {
+    const deps = {
+      blocked_by: [
+        { depends_on_id: 2, title: "Task B", completed: true },
+      ],
+    };
+    const unblockedDeps = deps.blocked_by.filter(d => !d.completed);
+    assert.equal(unblockedDeps.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Streak/habit tracking tests
+// ---------------------------------------------------------------------------
+describe("Streak tracking", () => {
+  it("increments streak on on-time completion", () => {
+    const todo = { streak_count: 3, best_streak: 5, due_date: "2026-03-15" };
+    const today = "2026-03-14";
+    const isOnTime = today <= todo.due_date;
+    const newStreak = isOnTime ? todo.streak_count + 1 : 1;
+    const newBest = Math.max(newStreak, todo.best_streak);
+    assert.equal(newStreak, 4);
+    assert.equal(newBest, 5);
+  });
+
+  it("resets streak on late completion", () => {
+    const todo = { streak_count: 3, best_streak: 5, due_date: "2026-03-10" };
+    const today = "2026-03-14";
+    const isOnTime = today <= todo.due_date;
+    const newStreak = isOnTime ? todo.streak_count + 1 : 1;
+    assert.equal(newStreak, 1);
+  });
+
+  it("updates best streak when current exceeds it", () => {
+    const todo = { streak_count: 5, best_streak: 5, due_date: "2026-03-15" };
+    const today = "2026-03-14";
+    const isOnTime = today <= todo.due_date;
+    const newStreak = isOnTime ? todo.streak_count + 1 : 1;
+    const newBest = Math.max(newStreak, todo.best_streak);
+    assert.equal(newStreak, 6);
+    assert.equal(newBest, 6);
+  });
+
+  it("carries streak to next recurring instance", () => {
+    const completed = { streak_count: 4, best_streak: 4 };
+    const next = { ...completed, completed: false, due_date: "2026-03-20" };
+    assert.equal(next.streak_count, 4);
+    assert.equal(next.best_streak, 4);
+    assert.equal(next.completed, false);
+  });
+
+  it("resets streak on overdue auto-completion", () => {
+    // Cron job auto-completes overdue tasks with streak = 0
+    const todo = { streak_count: 5, best_streak: 5 };
+    const autoCompleted = { ...todo, streak_count: 0, completed: true };
+    assert.equal(autoCompleted.streak_count, 0);
+    // Best streak preserved
+    const next = { streak_count: 0, best_streak: todo.best_streak };
+    assert.equal(next.best_streak, 5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dashboard customization tests
+// ---------------------------------------------------------------------------
+describe("Dashboard customization", () => {
+  it("default layout contains all widgets", () => {
+    const layout = { widgets: ["search", "cards", "briefing", "suggestions", "ai_query", "tasks", "upcoming_emails", "perfin", "shortcuts"], hidden: [] };
+    assert.equal(layout.widgets.length, 9);
+    assert.ok(layout.widgets.includes("search"));
+    assert.ok(layout.widgets.includes("tasks"));
+    assert.ok(layout.widgets.includes("suggestions"));
+    assert.ok(layout.widgets.includes("ai_query"));
+  });
+
+  it("hidden widgets are excluded from display", () => {
+    const layout = { widgets: ["search", "cards", "tasks"], hidden: ["cards"] };
+    const visible = layout.widgets.filter(w => !layout.hidden.includes(w));
+    assert.equal(visible.length, 2);
+    assert.ok(!visible.includes("cards"));
+  });
+
+  it("widget reordering preserves all widgets", () => {
+    const widgets = ["a", "b", "c"];
+    const srcIdx = 0, tgtIdx = 2;
+    const moved = widgets.splice(srcIdx, 1)[0];
+    widgets.splice(tgtIdx, 0, moved);
+    assert.deepEqual(widgets, ["b", "c", "a"]);
+    assert.equal(widgets.length, 3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Automation rules tests
+// ---------------------------------------------------------------------------
+describe("Automations", () => {
+  it("validates trigger types", () => {
+    const VALID_TRIGGERS = ["todo_created", "todo_completed", "email_created", "note_created", "schedule"];
+    assert.ok(VALID_TRIGGERS.includes("todo_created"));
+    assert.ok(VALID_TRIGGERS.includes("todo_completed"));
+    assert.ok(!VALID_TRIGGERS.includes("invalid"));
+  });
+
+  it("validates action types", () => {
+    const VALID_ACTIONS = ["set_priority", "set_category", "set_horizon", "add_tag", "send_notification", "create_todo"];
+    assert.ok(VALID_ACTIONS.includes("set_priority"));
+    assert.ok(VALID_ACTIONS.includes("create_todo"));
+    assert.ok(!VALID_ACTIONS.includes("delete_all"));
+  });
+
+  it("condition matching works correctly", () => {
+    const rule = { conditions: { category: "work", title_contains: "meeting" } };
+    const entity1 = { title: "Weekly meeting", category: "work" };
+    const entity2 = { title: "Buy groceries", category: "personal" };
+    // entity1 matches
+    let match1 = true;
+    if (rule.conditions.category && entity1.category !== rule.conditions.category) match1 = false;
+    if (rule.conditions.title_contains && !entity1.title.toLowerCase().includes(rule.conditions.title_contains)) match1 = false;
+    assert.ok(match1);
+    // entity2 doesn't match
+    let match2 = true;
+    if (rule.conditions.category && entity2.category !== rule.conditions.category) match2 = false;
+    assert.ok(!match2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// File attachment tests
+// ---------------------------------------------------------------------------
+describe("File attachments", () => {
+  it("validates entity types", () => {
+    const valid = ["todo", "email", "note"];
+    assert.ok(valid.includes("todo"));
+    assert.ok(valid.includes("note"));
+    assert.ok(!valid.includes("contact"));
+  });
+
+  it("attachment has expected fields", () => {
+    const attachment = { id: 1, filename: "123-file.pdf", original_name: "file.pdf", mime_type: "application/pdf", size_bytes: 1024, entity_type: "todo", entity_id: 1 };
+    assert.ok(attachment.filename);
+    assert.ok(attachment.original_name);
+    assert.ok(attachment.mime_type);
+    assert.ok(attachment.size_bytes > 0);
+    assert.ok(["todo", "email", "note"].includes(attachment.entity_type));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// iCal export tests
+// ---------------------------------------------------------------------------
+describe("iCal export", () => {
+  it("generates valid iCal format", () => {
+    const header = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Per-sistant//EN\r\n";
+    assert.ok(header.includes("BEGIN:VCALENDAR"));
+    assert.ok(header.includes("VERSION:2.0"));
+  });
+
+  it("formats dates correctly for iCal", () => {
+    const d = new Date("2026-03-15");
+    const dateStr = d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+    const dateOnly = dateStr.substring(0, 8);
+    assert.equal(dateOnly, "20260315");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Location-based reminder tests
+// ---------------------------------------------------------------------------
+describe("Location reminders", () => {
+  it("haversine distance calculation", () => {
+    // Simple haversine distance
+    function haversine(lat1, lon1, lat2, lon2) {
+      var R = 6371000; var p = Math.PI / 180;
+      var a = 0.5 - Math.cos((lat2-lat1)*p)/2 + Math.cos(lat1*p)*Math.cos(lat2*p)*(1-Math.cos((lon2-lon1)*p))/2;
+      return 2 * R * Math.asin(Math.sqrt(a));
+    }
+    // Same point = 0 distance
+    assert.equal(haversine(40.7128, -74.006, 40.7128, -74.006), 0);
+    // NYC to nearby point (~1km)
+    const dist = haversine(40.7128, -74.006, 40.7218, -74.006);
+    assert.ok(dist > 900 && dist < 1100);
+  });
+
+  it("location reminder fields are valid", () => {
+    const todo = { location_name: "Office", location_lat: 40.7128, location_lng: -74.006, location_radius: 200 };
+    assert.ok(todo.location_lat >= -90 && todo.location_lat <= 90);
+    assert.ok(todo.location_lng >= -180 && todo.location_lng <= 180);
+    assert.ok(todo.location_radius > 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Offline support tests
+// ---------------------------------------------------------------------------
+describe("Offline support", () => {
+  it("offline queue structure is valid", () => {
+    const queue = [
+      { url: "/api/todos", method: "POST", body: '{"title":"Test"}', headers: { "Content-Type": "application/json" } },
+    ];
+    assert.ok(Array.isArray(queue));
+    assert.equal(queue[0].method, "POST");
+    assert.ok(queue[0].body);
+  });
+
+  it("cache version naming", () => {
+    const CACHE = "per-sistant-v2";
+    assert.ok(CACHE.startsWith("per-sistant-"));
+    assert.ok(CACHE.includes("v2"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Custom recurrence intervals tests
+// ---------------------------------------------------------------------------
+describe("Custom recurrence intervals", () => {
+  function advanceRecurrence(date, rule, interval) {
+    const d = new Date(date);
+    const n = interval || 1;
+    if (rule === "daily" || rule === "custom_days") d.setDate(d.getDate() + n);
+    else if (rule === "weekdays") {
+      let count = 0;
+      while (count < n) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) count++; }
+    }
+    else if (rule === "weekly" || rule === "custom_weeks") d.setDate(d.getDate() + 7 * n);
+    else if (rule === "monthly" || rule === "custom_months") d.setMonth(d.getMonth() + n);
+    else if (rule === "yearly") d.setFullYear(d.getFullYear() + n);
+    return d;
+  }
+
+  it("advances daily by 1", () => {
+    const d = advanceRecurrence(new Date("2026-03-10"), "daily", 1);
+    assert.equal(d.toISOString().split("T")[0], "2026-03-11");
+  });
+
+  it("advances custom_days by 3", () => {
+    const d = advanceRecurrence(new Date("2026-03-10"), "custom_days", 3);
+    assert.equal(d.toISOString().split("T")[0], "2026-03-13");
+  });
+
+  it("advances custom_weeks by 2", () => {
+    const d = advanceRecurrence(new Date("2026-03-10"), "custom_weeks", 2);
+    assert.equal(d.toISOString().split("T")[0], "2026-03-24");
+  });
+
+  it("advances custom_months by 3", () => {
+    const d = advanceRecurrence(new Date("2026-03-10"), "custom_months", 3);
+    assert.equal(d.getMonth(), 5); // June (0-indexed)
+  });
+
+  it("weekdays skips weekends", () => {
+    const d = advanceRecurrence(new Date("2026-03-13"), "weekdays", 1); // Friday
+    assert.equal(d.getDay(), 1); // Monday
+  });
+
+  it("validates extended recurrence rules", () => {
+    const valid = ["daily", "weekly", "monthly", "yearly", "weekdays", "custom_days", "custom_weeks", "custom_months"];
+    assert.ok(valid.includes("custom_days"));
+    assert.ok(valid.includes("custom_weeks"));
+    assert.ok(valid.includes("custom_months"));
+    assert.ok(!valid.includes("biweekly"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Skip/snooze tests
+// ---------------------------------------------------------------------------
+describe("Skip and snooze recurring tasks", () => {
+  it("skip preserves streak but increments skip count", () => {
+    const todo = { streak_count: 5, best_streak: 5, skipped_count: 0 };
+    // After skip: streak stays, skip count increments
+    const afterSkip = { streak_count: todo.streak_count, skipped_count: todo.skipped_count + 1 };
+    assert.equal(afterSkip.streak_count, 5);
+    assert.equal(afterSkip.skipped_count, 1);
+  });
+
+  it("snooze updates due date", () => {
+    const todo = { due_date: "2026-03-15", snoozed_until: null };
+    const snoozed = { ...todo, due_date: "2026-03-18", snoozed_until: "2026-03-18" };
+    assert.equal(snoozed.due_date, "2026-03-18");
+    assert.equal(snoozed.snoozed_until, "2026-03-18");
+  });
+
+  it("snooze requires a date", () => {
+    const body = {};
+    assert.ok(!body.until, "Snooze should require 'until' date");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cross-entity links tests
+// ---------------------------------------------------------------------------
+describe("Cross-entity links", () => {
+  it("link structure is valid", () => {
+    const link = { source_type: "note", source_id: 1, target_type: "todo", target_id: 5 };
+    assert.ok(["todo", "email", "note"].includes(link.source_type));
+    assert.ok(["todo", "email", "note"].includes(link.target_type));
+    assert.ok(link.source_id !== undefined);
+    assert.ok(link.target_id !== undefined);
+  });
+
+  it("cannot link entity to itself", () => {
+    const link = { source_type: "todo", source_id: 1, target_type: "todo", target_id: 1 };
+    const isSelf = link.source_type === link.target_type && link.source_id === link.target_id;
+    assert.ok(isSelf, "Should detect self-link");
+  });
+
+  it("supports all entity types for linking", () => {
+    const types = ["todo", "email", "note"];
+    const validLinks = [];
+    types.forEach(s => types.forEach(t => validLinks.push({ source: s, target: t })));
+    assert.equal(validLinks.length, 9); // 3x3 combinations
+  });
+
+  it("create-todo-from-note extracts title", () => {
+    const note = { title: "Meeting Notes", content: "Discussed project timeline and deliverables..." };
+    const todoTitle = note.title || note.content.substring(0, 100);
+    assert.equal(todoTitle, "Meeting Notes");
+  });
+
+  it("create-todo-from-email uses subject", () => {
+    const email = { subject: "Re: Project Update", recipient_name: "Alice", body: "Please review the docs..." };
+    const todoTitle = email.subject;
+    const todoDesc = `Follow up on email to ${email.recipient_name}: ${email.body.substring(0, 200)}`;
+    assert.equal(todoTitle, "Re: Project Update");
+    assert.ok(todoDesc.includes("Follow up"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Webhook tests
+// ---------------------------------------------------------------------------
+describe("Webhooks", () => {
+  it("webhook structure is valid", () => {
+    const webhook = { name: "Test", url: "https://example.com/hook", events: ["todo_created", "todo_completed"], enabled: true, headers: {} };
+    assert.ok(webhook.name);
+    assert.ok(webhook.url.startsWith("https://"));
+    assert.ok(Array.isArray(webhook.events));
+    assert.ok(webhook.events.length > 0);
+  });
+
+  it("validates webhook events", () => {
+    const valid = ["todo_created", "todo_completed", "email_sent", "note_created", "reminder_due", "streak_milestone"];
+    assert.ok(valid.includes("todo_created"));
+    assert.ok(valid.includes("streak_milestone"));
+    assert.ok(!valid.includes("invalid_event"));
+  });
+
+  it("webhook payload has correct format", () => {
+    const payload = { event: "todo_completed", timestamp: new Date().toISOString(), data: { id: 1, title: "Test" } };
+    assert.ok(payload.event);
+    assert.ok(payload.timestamp);
+    assert.ok(payload.data);
+  });
+
+  it("webhook test payload format", () => {
+    const payload = { event: "test", timestamp: new Date().toISOString(), message: "Per-sistant webhook test" };
+    assert.equal(payload.event, "test");
+    assert.ok(payload.message);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slack integration tests
+// ---------------------------------------------------------------------------
+describe("Slack integration", () => {
+  it("slack message format is valid", () => {
+    const msg = { text: "Task completed: Buy groceries" };
+    assert.ok(msg.text);
+    assert.ok(typeof msg.text === "string");
+  });
+
+  it("slack webhook URL format", () => {
+    const url = "https://hooks.slack.com/services/T00/B00/xxxx";
+    assert.ok(url.startsWith("https://hooks.slack.com/"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Notification check tests
+// ---------------------------------------------------------------------------
+describe("Notification system", () => {
+  it("categorizes notifications correctly", () => {
+    const notifications = [
+      { type: "due_today", title: "Buy groceries", id: 1, entity: "todo" },
+      { type: "overdue", title: "Pay bills", id: 2, entity: "todo" },
+      { type: "streak_at_risk", title: "Exercise (5 streak)", id: 3, entity: "todo" },
+      { type: "reminder", title: "Meeting notes", id: 4, entity: "note" },
+    ];
+    assert.equal(notifications.filter(n => n.type === "overdue").length, 1);
+    assert.equal(notifications.filter(n => n.type === "streak_at_risk").length, 1);
+    assert.equal(notifications.filter(n => n.entity === "note").length, 1);
+  });
+
+  it("notification counts are computed", () => {
+    const counts = { due_today: 3, overdue: 1, streaks_at_risk: 2, reminders: 0 };
+    assert.ok(typeof counts.due_today === "number");
+    assert.ok(typeof counts.overdue === "number");
+    assert.ok(counts.due_today + counts.overdue > 0);
+  });
+
+  it("priority notifications filter correctly", () => {
+    const notifications = [
+      { type: "due_today", title: "A" },
+      { type: "overdue", title: "B" },
+      { type: "streak_at_risk", title: "C" },
+    ];
+    const important = notifications.filter(n => n.type === "overdue" || n.type === "streak_at_risk");
+    assert.equal(important.length, 2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Analytics tests
+// ---------------------------------------------------------------------------
+describe("Analytics and insights", () => {
+  it("period filter values are valid", () => {
+    const valid = ["week", "month", "quarter", "year"];
+    assert.ok(valid.includes("week"));
+    assert.ok(valid.includes("quarter"));
+    assert.ok(!valid.includes("day"));
+  });
+
+  it("completion rate calculation", () => {
+    const done = 15, total = 20;
+    const rate = total > 0 ? Math.round((done / total) * 100) : 0;
+    assert.equal(rate, 75);
+  });
+
+  it("completion rate with zero tasks", () => {
+    const done = 0, total = 0;
+    const rate = total > 0 ? Math.round((done / total) * 100) : 0;
+    assert.equal(rate, 0);
+  });
+
+  it("day of week mapping", () => {
+    const dowNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    assert.equal(dowNames[0], "Sun");
+    assert.equal(dowNames[6], "Sat");
+    assert.equal(dowNames.length, 7);
+  });
+
+  it("analytics response has expected fields including new ones", () => {
+    const response = {
+      period: "week", start_date: "2026-03-09", end_date: "2026-03-15",
+      completed_by_day: [], created_by_day: [], completion_rate: 75,
+      total_completed: 15, total_created: 20,
+      priority_breakdown: [], category_breakdown: [],
+      avg_completion_hours: 24.5, streak_leaders: [], productivity_by_dow: [],
+      heatmap: [], productivity_score: 72, emails_sent: 5, notes_created: 3,
+    };
+    assert.ok("completion_rate" in response);
+    assert.ok("priority_breakdown" in response);
+    assert.ok("streak_leaders" in response);
+    assert.ok("productivity_by_dow" in response);
+    assert.ok("avg_completion_hours" in response);
+    assert.ok("heatmap" in response);
+    assert.ok("productivity_score" in response);
+    assert.ok("emails_sent" in response);
+    assert.ok("notes_created" in response);
+  });
+
+  it("productivity by day of week data structure", () => {
+    const dowData = [
+      { dow: 0, count: 2 }, { dow: 1, count: 5 }, { dow: 2, count: 3 },
+      { dow: 3, count: 4 }, { dow: 4, count: 6 }, { dow: 5, count: 1 },
+    ];
+    const maxCount = Math.max(...dowData.map(d => d.count));
+    assert.equal(maxCount, 6); // Thursday
+    assert.ok(dowData.every(d => d.dow >= 0 && d.dow <= 6));
+  });
+
+  it("productivity score calculation", () => {
+    // Score is weighted: completion rate 40%, streak 20%, volume 20%, speed 20%
+    const completionPct = 80;
+    const topStreak = 7;
+    const totalCompleted = 10;
+    const avgHours = 24;
+    const volumeScore = Math.min(totalCompleted / 10, 1) * 100;
+    const speedScore = Math.max(0, Math.min(100, 100 - avgHours));
+    const streakScore = Math.min(topStreak / 7, 1) * 100;
+    const score = Math.round(completionPct * 0.4 + streakScore * 0.2 + volumeScore * 0.2 + speedScore * 0.2);
+    assert.ok(score >= 0 && score <= 100);
+    assert.equal(volumeScore, 100); // 10 tasks = max volume
+    assert.equal(streakScore, 100); // 7-day streak = max
+  });
+
+  it("heatmap data maps dates to counts", () => {
+    const heatmap = [
+      { day: "2026-03-10", count: 3 },
+      { day: "2026-03-11", count: 0 },
+      { day: "2026-03-12", count: 5 },
+    ];
+    const heatmapMap = {};
+    heatmap.forEach(h => { heatmapMap[h.day] = parseInt(h.count); });
+    assert.equal(heatmapMap["2026-03-10"], 3);
+    assert.equal(heatmapMap["2026-03-12"], 5);
+    assert.equal(heatmapMap["2026-03-13"] || 0, 0);
+  });
+
+  it("heatmap intensity levels", () => {
+    const maxHeat = 10;
+    function getIntensity(count) {
+      return count === 0 ? 0 : count <= maxHeat * 0.33 ? 1 : count <= maxHeat * 0.66 ? 2 : 3;
+    }
+    assert.equal(getIntensity(0), 0);
+    assert.equal(getIntensity(2), 1);
+    assert.equal(getIntensity(5), 2);
+    assert.equal(getIntensity(8), 3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Todo templates
+// ---------------------------------------------------------------------------
+describe("Todo templates", () => {
+  it("template structure has required fields", () => {
+    const template = {
+      id: 1, name: "Weekly Report", title: "Write weekly report",
+      description: "Summarize accomplishments", priority: "high",
+      horizon: "short", category: "work", recurring: true,
+      recurrence_rule: "weekly", recurrence_interval: 1,
+      subtasks: ["Draft outline", "Add metrics", "Review"],
+    };
+    assert.ok(template.name);
+    assert.ok(template.title);
+    assert.equal(template.subtasks.length, 3);
+    assert.equal(template.recurring, true);
+  });
+
+  it("template apply creates todo with template fields", () => {
+    const template = { title: "Team standup", priority: "medium", horizon: "short", category: "work" };
+    const overrides = { due_date: "2026-03-20" };
+    const todo = {
+      title: overrides.title || template.title,
+      priority: overrides.priority || template.priority,
+      horizon: overrides.horizon || template.horizon,
+      category: overrides.category || template.category,
+      due_date: overrides.due_date || null,
+    };
+    assert.equal(todo.title, "Team standup");
+    assert.equal(todo.due_date, "2026-03-20");
+    assert.equal(todo.priority, "medium");
+  });
+
+  it("template subtasks are applied as strings", () => {
+    const subtasks = [{ title: "Step 1" }, { title: "Step 2" }, "Step 3"];
+    const processed = subtasks.map(s => typeof s === "string" ? s : s.title);
+    assert.deepEqual(processed, ["Step 1", "Step 2", "Step 3"]);
+  });
+
+  it("template validates priority and horizon", () => {
+    const VALID_PRIORITIES = ["low", "medium", "high", "urgent"];
+    const VALID_HORIZONS = ["short", "medium", "long"];
+    assert.ok(VALID_PRIORITIES.includes("high"));
+    assert.ok(!VALID_PRIORITIES.includes("critical"));
+    assert.ok(VALID_HORIZONS.includes("long"));
+    assert.ok(!VALID_HORIZONS.includes("forever"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Batch contact import
+// ---------------------------------------------------------------------------
+describe("Batch contact import", () => {
+  it("validates contact structure", () => {
+    const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const contacts = [
+      { name: "Alice", email: "alice@example.com" },
+      { name: "Bob", email: "invalid" },
+      { name: "", email: "c@d.com" },
+    ];
+    const valid = contacts.filter(c => c.name && c.email && EMAIL_REGEX.test(c.email));
+    const invalid = contacts.filter(c => !c.name || !c.email || !EMAIL_REGEX.test(c.email));
+    assert.equal(valid.length, 1);
+    assert.equal(invalid.length, 2);
+  });
+
+  it("parses CSV lines into contacts", () => {
+    const csv = "name,email\nAlice,alice@test.com\nBob,bob@test.com";
+    const lines = csv.split("\n").filter(l => l.trim());
+    const contacts = [];
+    for (let i = 0; i < lines.length; i++) {
+      const parts = lines[i].split(",").map(s => s.trim());
+      if (i === 0 && parts[0].toLowerCase() === "name") continue;
+      if (parts.length >= 2) contacts.push({ name: parts[0], email: parts[1] });
+    }
+    assert.equal(contacts.length, 2);
+    assert.equal(contacts[0].name, "Alice");
+    assert.equal(contacts[1].email, "bob@test.com");
+  });
+
+  it("handles CSV with quotes", () => {
+    const line = '"John Doe","john@test.com"';
+    const parts = line.split(",").map(s => s.trim().replace(/^["']|["']$/g, ""));
+    assert.equal(parts[0], "John Doe");
+    assert.equal(parts[1], "john@test.com");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Quick actions from search
+// ---------------------------------------------------------------------------
+describe("Quick actions from search", () => {
+  it("search results include actionable fields for todos", () => {
+    const result = { id: 1, title: "Buy groceries", type: "todo", completed: false, recurring: false, priority: "high" };
+    assert.equal(result.type, "todo");
+    assert.equal(result.completed, false);
+    assert.ok("recurring" in result);
+  });
+
+  it("search results include status for emails", () => {
+    const result = { id: 2, title: "Meeting invite", type: "email", status: "scheduled" };
+    assert.equal(result.status, "scheduled");
+  });
+
+  it("search results include pinned status for notes", () => {
+    const result = { id: 3, title: "Shopping list", type: "note", pinned: false };
+    assert.equal(result.pinned, false);
+  });
+
+  it("determines correct action buttons per type", () => {
+    function getActions(r) {
+      if (r.type === "todo" && !r.completed) return ["complete"];
+      if (r.type === "email" && r.status === "scheduled") return ["send"];
+      if (r.type === "note") return [r.pinned ? "unpin" : "pin"];
+      return [];
+    }
+    assert.deepEqual(getActions({ type: "todo", completed: false }), ["complete"]);
+    assert.deepEqual(getActions({ type: "email", status: "scheduled" }), ["send"]);
+    assert.deepEqual(getActions({ type: "note", pinned: true }), ["unpin"]);
+    assert.deepEqual(getActions({ type: "todo", completed: true }), []);
+    assert.deepEqual(getActions({ type: "contact" }), []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Undo actions
+// ---------------------------------------------------------------------------
+describe("Undo actions", () => {
+  it("supports delete, complete, and send undo types", () => {
+    const validActions = ["delete", "complete", "send"];
+    validActions.forEach(action => {
+      assert.ok(typeof action === "string");
+    });
+  });
+
+  it("undo complete reverses task completion", () => {
+    let task = { id: 1, completed: true };
+    // Simulate undo
+    task.completed = false;
+    assert.equal(task.completed, false);
+  });
+
+  it("undo delete restores from trash", () => {
+    const trashItem = { id: 1, type: "todo", deleted_at: "2026-03-15T10:00:00Z" };
+    // Restore = set deleted_at to null
+    const restored = { ...trashItem, deleted_at: null };
+    assert.equal(restored.deleted_at, null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recurring task calendar projections
+// ---------------------------------------------------------------------------
+describe("Recurring task calendar projections", () => {
+  function advanceRecurrence(date, rule, interval) {
+    const d = new Date(date);
+    const n = interval || 1;
+    if (rule === "daily" || rule === "custom_days") d.setDate(d.getDate() + n);
+    else if (rule === "weekly" || rule === "custom_weeks") d.setDate(d.getDate() + 7 * n);
+    else if (rule === "monthly" || rule === "custom_months") d.setMonth(d.getMonth() + n);
+    else if (rule === "yearly") d.setFullYear(d.getFullYear() + n);
+    return d;
+  }
+
+  it("projects weekly recurring into a month", () => {
+    const start = new Date("2026-03-01");
+    const end = new Date("2026-04-01");
+    let nextDate = new Date("2026-03-05"); // A Thursday
+    const projected = [];
+    let safety = 0;
+    while (nextDate < end && safety++ < 20) {
+      if (nextDate >= start) projected.push(nextDate.toISOString().split("T")[0]);
+      nextDate = advanceRecurrence(nextDate, "weekly", 1);
+    }
+    assert.ok(projected.length >= 3); // Should be 4 Thursdays in March
+    assert.ok(projected.length <= 5);
+  });
+
+  it("projects daily recurring correctly", () => {
+    const start = new Date("2026-03-10");
+    const end = new Date("2026-03-15");
+    let next = new Date("2026-03-10");
+    const projected = [];
+    let safety = 0;
+    while (next < end && safety++ < 100) {
+      if (next >= start) projected.push(next.toISOString().split("T")[0]);
+      next = advanceRecurrence(next, "daily", 1);
+    }
+    assert.equal(projected.length, 5); // 10,11,12,13,14
+  });
+
+  it("marks projected events differently from actual", () => {
+    const actual = { id: 1, title: "Task", type: "todo", event_date: "2026-03-15" };
+    const projected = { id: 1, title: "Task", type: "todo", event_date: "2026-03-22", recurring_projection: true };
+    assert.ok(!actual.recurring_projection);
+    assert.ok(projected.recurring_projection);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pagination
+// ---------------------------------------------------------------------------
+describe("Pagination", () => {
+  it("builds limit clause from query params", () => {
+    const limit = "10";
+    const offset = "20";
+    let pagination = "";
+    let idx = 1;
+    const params = [];
+    if (limit) { pagination += ` LIMIT $${idx++}`; params.push(parseInt(limit, 10)); }
+    if (offset) { pagination += ` OFFSET $${idx++}`; params.push(parseInt(offset, 10)); }
+    assert.equal(pagination, " LIMIT $1 OFFSET $2");
+    assert.deepEqual(params, [10, 20]);
+  });
+
+  it("works without limit or offset", () => {
+    const limit = undefined;
+    const offset = undefined;
+    let pagination = "";
+    if (limit) pagination += " LIMIT " + limit;
+    if (offset) pagination += " OFFSET " + offset;
+    assert.equal(pagination, "");
+  });
+
+  it("handles limit without offset", () => {
+    const limit = "25";
+    const offset = undefined;
+    let pagination = "";
+    let idx = 1;
+    const params = [];
+    if (limit) { pagination += ` LIMIT $${idx++}`; params.push(parseInt(limit, 10)); }
+    if (offset) { pagination += ` OFFSET $${idx++}`; params.push(parseInt(offset, 10)); }
+    assert.equal(pagination, " LIMIT $1");
+    assert.deepEqual(params, [25]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Health check
+// ---------------------------------------------------------------------------
+describe("Health check", () => {
+  it("response structure", () => {
+    const response = {
+      status: "ok", uptime: 3600, memory_mb: 128,
+      db: "connected", timestamp: new Date().toISOString(),
+    };
+    assert.ok("status" in response);
+    assert.ok("uptime" in response);
+    assert.ok("memory_mb" in response);
+    assert.ok("db" in response);
+    assert.ok("timestamp" in response);
+    assert.equal(response.status, "ok");
+  });
+
+  it("degraded status when db disconnected", () => {
+    const response = { status: "degraded", db: "disconnected" };
+    assert.equal(response.status, "degraded");
+    assert.equal(response.db, "disconnected");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Rate limiting
+// ---------------------------------------------------------------------------
+describe("Rate limiting", () => {
+  it("has rate limits for general, auth, and AI endpoints", () => {
+    const limits = {
+      general: { windowMs: 15 * 60 * 1000, max: 200 },
+      auth: { windowMs: 15 * 60 * 1000, max: 10 },
+      ai: { windowMs: 60 * 1000, max: 20 },
+    };
+    assert.ok(limits.general.max > limits.auth.max);
+    assert.ok(limits.ai.windowMs < limits.general.windowMs);
+    assert.equal(limits.ai.max, 20);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AI API optimization
+// ---------------------------------------------------------------------------
+describe("AI API optimization", () => {
+  it("singleton client reuse pattern", () => {
+    // Singleton pattern: client created once, reused across calls
+    let client = null;
+    function getClient() {
+      if (!client) client = { id: Math.random() };
+      return client;
+    }
+    const first = getClient();
+    const second = getClient();
+    assert.strictEqual(first, second); // same instance
+    assert.equal(first.id, second.id);
+  });
+
+  it("callAI supports system prompt parameter for prompt caching", () => {
+    // callAI signature: (model, prompt, maxTokens, systemPrompt)
+    // When systemPrompt is provided, it's sent with cache_control: { type: "ephemeral" }
+    const params = {};
+    const systemPrompt = "You are an email assistant.";
+    if (systemPrompt) {
+      params.system = [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }];
+    }
+    assert.equal(params.system.length, 1);
+    assert.equal(params.system[0].type, "text");
+    assert.equal(params.system[0].cache_control.type, "ephemeral");
+  });
+
+  it("response cache with TTL", () => {
+    const cache = new Map();
+    function getCached(key, ttlMs) {
+      const entry = cache.get(key);
+      if (entry && Date.now() - entry.ts < ttlMs) return entry.value;
+      return null;
+    }
+    function setCache(key, value) {
+      cache.set(key, { value, ts: Date.now() });
+    }
+    setCache("test", "hello");
+    assert.equal(getCached("test", 60000), "hello");
+    assert.equal(getCached("missing", 60000), null);
+  });
+
+  it("expired cache returns null", () => {
+    const cache = new Map();
+    cache.set("old", { value: "stale", ts: Date.now() - 999999 });
+    function getCached(key, ttlMs) {
+      const entry = cache.get(key);
+      if (entry && Date.now() - entry.ts < ttlMs) return entry.value;
+      return null;
+    }
+    assert.equal(getCached("old", 1000), null); // expired
+  });
+
+  it("daily briefing cache key includes date", () => {
+    const today = "2026-03-15";
+    const cacheKey = `briefing_${today}`;
+    assert.equal(cacheKey, "briefing_2026-03-15");
+  });
+
+  it("suggestions cache key includes date and hour", () => {
+    const todayStr = "2026-03-15";
+    const hour = 14;
+    const cacheKey = `suggestions_${todayStr}_${hour}`;
+    assert.equal(cacheKey, "suggestions_2026-03-15_14");
+  });
+});

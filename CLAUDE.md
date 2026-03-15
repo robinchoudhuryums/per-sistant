@@ -8,8 +8,8 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **Server**: `server.js` (Express, port 3001, bound to 0.0.0.0)
 - **Database**: Neon PostgreSQL (schema in `db/`)
 - **Email**: nodemailer (SMTP) with scheduled sending via node-cron
-- **AI**: Anthropic Claude API — 7 AI features with per-feature model selection (Haiku/Sonnet/Off)
-- **Tests**: `tests/` (node:test runner, run with `npm test`, 88 tests)
+- **AI**: Anthropic Claude API — 9 AI features with per-feature model selection (Haiku/Sonnet/Off)
+- **Tests**: `tests/` (node:test runner, run with `npm test`, 176 tests)
 - **Deployment**: `Dockerfile`, `fly.toml` (Fly.io), `render.yaml` (Render)
 
 ## Current State (as of March 2026)
@@ -19,7 +19,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **To-Do Lists**: Short/medium/long-term horizons, 4 priority levels, categories, due dates
 - **Todo Categories**: Preset categories (work, personal, health, finance, errands, home, learning) + custom; filterable on todos page and dashboard
 - **Dashboard Task Views**: All / By Category / By Urgency / Due Soon tabs
-- **Recurring Tasks**: Daily, weekly, monthly, yearly, weekdays recurrence rules with auto-generation
+- **Recurring Tasks**: Daily, weekly, monthly, yearly, weekdays + custom intervals (every N days/weeks/months) with auto-generation, streak/habit tracking, skip, and snooze
 - **Subtasks**: Checklists within tasks with progress tracking
 - **Natural Language Quick Add**: Create todos from natural language with auto-detected priority/horizon/due date (AI-enhanced when enabled)
 - **Email Drafting**: Compose, schedule, send; natural language "Quick Send" parser
@@ -31,11 +31,22 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **AI Note Auto-Tagging**: Suggest tags for notes based on content
 - **AI Model Selection**: Per-feature choice of Haiku (fast/cheap), Sonnet (smarter), or Off — configurable in Settings
 - **Email Templates**: Save and reuse common email formats
-- **Notes**: Color-coded, pinnable, with optional reminders and tags
+- **Notes**: Color-coded, pinnable, with optional reminders, tags, and Markdown support (bold, italic, lists, checkboxes, links, quotes, headings)
+- **Task Dependencies**: Blocking/blocked-by relationships between tasks with circular dependency prevention
+- **Streak Tracking**: Recurring tasks track completion streaks (current + best) with on-time detection
 - **Contacts**: Name→email lookup for quick email addressing
-- **Dashboard**: Overview cards, task views, AI briefing, scheduled emails, Perfin widget, global search
+- **Dashboard**: Customizable widget layout (drag-to-reorder, show/hide widgets), overview cards, task views, AI briefing, smart suggestions, natural language AI query, scheduled emails, Perfin widget, global search
+- **AI Smart Suggestions**: AI-powered productivity coaching based on task priorities, due dates, and streaks
+- **AI Natural Language Query**: Ask questions about your data ("what did I do last week?", "how many tasks are overdue?")
+- **Automations/Rules Engine**: Create trigger→action rules (e.g., "when task created with category=work, set priority=high"), configurable in Settings
+- **File Attachments**: Upload files (up to 10MB) to tasks, emails, and notes via local storage
+- **iCal Export**: Export tasks and scheduled emails as .ics file for Google Calendar, Outlook, etc.
+- **Voice Input**: Web Speech API microphone button on Quick Add and notes (Chrome/Edge)
+- **Location-Based Reminders**: Set location (name + coordinates + radius) on tasks, periodic geofence checking with browser notifications
+- **Mobile-Optimized**: Bottom navigation bar, hamburger menu, swipe between pages, floating action button, horizontal-scroll filters, responsive layouts
+- **Offline Support**: Service worker caches pages and API responses, queues mutations for sync when back online, offline banner indicator
 - **Global Search**: Search across todos, emails, and notes
-- **Calendar View**: Monthly calendar showing tasks, emails, and notes by date
+- **Calendar View**: Monthly calendar with iCal export, showing tasks, emails, and notes by date
 - **Weekly Review**: Stats summary + AI narrative of completed tasks, emails sent, notes created
 - **Keyboard Shortcuts**: Global shortcuts (n=new todo, e=new email, /=search, etc.)
 - **Drag-and-Drop**: Reorder todos by dragging
@@ -48,6 +59,21 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **Bulk Actions**: Multi-select mode on todos, emails, and notes for batch operations
 - **System Theme Auto-Detection**: Auto option follows OS dark/light preference via prefers-color-scheme
 - **Backend Validation**: Server-side enum validation for priority, horizon, recurrence rules, note colors, email format
+- **Cross-Entity Links**: Link todos, emails, and notes to each other; create todos from notes or emails with auto-linking
+- **Notification System**: Centralized notification check for due tasks, overdue items, streaks at risk, and note reminders; browser push notifications on dashboard load
+- **Analytics Dashboard**: Productivity insights with completion trends, day-of-week analysis, priority/category breakdowns, average completion time, streak leaderboard, productivity score, activity heatmap (90 days), emails sent/notes created counts; filterable by week/month/quarter/year
+- **Todo Templates**: Save task structures (with subtasks) as reusable templates; apply from templates list; "Save as Template" from edit modal
+- **Batch Contact Import**: CSV upload for bulk contact import with validation and error reporting
+- **Quick Actions from Search**: Complete tasks, send emails, pin/unpin notes directly from search results
+- **Undo for More Actions**: Undo task completion, email send, and delete (not just delete)
+- **Recurring Task Calendar Projections**: Calendar shows future recurring task instances as dashed entries
+- **Health Check Endpoint**: `/api/health` returns server status, uptime, memory, DB connectivity (no auth required)
+- **API Pagination**: `limit` and `offset` query params on todos, emails, and notes list endpoints
+- **Performance Indexes**: Database indexes on common query patterns (completed, due_date, priority, category, recurring, etc.)
+- **Rate Limiting**: General (200/15min), auth (10/15min), and AI (20/min) rate limiters
+- **Webhooks**: Configure external webhook endpoints to receive event notifications (task created/completed, email sent, streak milestones); test webhooks from Settings
+- **Slack Integration**: Add Slack Incoming Webhook URL in Settings for notifications
+- **AI API Optimization**: Singleton client reuse, prompt caching via system prompts with `cache_control`, response caching for briefing (10min) and suggestions (5min)
 
 ## Key Files
 - `.env` — all secrets (never commit)
@@ -57,7 +83,12 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - `db/002_features.sql` — enhancement migration (recurring, subtasks, templates, reviews)
 - `db/003_ai_features.sql` — AI model preferences & note tags migration
 - `db/004_soft_delete.sql` — soft delete columns for trash/undo
-- `tests/api.test.js` — test suite (88 tests, 27 suites)
+- `db/005_dependencies_streaks_markdown.sql` — task dependencies, streak tracking, note format migration
+- `db/006_dashboard_automations.sql` — dashboard layout, automations, attachments, location reminders
+- `db/007_enhancements.sql` — custom recurrence, entity links, webhooks, notification preferences
+- `db/008_templates_performance.sql` — todo templates table, performance indexes
+- `uploads/` — local file attachment storage
+- `tests/api.test.js` — test suite (176 tests, 52 suites)
 - `Dockerfile` / `docker-compose.yml` — container deployment
 - `fly.toml` — Fly.io config
 - `render.yaml` — Render blueprint
@@ -67,7 +98,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 # Install & run locally
 npm install && node server.js
 
-# Run tests (88 tests)
+# Run tests (176 tests)
 npm test
 
 # Pages
@@ -79,6 +110,7 @@ GET  /contacts             # Contact management page
 GET  /settings             # Settings page
 GET  /calendar             # Calendar view
 GET  /review               # Weekly review page
+GET  /analytics            # Analytics/insights dashboard
 GET  /login                # Authentication
 
 # Core API
@@ -87,8 +119,14 @@ POST   /api/todos           # Create todo
 PATCH  /api/todos/:id       # Update todo
 DELETE /api/todos/:id       # Delete todo
 POST   /api/todos/reorder   # Reorder todos (drag-and-drop)
-POST   /api/todos/:id/complete-recurring  # Complete recurring task & generate next
+POST   /api/todos/:id/complete-recurring  # Complete recurring task & generate next (with streak tracking)
+POST   /api/todos/:id/skip-recurring     # Skip recurring task (preserves streak)
+POST   /api/todos/:id/snooze             # Snooze task (postpone due date)
 GET    /api/todo-categories  # List all categories (defaults + custom)
+GET    /api/todos/:id/dependencies  # Get task dependencies (blocked_by + blocking)
+POST   /api/todos/:id/dependencies  # Add dependency (depends_on_id)
+DELETE /api/dependencies/:id         # Remove dependency
+GET    /api/streaks                  # Get streak stats for recurring tasks
 
 GET    /api/emails          # List emails (query: status)
 POST   /api/emails          # Create email (draft or scheduled)
@@ -96,9 +134,9 @@ PATCH  /api/emails/:id      # Update email
 DELETE /api/emails/:id      # Delete email
 POST   /api/emails/:id/send # Send email now
 
-GET    /api/notes           # List notes (includes tags)
-POST   /api/notes           # Create note (with optional tags array)
-PATCH  /api/notes/:id       # Update note
+GET    /api/notes           # List notes (includes tags, format)
+POST   /api/notes           # Create note (with optional tags array, format: plain/markdown)
+PATCH  /api/notes/:id       # Update note (including format)
 DELETE /api/notes/:id       # Delete note
 
 GET    /api/trash            # List all trashed items
@@ -117,8 +155,43 @@ DELETE /api/contacts/:id    # Delete contact
 GET    /api/contacts/lookup/:name  # Lookup by name
 
 GET    /api/settings        # Get settings
-PATCH  /api/settings        # Update settings
+PATCH  /api/settings        # Update settings (including dashboard_layout)
 GET    /api/stats           # Dashboard statistics
+
+# Automations API
+GET    /api/automations            # List automation rules
+POST   /api/automations            # Create automation rule
+PATCH  /api/automations/:id        # Update automation rule
+DELETE /api/automations/:id        # Delete automation rule
+
+# Attachments API
+GET    /api/attachments/:type/:id       # List attachments for entity
+POST   /api/attachments/:type/:id       # Upload file attachment (multipart)
+GET    /api/attachments/download/:id    # Download attachment
+DELETE /api/attachments/:id             # Delete attachment
+
+# Cross-Entity Links
+GET    /api/links/:type/:id        # Get links for an entity
+POST   /api/links                  # Create a link between entities
+DELETE /api/links/:id              # Remove a link
+POST   /api/notes/:id/create-todo  # Create todo from note (with auto-link)
+POST   /api/emails/:id/create-todo # Create todo from email (with auto-link)
+
+# Webhooks API
+GET    /api/webhooks               # List webhooks
+POST   /api/webhooks               # Create webhook
+PATCH  /api/webhooks/:id           # Update webhook
+DELETE /api/webhooks/:id           # Delete webhook
+POST   /api/webhooks/:id/test      # Test a webhook
+
+# Notifications
+GET    /api/notifications/check    # Check for due tasks, overdue, streaks at risk, reminders
+
+# Analytics
+GET    /api/analytics              # Productivity analytics (query: period=week|month|quarter|year)
+
+# Calendar Export
+GET    /api/calendar.ics           # iCal export of tasks and scheduled emails
 
 # Enhancement API
 GET    /api/subtasks/:todoId       # List subtasks for a todo
@@ -131,7 +204,17 @@ POST   /api/email-templates        # Create template
 PUT    /api/email-templates/:id    # Update template
 DELETE /api/email-templates/:id    # Delete template
 
-GET    /api/search                 # Global search (query: q)
+GET    /api/todo-templates          # List todo templates
+POST   /api/todo-templates          # Create todo template
+PATCH  /api/todo-templates/:id      # Update todo template
+DELETE /api/todo-templates/:id      # Delete todo template
+POST   /api/todo-templates/:id/apply  # Create todo from template
+
+POST   /api/contacts/import         # Batch import contacts (JSON array)
+
+GET    /api/health                  # Health check (no auth, returns uptime/db status)
+
+GET    /api/search                 # Global search (query: q, with quick action fields)
 GET    /api/calendar               # Calendar events (query: month, year)
 GET    /api/review                 # Weekly review stats
 GET    /api/perfin/stats           # Proxy to Perfin API
@@ -144,6 +227,8 @@ POST   /api/ai/review-summary      # Generate weekly review narrative
 POST   /api/ai/adjust-tone         # Rewrite email in different tone
 GET    /api/ai/daily-briefing      # Generate daily task briefing
 POST   /api/ai/suggest-tags        # Suggest tags for note content
+GET    /api/ai/smart-suggestions   # AI productivity coaching suggestions
+POST   /api/ai/query               # Natural language query about your data
 GET    /api/ai/models              # Get per-feature model preferences
 PATCH  /api/ai/models              # Update per-feature model preferences
 
@@ -170,12 +255,12 @@ GET    /sw.js               # Service worker
 ## Database
 - Auto-migration runs on server startup — no manual SQL execution needed
 - `user_settings` table: single-row pattern (CHECK id = 1), includes ai_model_* columns
-- Tables: `todos`, `emails`, `notes`, `contacts`, `user_settings`, `subtasks`, `email_templates`, `weekly_reviews`
+- Tables: `todos`, `emails`, `notes`, `contacts`, `user_settings`, `subtasks`, `email_templates`, `todo_templates`, `weekly_reviews`, `task_dependencies`, `automations`, `attachments`
 
 ## AI Features & Models
-- 7 AI features, each independently configurable: Haiku (fast/cheap), Sonnet (smarter), or Off
+- 9 AI features, each independently configurable: Haiku (fast/cheap), Sonnet (smarter), or Off
 - Models: `claude-haiku-4-5-20251001`, `claude-sonnet-4-6-20250415`
-- Features: email drafting, task breakdown, smart quick add, weekly review summary, email tone adjustment, daily briefing, note auto-tagging
+- Features: email drafting, task breakdown, smart quick add, weekly review summary, email tone adjustment, daily briefing, note auto-tagging, smart suggestions, natural language query
 - Configuration stored in `user_settings` table (ai_model_* columns)
 - Settings page provides per-feature dropdowns
 

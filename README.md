@@ -7,19 +7,21 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 ```
 ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
 │   Browser (PWA)  │────>│  Express Server  │────>│  Claude API      │
-│  Tasks / Emails  │     │  (port 3001)     │     │  (7 AI features) │
+│  Tasks / Emails  │     │  (port 3001)     │     │  (9 AI features) │
 │  Notes / Calendar│     └────────┬─────────┘     └──────────────────┘
-└──────────────────┘              │
-                        ┌────────┴────────┐
-                        │ Neon PostgreSQL  │
-                        │  (todos, emails, │
-                        │   notes, etc.)   │
-                        └────────┬────────┘
-                                 │
-                        ┌────────┴────────┐     ┌──────────────┐
-                        │    node-cron    │────>│  SMTP Server │
-                        │ (email + tasks) │     │  (Gmail etc) │
-                        └─────────────────┘     └──────────────┘
+│  Analytics       │              │
+└──────────────────┘     ┌────────┴────────┐
+                         │ Neon PostgreSQL  │
+                         │  (todos, emails, │
+                         │   notes, etc.)   │
+                         └────────┬────────┘
+                                  │
+                  ┌───────────────┼───────────────┐
+                  │               │               │
+         ┌────────┴────────┐  ┌──┴───────┐  ┌────┴──────┐
+         │    node-cron    │  │  SMTP    │  │ Webhooks  │
+         │ (email + tasks) │  │  Server  │  │ / Slack   │
+         └─────────────────┘  └──────────┘  └───────────┘
 ```
 
 ## Features
@@ -34,8 +36,12 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 - **Natural language Quick Add**: Type "Buy groceries tomorrow urgent" and it auto-detects priority, horizon, and due date (AI-enhanced when enabled)
 
 ### Recurring Tasks
-- **Five recurrence rules**: Daily, weekly, monthly, yearly, weekdays
+- **Eight recurrence rules**: Daily, weekly, monthly, yearly, weekdays, custom_days, custom_weeks, custom_months
+- **Custom intervals**: "Every 3 days", "every 2 weeks", "every 6 months" via configurable interval
 - **Auto-generation**: When a recurring task is completed, the next instance is automatically created
+- **Skip**: Skip a recurring instance without breaking your streak
+- **Snooze**: Push a task's due date to a later date
+- **Streak tracking**: Current and best streaks tracked per recurring task with on-time detection
 - **Daily processor**: Cron job at midnight handles overdue recurring tasks
 
 ### Subtasks
@@ -57,27 +63,36 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 
 ### Notes
 - **Quick notes**: Title + content, color-coded cards
+- **Markdown support**: Bold, italic, lists, checkboxes, links, quotes, headings
 - **Pin important notes**: Pinned notes stay at the top
 - **Colors**: Default, warm, teal, green, blue
 - **Tags**: Add tags manually or use AI auto-tagging to suggest tags based on content
 - **Reminders**: Optional datetime reminders on notes
+- **Create todo from note**: Convert a note into a task with automatic cross-entity linking
 
 ### Contacts
 - **Name→email mapping**: For quick email addressing
 - **Lookup API**: Used by email composer and Quick Send
 - **Environment contacts**: Set `CONTACTS` env var for static contacts
+- **CSV import**: Bulk import contacts from a CSV file (name,email format)
 
 ### Dashboard
 - **Overview cards**: Task counts, email stats, note totals
+- **Customizable layout**: Drag-to-reorder widgets, show/hide individual widgets
 - **Task overview tabs**: All / By Category / By Urgency / Due Soon views
 - **AI Daily Briefing**: AI-generated summary of your day's priorities and schedule
+- **AI Smart Suggestions**: AI-powered productivity coaching based on priorities, due dates, and streaks
+- **AI Natural Language Query**: Ask questions about your data ("what did I do last week?")
+- **Notification center**: Browser notifications for due tasks, overdue items, and streak-at-risk alerts
 - **Upcoming tasks**: Next due items at a glance
 - **Scheduled emails**: Pending sends
 - **Global search**: Search across all todos, emails, and notes
 - **Perfin widget**: Shows subscription data from linked Perfin instance
+- **Inline actions**: Complete tasks and send emails directly from the dashboard
 
 ### Calendar View
 - **Monthly calendar**: Visual overview of all events
+- **Recurring projections**: Future recurring task instances shown as dashed entries
 - **Color-coded**: Tasks, emails, and notes shown with distinct colors
 - **Navigate**: Browse months with previous/next controls
 
@@ -88,7 +103,79 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 - **Overdue items**: Tasks needing attention
 - **Upcoming**: What's coming next week
 
-### AI Features (7 total)
+### Cross-Entity Links
+- **Link anything**: Connect todos, emails, and notes to each other
+- **Create todo from note/email**: One-click conversion with automatic linking
+- **Bidirectional**: Links show on both sides of the relationship
+
+### Analytics & Insights Dashboard
+- **Productivity score**: Weighted composite score (completion rate, streaks, volume, speed)
+- **Completion trends**: Visual bar charts of tasks completed over time
+- **Activity heatmap**: GitHub-style 90-day activity heatmap
+- **Productivity by day**: See which days of the week you're most productive
+- **Priority breakdown**: Distribution of tasks across priority levels
+- **Category breakdown**: How your work splits across categories
+- **Period filters**: View analytics for the past week, month, quarter, or year
+- **Emails sent / notes created**: Tracked per period
+- **CSS-rendered charts**: No external charting library needed
+
+### Webhooks & Integrations
+- **Webhook CRUD**: Create, test, enable/disable webhooks in Settings
+- **Event subscriptions**: Subscribe to todo_created, todo_completed, email_sent, note_created events
+- **Custom headers**: Set auth headers for webhook endpoints
+- **Test webhooks**: Send test payloads from Settings
+- **Slack integration**: Incoming webhook URL for Slack notifications on key events
+
+### Notification System
+- **Browser push notifications**: For due tasks, overdue items, and streak-at-risk alerts
+- **Notification preferences**: Toggle notifications per category in Settings
+- **Real-time checks**: Dashboard polls for pending notifications on load
+
+### Task Dependencies
+- **Blocking/blocked-by**: Define relationships between tasks
+- **Circular dependency prevention**: Server validates dependency chains
+- **Visual indicators**: See blocked/blocking status on task cards
+
+### Automations / Rules Engine
+- **Trigger→action rules**: e.g., "when task created with category=work, set priority=high"
+- **Configurable in Settings**: Create, enable/disable, delete rules
+
+### File Attachments
+- **Upload files**: Up to 10MB per file on tasks, emails, and notes
+- **Download/delete**: Manage attachments per entity
+
+### Offline Support
+- **Service worker**: Caches pages and API responses
+- **Mutation queue**: Queues changes for sync when back online
+- **Offline banner**: Visual indicator when disconnected
+
+### Voice Input
+- **Web Speech API**: Microphone button on Quick Add and notes (Chrome/Edge)
+
+### Todo Templates
+- **Save task structures**: Create reusable templates from existing tasks (with subtasks)
+- **Apply templates**: One-click task creation from saved templates
+- **Template management**: Create, browse, and delete templates from the todos page
+
+### Quick Actions from Search
+- **Complete tasks**: Mark tasks done directly from search results
+- **Send emails**: Send scheduled emails from search results
+- **Pin/unpin notes**: Toggle note pins from search results
+
+### Undo for More Actions
+- **Undo complete**: Revert task completion
+- **Undo send**: Revert sent email to draft status
+- **Undo delete**: Restore deleted items from trash (existing)
+
+### Health Check & Monitoring
+- **`/api/health`**: Returns server status, uptime, memory usage, DB connectivity (no auth required)
+- **Rate limiting**: General (200/15min), auth (10/15min), AI (20/min)
+
+### Location-Based Reminders
+- **Geofencing**: Set location (name + coordinates + radius) on tasks
+- **Periodic checking**: Browser-based geofence monitoring with notifications
+
+### AI Features (9 total)
 All AI features are optional and independently configurable. Choose **Haiku** (fast, ~$0.0003/call), **Sonnet** (smarter, ~$0.002/call), or **Off** for each feature in Settings.
 
 | Feature | Description | Default |
@@ -100,6 +187,8 @@ All AI features are optional and independently configurable. Choose **Haiku** (f
 | Email Tone Adjustment | Rewrite emails (formal/casual/shorter/etc.) | Haiku |
 | Daily Briefing | Dashboard summary of today's priorities | Off |
 | Note Auto-Tagging | Suggest tags for notes based on content | Off |
+| Smart Suggestions | AI productivity coaching based on your tasks | Off |
+| Natural Language Query | Ask questions about your data in plain English | Off |
 
 ### Authentication
 Two login modes — set one in your environment variables:
@@ -131,6 +220,8 @@ Optional push notifications for task reminders. Enable in Settings.
 Installable as a home screen icon:
 - **iPhone**: Open in Safari → Share → "Add to Home Screen"
 - **Android**: Chrome → Menu → "Install app"
+- **Mobile-optimized**: Bottom navigation bar, hamburger menu, swipe between pages, floating action button
+- **Offline support**: Service worker caches pages and API responses, queues mutations for sync
 
 ## Setup
 
@@ -173,7 +264,7 @@ docker compose up --build
 npm test
 ```
 
-73 tests across 22 suites covering: time parsing, input validation, data structures, sorting, security, recurring tasks, subtasks, email templates, natural language parsing, global search, calendar, weekly review, drag-and-drop, keyboard shortcuts, AI model selection, AI task breakdown, AI tone adjustment, todo categories, note tags, and dashboard views.
+176 tests across 52 suites covering: time parsing, input validation, data structures, sorting, security, recurring tasks, custom recurrence intervals, skip/snooze, subtasks, email templates, natural language parsing, global search, calendar, weekly review, drag-and-drop, keyboard shortcuts, AI model selection, AI task breakdown, AI tone adjustment, todo categories, note tags, dashboard views, task dependencies, streaks, bulk actions, trash/undo, automations, attachments, location reminders, cross-entity links, webhooks, Slack integration, notifications, analytics, productivity score, heatmap, todo templates, batch contact import, quick search actions, undo actions, calendar projections, pagination, health check, rate limiting, and AI API optimization.
 
 ## API Endpoints
 
@@ -187,6 +278,7 @@ npm test
 | `GET` | `/settings` | Settings page |
 | `GET` | `/calendar` | Calendar view |
 | `GET` | `/review` | Weekly review page |
+| `GET` | `/analytics` | Analytics & insights dashboard |
 | `GET` | `/login` | Authentication |
 | `GET` | `/api/todos` | List todos (query: horizon, priority, completed, category) |
 | `POST` | `/api/todos` | Create todo |
@@ -194,6 +286,12 @@ npm test
 | `DELETE` | `/api/todos/:id` | Delete todo |
 | `POST` | `/api/todos/reorder` | Reorder todos (drag-and-drop) |
 | `POST` | `/api/todos/:id/complete-recurring` | Complete recurring task & create next |
+| `POST` | `/api/todos/:id/skip-recurring` | Skip recurring instance (preserves streak) |
+| `POST` | `/api/todos/:id/snooze` | Snooze task to a later date |
+| `GET` | `/api/todos/:id/dependencies` | Get task dependencies |
+| `POST` | `/api/todos/:id/dependencies` | Add task dependency |
+| `DELETE` | `/api/dependencies/:id` | Remove dependency |
+| `GET` | `/api/streaks` | Get streak stats for recurring tasks |
 | `GET` | `/api/emails` | List emails (query: status) |
 | `POST` | `/api/emails` | Create email |
 | `PATCH` | `/api/emails/:id` | Update email |
@@ -220,6 +318,39 @@ npm test
 | `PUT` | `/api/email-templates/:id` | Update template |
 | `DELETE` | `/api/email-templates/:id` | Delete template |
 | `GET` | `/api/todo-categories` | List all categories (defaults + custom) |
+| `GET` | `/api/todo-templates` | List todo templates |
+| `POST` | `/api/todo-templates` | Create todo template |
+| `PATCH` | `/api/todo-templates/:id` | Update todo template |
+| `DELETE` | `/api/todo-templates/:id` | Delete todo template |
+| `POST` | `/api/todo-templates/:id/apply` | Create todo from template |
+| `POST` | `/api/contacts/import` | Batch import contacts (JSON array) |
+| `GET` | `/api/health` | Health check (no auth required) |
+| `GET` | `/api/trash` | List all trashed items |
+| `POST` | `/api/trash/:type/:id/restore` | Restore item from trash |
+| `DELETE` | `/api/trash/:type/:id` | Permanently delete trashed item |
+| `POST` | `/api/bulk/todos` | Bulk action on todos |
+| `POST` | `/api/bulk/emails` | Bulk action on emails |
+| `POST` | `/api/bulk/notes` | Bulk action on notes |
+| `GET` | `/api/links/:type/:id` | Get cross-entity links |
+| `POST` | `/api/links` | Create cross-entity link |
+| `DELETE` | `/api/links/:id` | Delete cross-entity link |
+| `POST` | `/api/notes/:id/create-todo` | Create todo from note |
+| `POST` | `/api/emails/:id/create-todo` | Create todo from email |
+| `GET` | `/api/webhooks` | List webhooks |
+| `POST` | `/api/webhooks` | Create webhook |
+| `PATCH` | `/api/webhooks/:id` | Update webhook |
+| `DELETE` | `/api/webhooks/:id` | Delete webhook |
+| `POST` | `/api/webhooks/:id/test` | Test webhook |
+| `GET` | `/api/automations` | List automation rules |
+| `POST` | `/api/automations` | Create automation rule |
+| `PATCH` | `/api/automations/:id` | Update automation rule |
+| `DELETE` | `/api/automations/:id` | Delete automation rule |
+| `GET` | `/api/attachments/:type/:id` | List attachments for entity |
+| `POST` | `/api/attachments/:type/:id` | Upload file attachment |
+| `DELETE` | `/api/attachments/:id` | Delete attachment |
+| `GET` | `/api/notifications/check` | Check pending notifications |
+| `GET` | `/api/analytics` | Analytics data (query: period) |
+| `GET` | `/api/calendar.ics` | iCal export |
 | `POST` | `/api/ai/draft-email` | AI-powered email drafting |
 | `POST` | `/api/ai/task-breakdown` | Generate subtasks from task title |
 | `POST` | `/api/ai/parse-todo` | Parse natural language into structured todo |
@@ -227,6 +358,8 @@ npm test
 | `POST` | `/api/ai/adjust-tone` | Rewrite email in different tone |
 | `GET` | `/api/ai/daily-briefing` | Generate daily task briefing |
 | `POST` | `/api/ai/suggest-tags` | Suggest tags for note content |
+| `GET` | `/api/ai/smart-suggestions` | AI productivity coaching |
+| `POST` | `/api/ai/query` | Natural language data query |
 | `GET` | `/api/ai/models` | Get per-feature model preferences |
 | `PATCH` | `/api/ai/models` | Update per-feature model preferences |
 | `GET` | `/api/search` | Global search (query: q) |

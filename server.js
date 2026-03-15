@@ -30,6 +30,9 @@ const helmet = require("helmet");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 
+let multer;
+try { multer = require("multer"); } catch { multer = null; }
+
 let nodemailer;
 try { nodemailer = require("nodemailer"); } catch { nodemailer = null; }
 
@@ -41,30 +44,57 @@ try {
   Anthropic = require("@anthropic-ai/sdk").default || require("@anthropic-ai/sdk");
 } catch { Anthropic = null; }
 
+// Singleton Anthropic client — reused across all AI calls
+let anthropicClient = null;
+function getAnthropicClient() {
+  if (!anthropicClient && Anthropic && process.env.ANTHROPIC_API_KEY) {
+    anthropicClient = new Anthropic();
+  }
+  return anthropicClient;
+}
+
 // AI model mapping — always use latest versions
 const AI_MODELS = {
   haiku: "claude-haiku-4-5-20251001",
   sonnet: "claude-sonnet-4-6-20250415",
 };
 
+// Simple TTL cache for AI responses (briefing, suggestions)
+const aiCache = new Map();
+function getCached(key, ttlMs) {
+  const entry = aiCache.get(key);
+  if (entry && Date.now() - entry.ts < ttlMs) return entry.value;
+  return null;
+}
+function setCache(key, value) {
+  aiCache.set(key, { value, ts: Date.now() });
+}
+
 // Validation constants
 const VALID_PRIORITIES = ["low", "medium", "high", "urgent"];
 const VALID_HORIZONS = ["short", "medium", "long"];
-const VALID_RECURRENCE_RULES = ["daily", "weekly", "monthly", "yearly", "weekdays"];
+const VALID_RECURRENCE_RULES = ["daily", "weekly", "monthly", "yearly", "weekdays", "custom_days", "custom_weeks", "custom_months"];
 const VALID_NOTE_COLORS = ["default", "warm", "teal", "green", "blue"];
 const VALID_EMAIL_STATUSES = ["draft", "scheduled", "sent", "failed"];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const VALID_AI_FEATURES = ["email_draft", "task_breakdown", "quick_add", "review_summary", "email_tone", "daily_briefing", "note_tagging"];
 
-async function callAI(model, prompt, maxTokens = 1024) {
+async function callAI(model, prompt, maxTokens = 1024, systemPrompt = null) {
   if (!Anthropic || !process.env.ANTHROPIC_API_KEY) throw new Error("AI not configured");
   if (!AI_MODELS[model]) throw new Error("Invalid model: " + model);
-  const client = new Anthropic();
-  const msg = await client.messages.create({
+  const client = getAnthropicClient();
+  if (!client) throw new Error("AI not configured");
+  const params = {
     model: AI_MODELS[model],
     max_tokens: maxTokens,
     messages: [{ role: "user", content: prompt }],
-  });
+  };
+  // Use system prompt with prompt caching when provided — the system prompt
+  // is stable across calls so Anthropic can cache the prefix, reducing latency and cost
+  if (systemPrompt) {
+    params.system = [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }];
+  }
+  const msg = await client.messages.create(params);
   return msg.content[0].text.trim();
 }
 
@@ -133,9 +163,20 @@ app.use(session({
   },
 }));
 
+// Health check — no auth required
+app.get("/api/health", (req, res) => {
+  const uptime = process.uptime();
+  const mem = process.memoryUsage();
+  pool.query("SELECT 1").then(() => {
+    res.json({ status: "ok", uptime: Math.floor(uptime), memory_mb: Math.round(mem.rss / 1048576), db: "connected", timestamp: new Date().toISOString() });
+  }).catch(() => {
+    res.status(503).json({ status: "degraded", uptime: Math.floor(uptime), memory_mb: Math.round(mem.rss / 1048576), db: "disconnected", timestamp: new Date().toISOString() });
+  });
+});
+
 function requireAuth(req, res, next) {
   if (!AUTH_SECRET) return next();
-  if (["/login", "/api/login", "/manifest.json", "/sw.js"].includes(req.path)) return next();
+  if (["/login", "/api/login", "/manifest.json", "/sw.js", "/api/health"].includes(req.path)) return next();
   if (req.session && req.session.authenticated) {
     const timeout = (req.session.timeoutMinutes || 15) * 60 * 1000;
     if (Date.now() - req.session.lastActivity < timeout) {
@@ -180,6 +221,13 @@ const authLimiter = rateLimit({
   message: { error: "Too many login attempts, please try again later." },
 });
 app.use("/api/login", authLimiter);
+
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  message: { error: "Too many AI requests, please slow down." },
+});
+app.use("/api/ai/", aiLimiter);
 
 // ---------------------------------------------------------------------------
 // Shared CSS — companion to Perfin (indigo/lavender palette vs Perfin's warm/amber)
@@ -375,6 +423,9 @@ const SHARED_CSS = `
     .note-card .note-preview { font-size: 12px; color: var(--text-muted); font-weight: 300;
                                line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 4;
                                -webkit-box-orient: vertical; overflow: hidden; }
+    .note-card .note-preview.md { display: block; max-height: 80px; }
+    .note-card .note-preview.md h2, .note-card .note-preview.md h3, .note-card .note-preview.md h4 { margin: 2px 0; }
+    .md-badge { display: inline-block; font-size: 9px; padding: 1px 6px; border-radius: 8px; background: var(--surface-2); color: var(--teal); border: 1px solid var(--teal); margin-left: 6px; vertical-align: middle; }
     .note-card .note-date { font-size: 10px; color: var(--text-muted); margin-top: 12px;
                             text-transform: uppercase; letter-spacing: 0.5px; }
 
@@ -423,6 +474,7 @@ const SHARED_CSS = `
     .cal-event { font-size: 9px; padding: 2px 4px; border-radius: 3px; margin-bottom: 2px;
                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .cal-event.todo { background: var(--blue-bg); color: var(--blue); }
+    .cal-event.todo.recurring-proj { background: rgba(160,140,212,0.12); color: var(--warm); border: 1px dashed var(--warm); }
     .cal-event.email { background: var(--yellow-bg); color: var(--yellow); }
     .cal-event.note { background: var(--green-bg); color: var(--green); }
 
@@ -453,10 +505,16 @@ const SHARED_CSS = `
 
     /* Recurring badge */
     .badge.recurring { background: rgba(212,165,116,0.1); color: var(--warm); }
+    .badge.streak { background: rgba(76,175,80,0.1); color: var(--green); }
+    .badge.blocked { background: rgba(239,83,80,0.1); color: var(--red); }
+    .badge.blocking { background: rgba(255,193,7,0.1); color: var(--yellow); }
+    .todo-blocked { opacity: 0.65; }
 
     @media (max-width: 768px) {
       .topnav { flex-direction: column; gap: 12px; align-items: flex-start; }
-      .topnav .nav-links { gap: 16px; flex-wrap: wrap; }
+      .topnav .nav-links { display: none; gap: 16px; flex-wrap: wrap; }
+      .topnav .nav-links.mobile-open { display: flex; }
+      .topnav .mobile-toggle { display: block; }
       h1 { font-size: 28px; }
       .top-cards { grid-template-columns: repeat(2, 1fr); }
       .notes-grid { grid-template-columns: 1fr; }
@@ -468,6 +526,10 @@ const SHARED_CSS = `
       .filters button { padding: 8px 16px; font-size: 12px; }
       .subtask-list { padding-left: 16px; }
       .drag-handle { display: none; }
+      .dash-two-col { grid-template-columns: 1fr !important; }
+      .mobile-fab { display: flex !important; }
+      .bottom-nav { display: flex !important; }
+      body { padding-bottom: 70px; }
     }
     @media (max-width: 480px) {
       .topnav .nav-links { gap: 12px; font-size: 12px; }
@@ -478,16 +540,48 @@ const SHARED_CSS = `
       .section { padding: 16px; }
       .todo-meta { gap: 8px; }
       .badge { font-size: 9px; padding: 2px 6px; }
-      .filters { gap: 6px; }
-      .filters button { padding: 6px 12px; font-size: 11px; }
+      .filters { gap: 6px; overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 4px; }
+      .filters::-webkit-scrollbar { display: none; }
+      .filters button { padding: 6px 12px; font-size: 11px; white-space: nowrap; }
       .cal-grid { font-size: 10px; }
       .cal-day { min-height: 40px; padding: 3px; }
+      .actions { gap: 6px; }
+      .actions button, .actions .btn { padding: 8px 14px; font-size: 11px; }
     }
     @media (max-width: 360px) {
       .container { padding: 12px 8px; }
       h1 { font-size: 20px; }
       .topnav .nav-links { gap: 10px; font-size: 11px; }
       .modal { padding: 12px; }
+    }
+
+    /* Mobile bottom navigation */
+    .bottom-nav { display: none; position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg);
+                  border-top: 1px solid var(--border); z-index: 99; justify-content: space-around;
+                  padding: 8px 0 env(safe-area-inset-bottom, 8px); backdrop-filter: blur(20px); }
+    .bottom-nav a { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 12px;
+                    font-size: 9px; color: var(--text-muted); text-decoration: none; letter-spacing: 0.5px;
+                    text-transform: uppercase; font-weight: 500; transition: color 0.2s;
+                    -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    .bottom-nav a .nav-icon { font-size: 18px; }
+    .bottom-nav a.active { color: var(--warm); }
+    .bottom-nav a:hover { color: var(--text); }
+
+    /* Mobile FAB (floating action button) */
+    .mobile-fab { display: none !important; position: fixed; bottom: 80px; right: 20px; width: 52px; height: 52px;
+                  border-radius: 50%; background: var(--warm); color: #fff; border: none; font-size: 26px;
+                  cursor: pointer; z-index: 98; box-shadow: 0 4px 16px rgba(0,0,0,0.3); align-items: center;
+                  justify-content: center; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    .mobile-fab:active { transform: scale(0.92); }
+
+    /* Mobile hamburger */
+    .topnav .mobile-toggle { display: none; background: none; border: none; color: var(--text); font-size: 22px;
+                              cursor: pointer; padding: 8px; -webkit-tap-highlight-color: transparent; }
+
+    /* Swipe gesture hint */
+    .swipe-hint { display: none; }
+    @media (max-width: 768px) {
+      .swipe-hint { display: block; font-size: 10px; color: var(--text-muted); text-align: center; padding: 4px; }
     }
 `;
 
@@ -496,20 +590,108 @@ const SHARED_CSS = `
 // ---------------------------------------------------------------------------
 const SHARED_JS = `
 function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+function renderMd(s){
+  if(!s)return'';
+  return s
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/^### (.+)$/gm,'<h4 style="margin:8px 0 4px;font-size:13px;font-weight:600;">$1</h4>')
+    .replace(/^## (.+)$/gm,'<h3 style="margin:8px 0 4px;font-size:14px;font-weight:600;">$1</h3>')
+    .replace(/^# (.+)$/gm,'<h2 style="margin:8px 0 4px;font-size:15px;font-weight:600;">$1</h2>')
+    .replace(/\\*\\*\\*(.+?)\\*\\*\\*/g,'<strong><em>$1</em></strong>')
+    .replace(/\\*\\*(.+?)\\*\\*/g,'<strong>$1</strong>')
+    .replace(/\\*(.+?)\\*/g,'<em>$1</em>')
+    .replace(/~~(.+?)~~/g,'<del>$1</del>')
+    .replace(/\`([^\`]+)\`/g,'<code style="background:var(--surface-2);padding:1px 5px;border-radius:3px;font-size:11px;">$1</code>')
+    .replace(/^- \\[x\\] (.+)$/gm,'<div style="margin:2px 0;"><span style="color:var(--green);margin-right:4px;">&#9745;</span><s style="opacity:0.5;">$1</s></div>')
+    .replace(/^- \\[ \\] (.+)$/gm,'<div style="margin:2px 0;"><span style="color:var(--text-muted);margin-right:4px;">&#9744;</span>$1</div>')
+    .replace(/^[*-] (.+)$/gm,'<div style="margin:2px 0;padding-left:12px;">&bull; $1</div>')
+    .replace(/^\\d+\\. (.+)$/gm,'<div style="margin:2px 0;padding-left:12px;">$1</div>')
+    .replace(/^> (.+)$/gm,'<blockquote style="border-left:2px solid var(--warm);padding-left:10px;margin:4px 0;color:var(--text-muted);font-style:italic;">$1</blockquote>')
+    .replace(/^---$/gm,'<hr style="border:none;border-top:1px solid var(--border);margin:8px 0;">')
+    .replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g,'<a href="$2" target="_blank" style="color:var(--teal);text-decoration:underline;">$1</a>')
+    .replace(/\\n/g,'<br>');
+}
+// Offline detection and sync
+window.addEventListener('online', function() {
+  document.body.classList.remove('offline');
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage('sync');
+  }
+  var offBanner = document.getElementById('offline-banner');
+  if (offBanner) offBanner.style.display = 'none';
+});
+window.addEventListener('offline', function() {
+  document.body.classList.add('offline');
+  var offBanner = document.getElementById('offline-banner');
+  if (!offBanner) {
+    offBanner = document.createElement('div');
+    offBanner.id = 'offline-banner';
+    offBanner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:var(--yellow);color:#000;text-align:center;padding:6px;font-size:12px;font-weight:500;z-index:9999;';
+    offBanner.textContent = 'You are offline. Changes will sync when reconnected.';
+    document.body.appendChild(offBanner);
+  }
+  offBanner.style.display = 'block';
+});
+if (navigator.serviceWorker) {
+  navigator.serviceWorker.addEventListener('message', function(e) {
+    if (e.data === 'synced' && typeof load === 'function') load();
+  });
+}
+var _touchStartX=0,_touchStartY=0;
+document.addEventListener('touchstart',function(e){_touchStartX=e.changedTouches[0].screenX;_touchStartY=e.changedTouches[0].screenY;},{passive:true});
+document.addEventListener('touchend',function(e){
+  var dx=e.changedTouches[0].screenX-_touchStartX,dy=e.changedTouches[0].screenY-_touchStartY;
+  if(Math.abs(dx)>100&&Math.abs(dx)>Math.abs(dy)*1.5){
+    var pages=['/','/todos','/emails','/notes','/calendar','/contacts','/review','/analytics','/settings'];
+    var cur=pages.indexOf(location.pathname);if(cur<0)return;
+    if(dx<0&&cur<pages.length-1)location.href=pages[cur+1];
+    else if(dx>0&&cur>0)location.href=pages[cur-1];
+  }
+},{passive:true});
+// Voice input (Web Speech API)
+function startVoiceInput(targetId, onDone) {
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { alert('Voice input not supported in this browser. Try Chrome or Edge.'); return; }
+  var recognition = new SR();
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  recognition.onresult = function(e) {
+    var text = e.results[0][0].transcript;
+    var target = document.getElementById(targetId);
+    if (target) {
+      if (target.tagName === 'TEXTAREA') target.value += (target.value ? ' ' : '') + text;
+      else target.value = text;
+    }
+    if (onDone) onDone(text);
+  };
+  recognition.onerror = function(e) { if (e.error !== 'no-speech') console.error('Voice error:', e.error); };
+  recognition.start();
+}
 var _undoTimer=null;
-function showUndo(msg,type,id){
+function showUndo(msg,type,id,action){
   clearTimeout(_undoTimer);
   var el=document.getElementById('undo-toast');
   if(!el){el=document.createElement('div');el.id='undo-toast';el.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface-2);border:1px solid var(--border);padding:12px 20px;border-radius:12px;display:flex;align-items:center;gap:12px;z-index:9999;backdrop-filter:blur(20px);font-size:14px;color:var(--text);box-shadow:0 8px 32px rgba(0,0,0,0.3);';document.body.appendChild(el);}
-  el.innerHTML=esc(msg)+' <button onclick="undoDelete(\\''+type+'\\','+id+')" style="background:var(--warm);color:#fff;border:none;padding:4px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;">Undo</button>';
+  var undoAction = action || 'delete';
+  el.innerHTML=esc(msg)+' <button onclick="undoAction(\\''+type+'\\','+id+',\\''+undoAction+'\\');event.stopPropagation();" style="background:var(--warm);color:#fff;border:none;padding:4px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;">Undo</button>';
   el.style.display='flex';
   _undoTimer=setTimeout(function(){el.style.display='none';},6000);
 }
-async function undoDelete(type,id){
-  await fetch('/api/trash/'+type+'/'+id+'/restore',{method:'POST'});
+async function undoAction(type,id,action){
+  if(action==='delete'){
+    await fetch('/api/trash/'+type+'/'+id+'/restore',{method:'POST'});
+  } else if(action==='complete'){
+    await fetch('/api/todos/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({completed:false})});
+  } else if(action==='send'){
+    // Can't unsend, but mark as draft
+    await fetch('/api/emails/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'draft'})});
+  }
   var el=document.getElementById('undo-toast');if(el)el.style.display='none';
   if(typeof load==='function')load();
 }
+// Backward compat
+function undoDelete(type,id){undoAction(type,id,'delete');}
 `;
 
 // ---------------------------------------------------------------------------
@@ -535,22 +717,30 @@ function pageHead(title) {
 
 function navBar(activePage) {
   const links = [
-    { href: "/", label: "Dashboard" },
-    { href: "/todos", label: "To-Dos" },
-    { href: "/emails", label: "Emails" },
-    { href: "/notes", label: "Notes" },
-    { href: "/calendar", label: "Calendar" },
-    { href: "/contacts", label: "Contacts" },
-    { href: "/review", label: "Review" },
-    { href: "/settings", label: "Settings" },
+    { href: "/", label: "Dashboard", icon: "&#9632;" },
+    { href: "/todos", label: "To-Dos", icon: "&#9745;" },
+    { href: "/emails", label: "Emails", icon: "&#9993;" },
+    { href: "/notes", label: "Notes", icon: "&#9998;" },
+    { href: "/calendar", label: "Calendar", icon: "&#128197;" },
+    { href: "/contacts", label: "Contacts", icon: "&#128100;" },
+    { href: "/review", label: "Review", icon: "&#128202;" },
+    { href: "/analytics", label: "Analytics", icon: "&#128200;" },
+    { href: "/settings", label: "Settings", icon: "&#9881;" },
   ];
+  const bottomLinks = links.slice(0, 5); // Dashboard, Todos, Emails, Notes, Calendar
   const perfinLink = PERFIN_URL ? `<a href="${PERFIN_URL}" target="_blank">Perfin</a>` : "";
   return `<nav class="topnav">
-    <div class="logo">Per-sistant</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
+      <div class="logo">Per-sistant</div>
+      <button class="mobile-toggle" onclick="document.querySelector('.nav-links').classList.toggle('mobile-open')" aria-label="Toggle menu">&#9776;</button>
+    </div>
     <div class="nav-links">
       ${links.map(l => `<a href="${l.href}" class="${activePage === l.href ? 'active' : ''}">${l.label}</a>`).join("\n      ")}
       ${perfinLink}
     </div>
+  </nav>
+  <nav class="bottom-nav">
+    ${bottomLinks.map(l => `<a href="${l.href}" class="${activePage === l.href ? 'active' : ''}"><span class="nav-icon">${l.icon}</span>${l.label}</a>`).join("\n    ")}
   </nav>`;
 }
 
@@ -650,7 +840,7 @@ app.post("/api/logout", (req, res) => {
 // ============================================================================
 app.get("/api/todos", async (req, res) => {
   try {
-    const { horizon, priority, completed, category, limit } = req.query;
+    const { horizon, priority, completed, category, limit, offset } = req.query;
     let where = ["deleted_at IS NULL"];
     let params = [];
     let idx = 1;
@@ -659,9 +849,10 @@ app.get("/api/todos", async (req, res) => {
     if (completed !== undefined) { where.push(`completed = $${idx++}`); params.push(completed === "true"); }
     if (category) { where.push(`category = $${idx++}`); params.push(category); }
     const clause = "WHERE " + where.join(" AND ");
-    const limitClause = limit ? ` LIMIT $${idx++}` : "";
-    if (limit) params.push(parseInt(limit, 10));
-    const r = await pool.query(`SELECT * FROM todos ${clause} ORDER BY completed ASC, sort_order ASC, CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at DESC${limitClause}`, params);
+    let pagination = "";
+    if (limit) { pagination += ` LIMIT $${idx++}`; params.push(parseInt(limit, 10)); }
+    if (offset) { pagination += ` OFFSET $${idx++}`; params.push(parseInt(offset, 10)); }
+    const r = await pool.query(`SELECT * FROM todos ${clause} ORDER BY completed ASC, sort_order ASC, CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at DESC${pagination}`, params);
     res.json(r.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -670,15 +861,17 @@ app.get("/api/todos", async (req, res) => {
 
 app.post("/api/todos", async (req, res) => {
   try {
-    const { title, description, priority, horizon, category, due_date, recurring, recurrence_rule } = req.body;
+    const { title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_interval } = req.body;
     if (!title) return res.status(400).json({ error: "Title is required." });
     if (priority && !VALID_PRIORITIES.includes(priority)) return res.status(400).json({ error: "Invalid priority. Must be: " + VALID_PRIORITIES.join(", ") });
     if (horizon && !VALID_HORIZONS.includes(horizon)) return res.status(400).json({ error: "Invalid horizon. Must be: " + VALID_HORIZONS.join(", ") });
     if (recurrence_rule && !VALID_RECURRENCE_RULES.includes(recurrence_rule)) return res.status(400).json({ error: "Invalid recurrence rule. Must be: " + VALID_RECURRENCE_RULES.join(", ") });
     const r = await pool.query(
-      `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [title, description || null, priority || "medium", horizon || "short", category || null, due_date || null, recurring || false, recurrence_rule || null]
+      `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_interval) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [title, description || null, priority || "medium", horizon || "short", category || null, due_date || null, recurring || false, recurrence_rule || null, recurrence_interval || 1]
     );
+    runAutomations('todo_created', r.rows[0], 'todo').catch(() => {});
+    fireWebhooks('todo_created', r.rows[0]).catch(() => {});
     res.json(r.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -703,6 +896,12 @@ app.patch("/api/todos/:id", async (req, res) => {
     if (sort_order !== undefined) { fields.push(`sort_order = $${idx++}`); params.push(sort_order); }
     if (recurring !== undefined) { fields.push(`recurring = $${idx++}`); params.push(recurring); }
     if (recurrence_rule !== undefined) { fields.push(`recurrence_rule = $${idx++}`); params.push(recurrence_rule); }
+    if (req.body.recurrence_interval !== undefined) { fields.push(`recurrence_interval = $${idx++}`); params.push(req.body.recurrence_interval); }
+    if (req.body.snoozed_until !== undefined) { fields.push(`snoozed_until = $${idx++}`); params.push(req.body.snoozed_until); }
+    if (req.body.location_name !== undefined) { fields.push(`location_name = $${idx++}`); params.push(req.body.location_name); }
+    if (req.body.location_lat !== undefined) { fields.push(`location_lat = $${idx++}`); params.push(req.body.location_lat); }
+    if (req.body.location_lng !== undefined) { fields.push(`location_lng = $${idx++}`); params.push(req.body.location_lng); }
+    if (req.body.location_radius !== undefined) { fields.push(`location_radius = $${idx++}`); params.push(req.body.location_radius); }
     if (completed !== undefined) {
       fields.push(`completed = $${idx++}`); params.push(completed);
       fields.push(`completed_at = $${idx++}`); params.push(completed ? new Date().toISOString() : null);
@@ -711,6 +910,10 @@ app.patch("/api/todos/:id", async (req, res) => {
     params.push(req.params.id);
     const r = await pool.query(`UPDATE todos SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, params);
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    if (completed) {
+      runAutomations('todo_completed', r.rows[0], 'todo').catch(() => {});
+      fireWebhooks('todo_completed', r.rows[0]).catch(() => {});
+    }
     res.json(r.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -732,10 +935,15 @@ app.delete("/api/todos/:id", async (req, res) => {
 // ============================================================================
 app.get("/api/emails", async (req, res) => {
   try {
-    const { status } = req.query;
-    const where = status ? "WHERE deleted_at IS NULL AND status = $1" : "WHERE deleted_at IS NULL";
-    const params = status ? [status] : [];
-    const r = await pool.query(`SELECT * FROM emails ${where} ORDER BY CASE status WHEN 'scheduled' THEN 0 WHEN 'draft' THEN 1 WHEN 'sent' THEN 2 ELSE 3 END, created_at DESC`, params);
+    const { status, limit, offset } = req.query;
+    let where = ["deleted_at IS NULL"];
+    let params = [];
+    let idx = 1;
+    if (status) { where.push(`status = $${idx++}`); params.push(status); }
+    let pagination = "";
+    if (limit) { pagination += ` LIMIT $${idx++}`; params.push(parseInt(limit, 10)); }
+    if (offset) { pagination += ` OFFSET $${idx++}`; params.push(parseInt(offset, 10)); }
+    const r = await pool.query(`SELECT * FROM emails WHERE ${where.join(" AND ")} ORDER BY CASE status WHEN 'scheduled' THEN 0 WHEN 'draft' THEN 1 WHEN 'sent' THEN 2 ELSE 3 END, created_at DESC${pagination}`, params);
     res.json(r.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -830,7 +1038,13 @@ app.post("/api/emails/:id/send", async (req, res) => {
 // ============================================================================
 app.get("/api/notes", async (req, res) => {
   try {
-    const r = await pool.query("SELECT * FROM notes WHERE deleted_at IS NULL ORDER BY pinned DESC, updated_at DESC");
+    const { limit, offset } = req.query;
+    let params = [];
+    let idx = 1;
+    let pagination = "";
+    if (limit) { pagination += ` LIMIT $${idx++}`; params.push(parseInt(limit, 10)); }
+    if (offset) { pagination += ` OFFSET $${idx++}`; params.push(parseInt(offset, 10)); }
+    const r = await pool.query(`SELECT * FROM notes WHERE deleted_at IS NULL ORDER BY pinned DESC, updated_at DESC${pagination}`, params);
     res.json(r.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -839,13 +1053,14 @@ app.get("/api/notes", async (req, res) => {
 
 app.post("/api/notes", async (req, res) => {
   try {
-    const { title, content, pinned, color, reminder_at, tags } = req.body;
+    const { title, content, pinned, color, reminder_at, tags, format } = req.body;
     if (!content) return res.status(400).json({ error: "Content is required." });
     if (color && !VALID_NOTE_COLORS.includes(color)) return res.status(400).json({ error: "Invalid color. Must be: " + VALID_NOTE_COLORS.join(", ") });
     if (tags && !Array.isArray(tags)) return res.status(400).json({ error: "Tags must be an array." });
+    if (format && !["plain", "markdown"].includes(format)) return res.status(400).json({ error: "Invalid format. Must be: plain, markdown" });
     const r = await pool.query(
-      `INSERT INTO notes (title, content, pinned, color, reminder_at, tags) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [title || null, content, pinned || false, color || "default", reminder_at || null, tags || null]
+      `INSERT INTO notes (title, content, pinned, color, reminder_at, tags, format) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [title || null, content, pinned || false, color || "default", reminder_at || null, tags || null, format || "plain"]
     );
     res.json(r.rows[0]);
   } catch (err) {
@@ -855,9 +1070,10 @@ app.post("/api/notes", async (req, res) => {
 
 app.patch("/api/notes/:id", async (req, res) => {
   try {
-    const { title, content, pinned, color, reminder_at, tags } = req.body;
+    const { title, content, pinned, color, reminder_at, tags, format } = req.body;
     if (color !== undefined && !VALID_NOTE_COLORS.includes(color)) return res.status(400).json({ error: "Invalid color. Must be: " + VALID_NOTE_COLORS.join(", ") });
     if (tags !== undefined && tags !== null && !Array.isArray(tags)) return res.status(400).json({ error: "Tags must be an array." });
+    if (format !== undefined && !["plain", "markdown"].includes(format)) return res.status(400).json({ error: "Invalid format. Must be: plain, markdown" });
     const fields = [];
     const params = [];
     let idx = 1;
@@ -867,6 +1083,7 @@ app.patch("/api/notes/:id", async (req, res) => {
     if (color !== undefined) { fields.push(`color = $${idx++}`); params.push(color); }
     if (reminder_at !== undefined) { fields.push(`reminder_at = $${idx++}`); params.push(reminder_at); }
     if (tags !== undefined) { fields.push(`tags = $${idx++}`); params.push(tags); }
+    if (format !== undefined) { fields.push(`format = $${idx++}`); params.push(format); }
     if (!fields.length) return res.status(400).json({ error: "No fields to update." });
     params.push(req.params.id);
     const r = await pool.query(`UPDATE notes SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, params);
@@ -1026,7 +1243,7 @@ app.get("/api/settings", async (req, res) => {
 
 app.patch("/api/settings", async (req, res) => {
   try {
-    const { theme, session_timeout_minutes, default_horizon, perfin_url } = req.body;
+    const { theme, session_timeout_minutes, default_horizon, perfin_url, dashboard_layout, slack_webhook_url } = req.body;
     const fields = [];
     const params = [];
     let idx = 1;
@@ -1034,6 +1251,8 @@ app.patch("/api/settings", async (req, res) => {
     if (session_timeout_minutes !== undefined) { fields.push(`session_timeout_minutes = $${idx++}`); params.push(session_timeout_minutes); }
     if (default_horizon !== undefined) { fields.push(`default_horizon = $${idx++}`); params.push(default_horizon); }
     if (perfin_url !== undefined) { fields.push(`perfin_url = $${idx++}`); params.push(perfin_url || null); }
+    if (dashboard_layout !== undefined) { fields.push(`dashboard_layout = $${idx++}`); params.push(JSON.stringify(dashboard_layout)); }
+    if (slack_webhook_url !== undefined) { fields.push(`slack_webhook_url = $${idx++}`); params.push(slack_webhook_url || null); }
     if (!fields.length) return res.status(400).json({ error: "No fields to update." });
     const r = await pool.query(`UPDATE user_settings SET ${fields.join(", ")} WHERE id = 1 RETURNING *`, params);
     if (theme && req.session) req.session.theme = theme;
@@ -1118,25 +1337,574 @@ app.post("/api/todos/:id/complete-recurring", async (req, res) => {
     if (!todo.recurring || !todo.recurrence_rule) {
       return res.status(400).json({ error: "Not a recurring task." });
     }
-    // Mark current as completed
-    await pool.query("UPDATE todos SET completed = true, completed_at = now() WHERE id = $1", [todo.id]);
-    // Calculate next due date
+    // Calculate streak: check if completed on time (before or on due date)
+    const today = new Date().toISOString().split("T")[0];
+    const isOnTime = !todo.due_date || today <= todo.due_date.toISOString().split("T")[0];
+    let newStreak = isOnTime ? (todo.streak_count || 0) + 1 : 1;
+    let newBest = Math.max(newStreak, todo.best_streak || 0);
+    // Mark current as completed with streak info
+    await pool.query("UPDATE todos SET completed = true, completed_at = now(), streak_count = $2, best_streak = $3, last_streak_date = $4 WHERE id = $1",
+      [todo.id, newStreak, newBest, today]);
+    // Calculate next due date using interval
     const rule = todo.recurrence_rule;
+    const interval = todo.recurrence_interval || 1;
     let nextDue = todo.due_date ? new Date(todo.due_date) : new Date();
-    if (rule === "daily") nextDue.setDate(nextDue.getDate() + 1);
-    else if (rule === "weekdays") {
-      do { nextDue.setDate(nextDue.getDate() + 1); } while (nextDue.getDay() === 0 || nextDue.getDay() === 6);
-    } else if (rule === "weekly") nextDue.setDate(nextDue.getDate() + 7);
-    else if (rule === "monthly") nextDue.setMonth(nextDue.getMonth() + 1);
-    else if (rule === "yearly") nextDue.setFullYear(nextDue.getFullYear() + 1);
-    // Create next instance
+    nextDue = advanceRecurrence(nextDue, rule, interval);
+    // Create next instance with streak carried forward
     const n = await pool.query(
-      `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_parent_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_interval, recurrence_parent_id, streak_count, best_streak, last_streak_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [todo.title, todo.description, todo.priority, todo.horizon, todo.category,
-       nextDue.toISOString().split("T")[0], true, rule, todo.recurrence_parent_id || todo.id]
+       nextDue.toISOString().split("T")[0], true, rule, interval, todo.recurrence_parent_id || todo.id,
+       newStreak, newBest, today]
     );
-    res.json({ completed: todo, next: n.rows[0] });
+    fireWebhooks('todo_completed', todo).catch(() => {});
+    res.json({ completed: todo, next: n.rows[0], streak: newStreak, best_streak: newBest });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Skip recurring task (mark skipped, create next without breaking streak)
+app.post("/api/todos/:id/skip-recurring", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM todos WHERE id = $1", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    const todo = r.rows[0];
+    if (!todo.recurring || !todo.recurrence_rule) return res.status(400).json({ error: "Not a recurring task." });
+    // Mark as completed but increment skip counter (streak preserved but not incremented)
+    await pool.query("UPDATE todos SET completed = true, completed_at = now(), skipped_count = COALESCE(skipped_count,0) + 1 WHERE id = $1", [todo.id]);
+    const rule = todo.recurrence_rule;
+    const interval = todo.recurrence_interval || 1;
+    let nextDue = todo.due_date ? new Date(todo.due_date) : new Date();
+    nextDue = advanceRecurrence(nextDue, rule, interval);
+    const n = await pool.query(
+      `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_interval, recurrence_parent_id, streak_count, best_streak, last_streak_date, skipped_count)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+      [todo.title, todo.description, todo.priority, todo.horizon, todo.category,
+       nextDue.toISOString().split("T")[0], true, rule, interval, todo.recurrence_parent_id || todo.id,
+       todo.streak_count || 0, todo.best_streak || 0, todo.last_streak_date, (todo.skipped_count || 0) + 1]
+    );
+    res.json({ skipped: todo, next: n.rows[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Snooze recurring task (postpone due date)
+app.post("/api/todos/:id/snooze", async (req, res) => {
+  try {
+    const { until } = req.body;
+    if (!until) return res.status(400).json({ error: "Snooze date (until) is required." });
+    const r = await pool.query("UPDATE todos SET snoozed_until = $1, due_date = $1 WHERE id = $2 AND deleted_at IS NULL RETURNING *", [until, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Helper: advance a date by recurrence rule and interval
+function advanceRecurrence(date, rule, interval) {
+  const d = new Date(date);
+  const n = interval || 1;
+  if (rule === "daily" || rule === "custom_days") d.setDate(d.getDate() + n);
+  else if (rule === "weekdays") {
+    let count = 0;
+    while (count < n) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) count++; }
+  }
+  else if (rule === "weekly" || rule === "custom_weeks") d.setDate(d.getDate() + 7 * n);
+  else if (rule === "monthly" || rule === "custom_months") d.setMonth(d.getMonth() + n);
+  else if (rule === "yearly") d.setFullYear(d.getFullYear() + n);
+  return d;
+}
+
+// ============================================================================
+// API — Streak/Habit Stats
+// ============================================================================
+app.get("/api/streaks", async (req, res) => {
+  try {
+    // Get active recurring tasks with their current streaks
+    const active = await pool.query(
+      "SELECT id, title, recurrence_rule, streak_count, best_streak, last_streak_date, due_date FROM todos WHERE deleted_at IS NULL AND recurring = true AND completed = false ORDER BY streak_count DESC"
+    );
+    // Get top streaks across all recurring tasks (including completed ones)
+    const top = await pool.query(
+      "SELECT DISTINCT ON (COALESCE(recurrence_parent_id, id)) COALESCE(recurrence_parent_id, id) as chain_id, title, best_streak, streak_count, recurrence_rule FROM todos WHERE recurring = true AND best_streak > 0 ORDER BY COALESCE(recurrence_parent_id, id), best_streak DESC"
+    );
+    res.json({ active: active.rows, top_streaks: top.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Automations / Rules Engine
+// ============================================================================
+const VALID_TRIGGERS = ['todo_created', 'todo_completed', 'email_created', 'note_created', 'schedule'];
+const VALID_ACTIONS = ['set_priority', 'set_category', 'set_horizon', 'add_tag', 'send_notification', 'create_todo'];
+
+app.get("/api/automations", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM automations ORDER BY created_at DESC");
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/automations", async (req, res) => {
+  try {
+    const { name, trigger_type, conditions, action_type, action_data } = req.body;
+    if (!name) return res.status(400).json({ error: "Name is required." });
+    if (!VALID_TRIGGERS.includes(trigger_type)) return res.status(400).json({ error: "Invalid trigger. Must be: " + VALID_TRIGGERS.join(", ") });
+    if (!VALID_ACTIONS.includes(action_type)) return res.status(400).json({ error: "Invalid action. Must be: " + VALID_ACTIONS.join(", ") });
+    const r = await pool.query(
+      "INSERT INTO automations (name, trigger_type, conditions, action_type, action_data) VALUES ($1,$2,$3,$4,$5) RETURNING *",
+      [name, trigger_type, conditions || {}, action_type, action_data || {}]
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch("/api/automations/:id", async (req, res) => {
+  try {
+    const { name, trigger_type, conditions, action_type, action_data, enabled } = req.body;
+    if (trigger_type && !VALID_TRIGGERS.includes(trigger_type)) return res.status(400).json({ error: "Invalid trigger." });
+    if (action_type && !VALID_ACTIONS.includes(action_type)) return res.status(400).json({ error: "Invalid action." });
+    const fields = []; const params = []; let idx = 1;
+    if (name !== undefined) { fields.push(`name = $${idx++}`); params.push(name); }
+    if (trigger_type !== undefined) { fields.push(`trigger_type = $${idx++}`); params.push(trigger_type); }
+    if (conditions !== undefined) { fields.push(`conditions = $${idx++}`); params.push(JSON.stringify(conditions)); }
+    if (action_type !== undefined) { fields.push(`action_type = $${idx++}`); params.push(action_type); }
+    if (action_data !== undefined) { fields.push(`action_data = $${idx++}`); params.push(JSON.stringify(action_data)); }
+    if (enabled !== undefined) { fields.push(`enabled = $${idx++}`); params.push(enabled); }
+    if (!fields.length) return res.status(400).json({ error: "No fields." });
+    params.push(req.params.id);
+    const r = await pool.query(`UPDATE automations SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, params);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/automations/:id", async (req, res) => {
+  try {
+    const r = await pool.query("DELETE FROM automations WHERE id = $1 RETURNING id", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Cross-Entity Links
+// ============================================================================
+app.get("/api/links/:type/:id", async (req, res) => {
+  try {
+    const { type, id } = req.params;
+    if (!["todo", "email", "note"].includes(type)) return res.status(400).json({ error: "Invalid entity type." });
+    const [outgoing, incoming] = await Promise.all([
+      pool.query(`SELECT el.*,
+        CASE el.target_type
+          WHEN 'todo' THEN (SELECT title FROM todos WHERE id = el.target_id)
+          WHEN 'email' THEN (SELECT subject FROM emails WHERE id = el.target_id)
+          WHEN 'note' THEN (SELECT COALESCE(title, LEFT(content,50)) FROM notes WHERE id = el.target_id)
+        END as target_title
+        FROM entity_links el WHERE el.source_type = $1 AND el.source_id = $2`, [type, id]),
+      pool.query(`SELECT el.*,
+        CASE el.source_type
+          WHEN 'todo' THEN (SELECT title FROM todos WHERE id = el.source_id)
+          WHEN 'email' THEN (SELECT subject FROM emails WHERE id = el.source_id)
+          WHEN 'note' THEN (SELECT COALESCE(title, LEFT(content,50)) FROM notes WHERE id = el.source_id)
+        END as source_title
+        FROM entity_links el WHERE el.target_type = $1 AND el.target_id = $2`, [type, id]),
+    ]);
+    res.json({ outgoing: outgoing.rows, incoming: incoming.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/links", async (req, res) => {
+  try {
+    const { source_type, source_id, target_type, target_id } = req.body;
+    if (!["todo", "email", "note"].includes(source_type) || !["todo", "email", "note"].includes(target_type)) {
+      return res.status(400).json({ error: "Invalid entity type." });
+    }
+    if (source_type === target_type && parseInt(source_id) === parseInt(target_id)) {
+      return res.status(400).json({ error: "Cannot link an entity to itself." });
+    }
+    const r = await pool.query(
+      "INSERT INTO entity_links (source_type, source_id, target_type, target_id) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING *",
+      [source_type, source_id, target_type, target_id]
+    );
+    if (!r.rows.length) return res.status(409).json({ error: "Link already exists." });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/links/:id", async (req, res) => {
+  try {
+    const r = await pool.query("DELETE FROM entity_links WHERE id = $1 RETURNING id", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Create todo from note
+app.post("/api/notes/:id/create-todo", async (req, res) => {
+  try {
+    const note = await pool.query("SELECT * FROM notes WHERE id = $1 AND deleted_at IS NULL", [req.params.id]);
+    if (!note.rows.length) return res.status(404).json({ error: "Note not found." });
+    const n = note.rows[0];
+    const { priority, horizon } = req.body;
+    const todo = await pool.query(
+      "INSERT INTO todos (title, description, priority, horizon) VALUES ($1, $2, $3, $4) RETURNING *",
+      [n.title || n.content.substring(0, 100), n.content, priority || "medium", horizon || "short"]
+    );
+    // Create cross-entity link
+    await pool.query("INSERT INTO entity_links (source_type, source_id, target_type, target_id) VALUES ('note', $1, 'todo', $2) ON CONFLICT DO NOTHING",
+      [n.id, todo.rows[0].id]);
+    res.json(todo.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Create todo from email
+app.post("/api/emails/:id/create-todo", async (req, res) => {
+  try {
+    const email = await pool.query("SELECT * FROM emails WHERE id = $1 AND deleted_at IS NULL", [req.params.id]);
+    if (!email.rows.length) return res.status(404).json({ error: "Email not found." });
+    const e = email.rows[0];
+    const { priority, horizon } = req.body;
+    const todo = await pool.query(
+      "INSERT INTO todos (title, description, priority, horizon) VALUES ($1, $2, $3, $4) RETURNING *",
+      [e.subject, `Follow up on email to ${e.recipient_name || e.recipient_email}: ${e.body.substring(0, 200)}`, priority || "medium", horizon || "short"]
+    );
+    await pool.query("INSERT INTO entity_links (source_type, source_id, target_type, target_id) VALUES ('email', $1, 'todo', $2) ON CONFLICT DO NOTHING",
+      [e.id, todo.rows[0].id]);
+    res.json(todo.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Webhooks
+// ============================================================================
+const VALID_WEBHOOK_EVENTS = ['todo_created', 'todo_completed', 'email_sent', 'note_created', 'reminder_due', 'streak_milestone'];
+
+app.get("/api/webhooks", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM webhooks ORDER BY created_at DESC");
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/webhooks", async (req, res) => {
+  try {
+    const { name, url, events, headers } = req.body;
+    if (!name || !url) return res.status(400).json({ error: "Name and URL are required." });
+    if (events && !events.every(e => VALID_WEBHOOK_EVENTS.includes(e))) {
+      return res.status(400).json({ error: "Invalid events. Must be: " + VALID_WEBHOOK_EVENTS.join(", ") });
+    }
+    const r = await pool.query(
+      "INSERT INTO webhooks (name, url, events, headers) VALUES ($1,$2,$3,$4) RETURNING *",
+      [name, url, events || [], headers || {}]
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch("/api/webhooks/:id", async (req, res) => {
+  try {
+    const { name, url, events, headers, enabled } = req.body;
+    const fields = []; const params = []; let idx = 1;
+    if (name !== undefined) { fields.push(`name = $${idx++}`); params.push(name); }
+    if (url !== undefined) { fields.push(`url = $${idx++}`); params.push(url); }
+    if (events !== undefined) { fields.push(`events = $${idx++}`); params.push(events); }
+    if (headers !== undefined) { fields.push(`headers = $${idx++}`); params.push(JSON.stringify(headers)); }
+    if (enabled !== undefined) { fields.push(`enabled = $${idx++}`); params.push(enabled); }
+    if (!fields.length) return res.status(400).json({ error: "No fields." });
+    params.push(req.params.id);
+    const r = await pool.query(`UPDATE webhooks SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, params);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/webhooks/:id", async (req, res) => {
+  try {
+    const r = await pool.query("DELETE FROM webhooks WHERE id = $1 RETURNING id", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Test a webhook
+app.post("/api/webhooks/:id/test", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM webhooks WHERE id = $1", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    const webhook = r.rows[0];
+    const payload = { event: "test", timestamp: new Date().toISOString(), message: "Per-sistant webhook test" };
+    const result = await sendWebhook(webhook, payload);
+    res.json({ ok: result.ok, status: result.status });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+async function sendWebhook(webhook, payload) {
+  try {
+    const headers = { "Content-Type": "application/json", ...(webhook.headers || {}) };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const r = await fetch(webhook.url, {
+      method: "POST", headers, body: JSON.stringify(payload), signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    await pool.query("UPDATE webhooks SET last_triggered = now(), last_status = $1 WHERE id = $2", [r.status, webhook.id]);
+    return { ok: r.ok, status: r.status };
+  } catch (err) {
+    await pool.query("UPDATE webhooks SET last_triggered = now(), last_status = 0 WHERE id = $1", [webhook.id]);
+    return { ok: false, status: 0, error: err.message };
+  }
+}
+
+async function fireWebhooks(eventType, data) {
+  try {
+    const webhooks = await pool.query("SELECT * FROM webhooks WHERE enabled = true AND $1 = ANY(events)", [eventType]);
+    for (const wh of webhooks.rows) {
+      sendWebhook(wh, { event: eventType, timestamp: new Date().toISOString(), data }).catch(() => {});
+    }
+  } catch {}
+}
+
+// Slack notification helper
+async function sendSlackNotification(message) {
+  try {
+    const settings = await pool.query("SELECT slack_webhook_url FROM user_settings WHERE id = 1");
+    const url = settings.rows[0]?.slack_webhook_url;
+    if (!url) return;
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: message }),
+    });
+  } catch {}
+}
+
+// ============================================================================
+// API — Notifications (push notification preferences + trigger check)
+// ============================================================================
+app.get("/api/notifications/check", async (req, res) => {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const [dueSoon, overdue, streaksAtRisk, reminders] = await Promise.all([
+      pool.query("SELECT id, title, due_date FROM todos WHERE deleted_at IS NULL AND completed = false AND due_date = $1", [today]),
+      pool.query("SELECT id, title, due_date FROM todos WHERE deleted_at IS NULL AND completed = false AND due_date < $1", [today]),
+      pool.query("SELECT id, title, streak_count, due_date FROM todos WHERE deleted_at IS NULL AND completed = false AND recurring = true AND streak_count >= 3 AND due_date = $1", [today]),
+      pool.query("SELECT id, COALESCE(title, LEFT(content,50)) as title, reminder_at FROM notes WHERE deleted_at IS NULL AND reminder_at IS NOT NULL AND DATE(reminder_at) = $1", [today]),
+    ]);
+    const notifications = [];
+    dueSoon.rows.forEach(t => notifications.push({ type: "due_today", title: t.title, id: t.id, entity: "todo" }));
+    overdue.rows.forEach(t => notifications.push({ type: "overdue", title: t.title, id: t.id, entity: "todo" }));
+    streaksAtRisk.rows.forEach(t => notifications.push({ type: "streak_at_risk", title: `${t.title} (${t.streak_count} streak)`, id: t.id, entity: "todo" }));
+    reminders.rows.forEach(n => notifications.push({ type: "reminder", title: n.title, id: n.id, entity: "note" }));
+    res.json({ notifications, counts: { due_today: dueSoon.rows.length, overdue: overdue.rows.length, streaks_at_risk: streaksAtRisk.rows.length, reminders: reminders.rows.length } });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Analytics / Insights
+// ============================================================================
+app.get("/api/analytics", async (req, res) => {
+  try {
+    const { period } = req.query; // "week", "month", "quarter", "year"
+    const now = new Date();
+    let startDate;
+    if (period === "year") { startDate = new Date(now.getFullYear(), 0, 1); }
+    else if (period === "quarter") { startDate = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1); }
+    else if (period === "month") { startDate = new Date(now.getFullYear(), now.getMonth(), 1); }
+    else { // default week
+      startDate = new Date(now);
+      const dayOfWeek = now.getDay();
+      startDate.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    }
+    startDate.setHours(0,0,0,0);
+    const sd = startDate.toISOString().split("T")[0];
+    const ed = now.toISOString().split("T")[0];
+
+    // Heatmap date: 90 days ago
+    const heatmapStart = new Date(now);
+    heatmapStart.setDate(heatmapStart.getDate() - 90);
+    const hsd = heatmapStart.toISOString().split("T")[0];
+
+    const [completedByDay, createdByDay, completionRate, priorityBreakdown, categoryBreakdown, avgCompletionTime, streakLeaders, productivityByDow, heatmapData, emailsSent, notesMade] = await Promise.all([
+      pool.query(`SELECT DATE(completed_at) as day, COUNT(*) as count FROM todos WHERE deleted_at IS NULL AND completed = true AND completed_at >= $1 GROUP BY DATE(completed_at) ORDER BY day`, [sd]),
+      pool.query(`SELECT DATE(created_at) as day, COUNT(*) as count FROM todos WHERE deleted_at IS NULL AND created_at >= $1 GROUP BY DATE(created_at) ORDER BY day`, [sd]),
+      pool.query(`SELECT COUNT(*) FILTER (WHERE completed) as done, COUNT(*) as total FROM todos WHERE deleted_at IS NULL AND created_at >= $1`, [sd]),
+      pool.query(`SELECT priority, COUNT(*) as count FROM todos WHERE deleted_at IS NULL AND completed = false GROUP BY priority ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END`),
+      pool.query(`SELECT COALESCE(category, 'uncategorized') as category, COUNT(*) as count, COUNT(*) FILTER (WHERE completed) as completed FROM todos WHERE deleted_at IS NULL AND created_at >= $1 GROUP BY category ORDER BY count DESC`, [sd]),
+      pool.query(`SELECT AVG(EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600) as avg_hours FROM todos WHERE deleted_at IS NULL AND completed = true AND completed_at >= $1`, [sd]),
+      pool.query(`SELECT title, streak_count, best_streak, recurrence_rule FROM todos WHERE deleted_at IS NULL AND recurring = true AND completed = false AND streak_count > 0 ORDER BY streak_count DESC LIMIT 5`),
+      pool.query(`SELECT EXTRACT(DOW FROM completed_at) as dow, COUNT(*) as count FROM todos WHERE deleted_at IS NULL AND completed = true AND completed_at >= $1 GROUP BY dow ORDER BY dow`, [sd]),
+      // Heatmap: completions per day for last 90 days
+      pool.query(`SELECT DATE(completed_at) as day, COUNT(*) as count FROM todos WHERE deleted_at IS NULL AND completed = true AND completed_at >= $1 GROUP BY DATE(completed_at) ORDER BY day`, [hsd]),
+      // Emails sent in period
+      pool.query(`SELECT COUNT(*) as count FROM emails WHERE deleted_at IS NULL AND sent_at >= $1`, [sd]),
+      // Notes created in period
+      pool.query(`SELECT COUNT(*) as count FROM notes WHERE deleted_at IS NULL AND created_at >= $1`, [sd]),
+    ]);
+
+    const rate = completionRate.rows[0];
+    const totalCompleted = parseInt(rate.done);
+    const totalCreated = parseInt(rate.total);
+    const completionPct = totalCreated > 0 ? Math.round((totalCompleted / totalCreated) * 100) : 0;
+    const avgHours = avgCompletionTime.rows[0]?.avg_hours ? Math.round(avgCompletionTime.rows[0].avg_hours * 10) / 10 : null;
+    const topStreak = streakLeaders.rows[0]?.streak_count || 0;
+    // Productivity score: weighted composite (completion rate 40%, streak bonus 20%, volume 20%, speed 20%)
+    const volumeScore = Math.min(totalCompleted / 10, 1) * 100; // 10 tasks = max
+    const speedScore = avgHours ? Math.max(0, Math.min(100, 100 - avgHours)) : 50;
+    const streakScore = Math.min(topStreak / 7, 1) * 100;
+    const productivityScore = Math.round(completionPct * 0.4 + streakScore * 0.2 + volumeScore * 0.2 + speedScore * 0.2);
+
+    res.json({
+      period: period || "week",
+      start_date: sd,
+      end_date: ed,
+      completed_by_day: completedByDay.rows,
+      created_by_day: createdByDay.rows,
+      completion_rate: completionPct,
+      total_completed: totalCompleted,
+      total_created: totalCreated,
+      priority_breakdown: priorityBreakdown.rows,
+      category_breakdown: categoryBreakdown.rows,
+      avg_completion_hours: avgHours,
+      streak_leaders: streakLeaders.rows,
+      productivity_by_dow: productivityByDow.rows,
+      heatmap: heatmapData.rows,
+      productivity_score: productivityScore,
+      emails_sent: parseInt(emailsSent.rows[0]?.count || 0),
+      notes_created: parseInt(notesMade.rows[0]?.count || 0),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Run automations for a trigger
+async function runAutomations(triggerType, entity, entityType) {
+  try {
+    const rules = await pool.query("SELECT * FROM automations WHERE trigger_type = $1 AND enabled = true", [triggerType]);
+    for (const rule of rules.rows) {
+      const cond = rule.conditions || {};
+      // Check conditions
+      let match = true;
+      if (cond.category && entity.category !== cond.category) match = false;
+      if (cond.priority && entity.priority !== cond.priority) match = false;
+      if (cond.title_contains && !(entity.title || '').toLowerCase().includes(cond.title_contains.toLowerCase())) match = false;
+      if (cond.horizon && entity.horizon !== cond.horizon) match = false;
+      if (!match) continue;
+      // Execute action
+      const data = rule.action_data || {};
+      if (rule.action_type === 'set_priority' && data.priority && entity.id) {
+        await pool.query("UPDATE todos SET priority = $1 WHERE id = $2", [data.priority, entity.id]);
+      } else if (rule.action_type === 'set_category' && data.category && entity.id) {
+        await pool.query("UPDATE todos SET category = $1 WHERE id = $2", [data.category, entity.id]);
+      } else if (rule.action_type === 'set_horizon' && data.horizon && entity.id) {
+        await pool.query("UPDATE todos SET horizon = $1 WHERE id = $2", [data.horizon, entity.id]);
+      } else if (rule.action_type === 'add_tag' && data.tag && entity.id && entityType === 'note') {
+        await pool.query("UPDATE notes SET tags = array_append(COALESCE(tags, ARRAY[]::TEXT[]), $1) WHERE id = $2 AND NOT ($1 = ANY(COALESCE(tags, ARRAY[]::TEXT[])))", [data.tag, entity.id]);
+      } else if (rule.action_type === 'create_todo' && data.title) {
+        await pool.query("INSERT INTO todos (title, priority, horizon, category) VALUES ($1, $2, $3, $4)", [data.title, data.priority || 'medium', data.horizon || 'short', data.category || null]);
+      }
+    }
+  } catch (err) { console.error("Automation error:", err.message); }
+}
+
+// ============================================================================
+// API — File Attachments
+// ============================================================================
+const uploadsDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+const upload = multer ? multer({
+  storage: multer.diskStorage({
+    destination: uploadsDir,
+    filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_")),
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+}) : null;
+
+app.get("/api/attachments/:entityType/:entityId", async (req, res) => {
+  try {
+    const { entityType, entityId } = req.params;
+    if (!["todo", "email", "note"].includes(entityType)) return res.status(400).json({ error: "Invalid entity type." });
+    const r = await pool.query("SELECT * FROM attachments WHERE entity_type = $1 AND entity_id = $2 ORDER BY created_at DESC", [entityType, entityId]);
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+if (upload) {
+  app.post("/api/attachments/:entityType/:entityId", upload.single("file"), async (req, res) => {
+    try {
+      const { entityType, entityId } = req.params;
+      if (!["todo", "email", "note"].includes(entityType)) return res.status(400).json({ error: "Invalid entity type." });
+      if (!req.file) return res.status(400).json({ error: "No file uploaded." });
+      const r = await pool.query(
+        "INSERT INTO attachments (filename, original_name, mime_type, size_bytes, entity_type, entity_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *",
+        [req.file.filename, req.file.originalname, req.file.mimetype, req.file.size, entityType, entityId]
+      );
+      res.json(r.rows[0]);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+}
+
+app.get("/api/attachments/download/:id", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM attachments WHERE id = $1", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    const filePath = path.join(uploadsDir, r.rows[0].filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: "File not found on disk." });
+    res.setHeader("Content-Disposition", `attachment; filename="${r.rows[0].original_name}"`);
+    res.setHeader("Content-Type", r.rows[0].mime_type);
+    fs.createReadStream(filePath).pipe(res);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/attachments/:id", async (req, res) => {
+  try {
+    const r = await pool.query("DELETE FROM attachments WHERE id = $1 RETURNING *", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    const filePath = path.join(uploadsDir, r.rows[0].filename);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Task Dependencies
+// ============================================================================
+app.get("/api/todos/:id/dependencies", async (req, res) => {
+  try {
+    const [blockedBy, blocking] = await Promise.all([
+      pool.query(`SELECT td.id as dep_id, td.depends_on_id, t.title, t.completed FROM task_dependencies td JOIN todos t ON t.id = td.depends_on_id WHERE td.todo_id = $1`, [req.params.id]),
+      pool.query(`SELECT td.id as dep_id, td.todo_id, t.title, t.completed FROM task_dependencies td JOIN todos t ON t.id = td.todo_id WHERE td.depends_on_id = $1`, [req.params.id]),
+    ]);
+    res.json({ blocked_by: blockedBy.rows, blocking: blocking.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/todos/:id/dependencies", async (req, res) => {
+  try {
+    const { depends_on_id } = req.body;
+    if (!depends_on_id) return res.status(400).json({ error: "depends_on_id is required." });
+    if (parseInt(depends_on_id) === parseInt(req.params.id)) return res.status(400).json({ error: "A task cannot depend on itself." });
+    // Check both tasks exist
+    const [task, dep] = await Promise.all([
+      pool.query("SELECT id FROM todos WHERE id = $1 AND deleted_at IS NULL", [req.params.id]),
+      pool.query("SELECT id FROM todos WHERE id = $1 AND deleted_at IS NULL", [depends_on_id]),
+    ]);
+    if (!task.rows.length || !dep.rows.length) return res.status(404).json({ error: "Task not found." });
+    // Check for circular dependency
+    const chain = await pool.query("SELECT * FROM task_dependencies WHERE todo_id = $1 AND depends_on_id = $2", [depends_on_id, req.params.id]);
+    if (chain.rows.length) return res.status(400).json({ error: "Circular dependency: that task already depends on this one." });
+    const r = await pool.query(
+      "INSERT INTO task_dependencies (todo_id, depends_on_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING *",
+      [req.params.id, depends_on_id]
+    );
+    if (!r.rows.length) return res.status(409).json({ error: "Dependency already exists." });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/dependencies/:id", async (req, res) => {
+  try {
+    const r = await pool.query("DELETE FROM task_dependencies WHERE id = $1 RETURNING id", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1230,6 +1998,99 @@ app.delete("/api/email-templates/:id", async (req, res) => {
 });
 
 // ============================================================================
+// API — Todo Templates
+// ============================================================================
+app.get("/api/todo-templates", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM todo_templates ORDER BY name ASC");
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/todo-templates", async (req, res) => {
+  try {
+    const { name, title, description, priority, horizon, category, recurring, recurrence_rule, recurrence_interval, subtasks } = req.body;
+    if (!name || !title) return res.status(400).json({ error: "Name and title required." });
+    if (priority && !VALID_PRIORITIES.includes(priority)) return res.status(400).json({ error: "Invalid priority." });
+    if (horizon && !VALID_HORIZONS.includes(horizon)) return res.status(400).json({ error: "Invalid horizon." });
+    const r = await pool.query(
+      "INSERT INTO todo_templates (name, title, description, priority, horizon, category, recurring, recurrence_rule, recurrence_interval, subtasks) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *",
+      [name, title, description || null, priority || "medium", horizon || "short", category || null, recurring || false, recurrence_rule || null, recurrence_interval || 1, JSON.stringify(subtasks || [])]
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch("/api/todo-templates/:id", async (req, res) => {
+  try {
+    const { name, title, description, priority, horizon, category, recurring, recurrence_rule, recurrence_interval, subtasks } = req.body;
+    const fields = []; const params = []; let idx = 1;
+    if (name !== undefined) { fields.push(`name = $${idx++}`); params.push(name); }
+    if (title !== undefined) { fields.push(`title = $${idx++}`); params.push(title); }
+    if (description !== undefined) { fields.push(`description = $${idx++}`); params.push(description); }
+    if (priority !== undefined) { fields.push(`priority = $${idx++}`); params.push(priority); }
+    if (horizon !== undefined) { fields.push(`horizon = $${idx++}`); params.push(horizon); }
+    if (category !== undefined) { fields.push(`category = $${idx++}`); params.push(category); }
+    if (recurring !== undefined) { fields.push(`recurring = $${idx++}`); params.push(recurring); }
+    if (recurrence_rule !== undefined) { fields.push(`recurrence_rule = $${idx++}`); params.push(recurrence_rule); }
+    if (recurrence_interval !== undefined) { fields.push(`recurrence_interval = $${idx++}`); params.push(recurrence_interval); }
+    if (subtasks !== undefined) { fields.push(`subtasks = $${idx++}`); params.push(JSON.stringify(subtasks)); }
+    if (!fields.length) return res.status(400).json({ error: "No fields." });
+    params.push(req.params.id);
+    const r = await pool.query(`UPDATE todo_templates SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, params);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/todo-templates/:id", async (req, res) => {
+  try {
+    const r = await pool.query("DELETE FROM todo_templates WHERE id = $1 RETURNING id", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/todo-templates/:id/apply", async (req, res) => {
+  try {
+    const template = (await pool.query("SELECT * FROM todo_templates WHERE id = $1", [req.params.id])).rows[0];
+    if (!template) return res.status(404).json({ error: "Template not found." });
+    const overrides = req.body || {};
+    const r = await pool.query(
+      "INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_interval) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *",
+      [overrides.title || template.title, overrides.description || template.description, overrides.priority || template.priority, overrides.horizon || template.horizon, overrides.category || template.category, overrides.due_date || null, template.recurring, template.recurrence_rule, template.recurrence_interval]
+    );
+    const todo = r.rows[0];
+    const subs = template.subtasks || [];
+    for (const sub of subs) {
+      await pool.query("INSERT INTO subtasks (todo_id, title) VALUES ($1, $2)", [todo.id, typeof sub === "string" ? sub : sub.title]);
+    }
+    res.json(todo);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Batch Contact Import
+// ============================================================================
+app.post("/api/contacts/import", async (req, res) => {
+  try {
+    const { contacts } = req.body;
+    if (!Array.isArray(contacts) || !contacts.length) return res.status(400).json({ error: "contacts array required." });
+    const imported = [];
+    const errors = [];
+    for (const c of contacts) {
+      try {
+        if (!c.name || !c.email) { errors.push({ contact: c, error: "name and email required" }); continue; }
+        if (!EMAIL_REGEX.test(c.email)) { errors.push({ contact: c, error: "invalid email" }); continue; }
+        const r = await pool.query("INSERT INTO contacts (name, email) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING *", [c.name.trim(), c.email.trim().toLowerCase()]);
+        if (r.rows[0]) imported.push(r.rows[0]);
+      } catch (err) { errors.push({ contact: c, error: err.message }); }
+    }
+    res.json({ imported: imported.length, errors: errors.length, details: errors.length ? errors : undefined });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
 // API — AI Email Drafting
 // ============================================================================
 app.post("/api/ai/draft-email", async (req, res) => {
@@ -1238,13 +2099,10 @@ app.post("/api/ai/draft-email", async (req, res) => {
     if (model === "off") return res.status(400).json({ error: "AI email drafting is disabled. Enable it in Settings." });
     const { prompt, recipient_name } = req.body;
     if (!prompt) return res.status(400).json({ error: "Prompt is required." });
-    const text = await callAI(model, `Draft a professional email based on this request: "${prompt}"${recipient_name ? ` The recipient's name is ${recipient_name}.` : ""}
-
-Return ONLY a JSON object with these fields:
-- "subject": the email subject line
-- "body": the email body text (plain text, no HTML)
-
-Keep the tone professional but warm. Do not include any other text outside the JSON.`);
+    const text = await callAI(model,
+      `Draft an email based on this request: "${prompt}"${recipient_name ? ` The recipient's name is ${recipient_name}.` : ""}`,
+      1024,
+      `You are a professional email drafting assistant. Return ONLY a JSON object with these fields:\n- "subject": the email subject line\n- "body": the email body text (plain text, no HTML)\n\nKeep the tone professional but warm. Do not include any other text outside the JSON.`);
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
     const draft = JSON.parse(jsonMatch[0]);
@@ -1263,12 +2121,10 @@ app.post("/api/ai/task-breakdown", async (req, res) => {
     if (model === "off") return res.status(400).json({ error: "AI task breakdown is disabled. Enable it in Settings." });
     const { title, description } = req.body;
     if (!title) return res.status(400).json({ error: "Task title is required." });
-    const text = await callAI(model, `Break down this task into actionable subtasks (3-8 items):
-
-Task: "${title}"${description ? `\nDetails: "${description}"` : ""}
-
-Return ONLY a JSON array of strings, where each string is a subtask. Keep them specific and actionable.
-Example: ["Research options", "Compare prices", "Make decision"]`, 512);
+    const text = await callAI(model,
+      `Task: "${title}"${description ? `\nDetails: "${description}"` : ""}`,
+      512,
+      `You are a task breakdown assistant. Break down the given task into 3-8 actionable subtasks. Return ONLY a JSON array of strings, where each string is a subtask. Keep them specific and actionable.\nExample: ["Research options", "Compare prices", "Make decision"]`);
     const jsonMatch = text.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
     const subtasks = JSON.parse(jsonMatch[0]);
@@ -1288,18 +2144,10 @@ app.post("/api/ai/parse-todo", async (req, res) => {
     const { input } = req.body;
     if (!input) return res.status(400).json({ error: "Input is required." });
     const today = new Date().toISOString().split("T")[0];
-    const text = await callAI(model, `Parse this natural language task description into structured data. Today is ${today}.
-
-Input: "${input}"
-
-Return ONLY a JSON object with:
-- "title": clean task title (remove time/priority words)
-- "priority": one of "low", "medium", "high", "urgent"
-- "horizon": one of "short", "medium", "long"
-- "category": inferred category (e.g. "work", "personal", "health", "finance", "errands", "home") or null
-- "due_date": ISO date string (YYYY-MM-DD) if a date/time is mentioned, or null
-
-Be smart about inferring: "ASAP" = urgent, "someday" = low priority long-term, "this week" = short-term, etc.`, 256);
+    const text = await callAI(model,
+      `Today is ${today}.\nInput: "${input}"`,
+      256,
+      `You are a task parser. Parse natural language task descriptions into structured data.\n\nReturn ONLY a JSON object with:\n- "title": clean task title (remove time/priority words)\n- "priority": one of "low", "medium", "high", "urgent"\n- "horizon": one of "short", "medium", "long"\n- "category": inferred category (e.g. "work", "personal", "health", "finance", "errands", "home") or null\n- "due_date": ISO date string (YYYY-MM-DD) if a date/time is mentioned, or null\n\nBe smart about inferring: "ASAP" = urgent, "someday" = low priority long-term, "this week" = short-term, etc.`);
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
     const parsed = JSON.parse(jsonMatch[0]);
@@ -1318,16 +2166,10 @@ app.post("/api/ai/review-summary", async (req, res) => {
     if (model === "off") return res.status(400).json({ error: "AI review summary is disabled." });
     const { stats } = req.body;
     if (!stats) return res.status(400).json({ error: "Stats required." });
-    const text = await callAI(model, `Write a brief, encouraging weekly review summary (2-4 sentences) based on these stats:
-
-- Tasks completed: ${stats.tasks_completed}
-- Tasks created: ${stats.tasks_created}
-- Emails sent: ${stats.emails_sent}
-- Notes created: ${stats.notes_created}
-- Overdue tasks: ${stats.overdue}
-- Completed task titles: ${stats.completed_titles || "none"}
-
-Be conversational and motivating. Highlight accomplishments. If there are overdue tasks, gently remind. Don't use emojis.`, 256);
+    const text = await callAI(model,
+      `Stats:\n- Tasks completed: ${stats.tasks_completed}\n- Tasks created: ${stats.tasks_created}\n- Emails sent: ${stats.emails_sent}\n- Notes created: ${stats.notes_created}\n- Overdue tasks: ${stats.overdue}\n- Completed task titles: ${stats.completed_titles || "none"}`,
+      256,
+      `You are a productivity coach. Write a brief, encouraging weekly review summary (2-4 sentences) based on the user's stats. Be conversational and motivating. Highlight accomplishments. If there are overdue tasks, gently remind. Don't use emojis.`);
     res.json({ summary: text });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1343,13 +2185,10 @@ app.post("/api/ai/adjust-tone", async (req, res) => {
     if (model === "off") return res.status(400).json({ error: "AI tone adjustment is disabled." });
     const { body, tone } = req.body;
     if (!body || !tone) return res.status(400).json({ error: "Body and tone are required." });
-    const text = await callAI(model, `Rewrite this email body with a "${tone}" tone. Keep the same meaning and content but adjust the language.
-
-Original email:
-${body}
-
-Return ONLY the rewritten email body text (plain text, no JSON wrapping, no quotes).
-Valid tones: more formal, more casual, shorter, friendlier, more direct.`, 1024);
+    const text = await callAI(model,
+      `Tone: "${tone}"\n\nOriginal email:\n${body}`,
+      1024,
+      `You are an email tone adjustment assistant. Rewrite the given email body with the requested tone. Keep the same meaning and content but adjust the language.\n\nReturn ONLY the rewritten email body text (plain text, no JSON wrapping, no quotes).\nValid tones: more formal, more casual, shorter, friendlier, more direct.`);
     res.json({ body: text });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1370,15 +2209,16 @@ app.get("/api/ai/daily-briefing", async (req, res) => {
       pool.query("SELECT subject, recipient_name, scheduled_at FROM emails WHERE deleted_at IS NULL AND status = 'scheduled' AND DATE(scheduled_at) = $1", [today]),
       pool.query("SELECT title, due_date FROM todos WHERE deleted_at IS NULL AND NOT completed AND due_date = $1", [today]),
     ]);
-    const text = await callAI(model, `Generate a brief, helpful daily briefing (3-5 sentences) for today (${today}). Be conversational and actionable.
+    // Check response cache (briefing cached for 10 minutes)
+    const cacheKey = `briefing_${today}`;
+    const cached = getCached(cacheKey, 10 * 60 * 1000);
+    if (cached) return res.json({ briefing: cached });
 
-Today's tasks (${upcoming.rows.length}): ${upcoming.rows.map(t => t.title).join(", ") || "none"}
-Overdue tasks (${overdue.rows.length}): ${overdue.rows.map(t => t.title).join(", ") || "none"}
-Scheduled emails today: ${scheduled.rows.map(e => `"${e.subject}" to ${e.recipient_name}`).join(", ") || "none"}
-Total pending tasks: ${pending.rows.length}
-Top priorities: ${pending.rows.slice(0, 5).map(t => `${t.title} (${t.priority})`).join(", ")}
-
-Summarize what needs attention today. Don't use emojis.`, 300);
+    const text = await callAI(model,
+      `Today: ${today}\nToday's tasks (${upcoming.rows.length}): ${upcoming.rows.map(t => t.title).join(", ") || "none"}\nOverdue tasks (${overdue.rows.length}): ${overdue.rows.map(t => t.title).join(", ") || "none"}\nScheduled emails today: ${scheduled.rows.map(e => `"${e.subject}" to ${e.recipient_name}`).join(", ") || "none"}\nTotal pending tasks: ${pending.rows.length}\nTop priorities: ${pending.rows.slice(0, 5).map(t => `${t.title} (${t.priority})`).join(", ")}`,
+      300,
+      `You are a daily briefing assistant. Generate a brief, helpful daily briefing (3-5 sentences). Be conversational and actionable. Summarize what needs attention today. Don't use emojis.`);
+    setCache(cacheKey, text);
     res.json({ briefing: text });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1394,13 +2234,10 @@ app.post("/api/ai/suggest-tags", async (req, res) => {
     if (model === "off") return res.status(400).json({ error: "AI note tagging is disabled." });
     const { title, content } = req.body;
     if (!content) return res.status(400).json({ error: "Content is required." });
-    const text = await callAI(model, `Suggest 1-4 short tags for this note. Tags should be lowercase single words or hyphenated phrases.
-
-${title ? `Title: "${title}"` : ""}
-Content: "${content.substring(0, 500)}"
-
-Return ONLY a JSON array of tag strings.
-Example: ["meeting-notes", "project-alpha", "action-items"]`, 128);
+    const text = await callAI(model,
+      `${title ? `Title: "${title}"\n` : ""}Content: "${content.substring(0, 500)}"`,
+      128,
+      `You are a note tagging assistant. Suggest 1-4 short tags for the given note. Tags should be lowercase single words or hyphenated phrases.\n\nReturn ONLY a JSON array of tag strings.\nExample: ["meeting-notes", "project-alpha", "action-items"]`);
     const jsonMatch = text.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
     const tags = JSON.parse(jsonMatch[0]);
@@ -1408,6 +2245,59 @@ Example: ["meeting-notes", "project-alpha", "action-items"]`, 128);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ============================================================================
+// API — AI Smart Suggestions
+// ============================================================================
+app.get("/api/ai/smart-suggestions", async (req, res) => {
+  try {
+    const model = await getAIModelForFeature("daily_briefing");
+    if (model === "off") return res.json({ suggestions: null });
+    // Check response cache (suggestions cached for 5 minutes)
+    const todayStr = new Date().toISOString().split("T")[0];
+    const suggestCacheKey = `suggestions_${todayStr}_${new Date().getHours()}`;
+    const cachedSuggestions = getCached(suggestCacheKey, 5 * 60 * 1000);
+    if (cachedSuggestions) return res.json({ suggestions: cachedSuggestions });
+
+    const todos = await pool.query("SELECT id, title, priority, horizon, category, due_date, recurring, recurrence_rule, streak_count FROM todos WHERE deleted_at IS NULL AND completed = false ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, due_date NULLS LAST LIMIT 30");
+    if (!todos.rows.length) return res.json({ suggestions: null });
+    const dayName = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][new Date().getDay()];
+    const taskList = todos.rows.map(t => `- "${t.title}" [${t.priority}/${t.horizon}]${t.category ? ' ('+t.category+')' : ''}${t.due_date ? ' due:'+t.due_date.toISOString().split("T")[0] : ''}${t.recurring ? ' recurring:'+t.recurrence_rule : ''}${t.streak_count > 0 ? ' streak:'+t.streak_count : ''}`).join("\n");
+    const result = await callAI(model,
+      `Today is ${dayName}, ${todayStr}. Here are the user's pending tasks:\n${taskList}`,
+      512,
+      `You are a productivity coach. Provide exactly 3 smart suggestions as a JSON array of objects with "suggestion" (short actionable advice) and "task_ids" (array of relevant task IDs). Consider: urgency, due dates, streaks at risk, workload balance, and day of week. Focus on what to tackle NOW.\nRespond with ONLY a JSON array, no other text.`);
+    const cleaned = result.replace(/```json?\s*|\s*```/g, "").trim();
+    const suggestions = JSON.parse(cleaned);
+    setCache(suggestCacheKey, suggestions);
+    res.json({ suggestions });
+  } catch (err) { res.json({ suggestions: null, error: err.message }); }
+});
+
+// ============================================================================
+// API — AI Natural Language Query
+// ============================================================================
+app.post("/api/ai/query", async (req, res) => {
+  try {
+    const { query } = req.body;
+    if (!query) return res.status(400).json({ error: "Query is required." });
+    const model = await getAIModelForFeature("daily_briefing");
+    if (model === "off") return res.json({ answer: "AI is not enabled. Enable it in Settings.", data: null });
+    // Gather context
+    const [todos, emails, notes] = await Promise.all([
+      pool.query("SELECT id, title, priority, horizon, category, due_date, completed, completed_at, recurring, recurrence_rule, streak_count, created_at FROM todos WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 50"),
+      pool.query("SELECT id, subject, recipient_name, recipient_email, status, scheduled_at, sent_at, created_at FROM emails WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 20"),
+      pool.query("SELECT id, title, content, tags, pinned, created_at, updated_at FROM notes WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 20"),
+    ]);
+    const todayStr = new Date().toISOString().split("T")[0];
+    const context = `Today: ${todayStr}\n\nTasks (${todos.rows.length}):\n${todos.rows.map(t => `- [${t.completed?'done':'pending'}] "${t.title}" priority:${t.priority} horizon:${t.horizon}${t.category?' cat:'+t.category:''}${t.due_date?' due:'+t.due_date.toISOString().split("T")[0]:''}${t.completed_at?' completed:'+t.completed_at.toISOString().split("T")[0]:''}${t.recurring?' recurring:'+t.recurrence_rule:''}`).join("\n")}\n\nEmails (${emails.rows.length}):\n${emails.rows.map(e => `- [${e.status}] "${e.subject}" to:${e.recipient_name||e.recipient_email}${e.sent_at?' sent:'+e.sent_at.toISOString().split("T")[0]:''}`).join("\n")}\n\nNotes (${notes.rows.length}):\n${notes.rows.map(n => `- "${n.title||n.content.substring(0,40)}"${n.tags?' tags:'+n.tags.join(','):''}${n.pinned?' pinned':''}`).join("\n")}`;
+    const answer = await callAI(model,
+      `Data:\n${context}\n\nUser question: "${query}"`,
+      1024,
+      `You are a personal assistant with access to the user's data. Answer their question based on the provided data. Be concise and helpful. If the question asks for counts, lists, or stats, provide specific numbers. Answer concisely.`);
+    res.json({ answer });
+  } catch (err) { res.json({ answer: "Sorry, I couldn't process that query.", error: err.message }); }
 });
 
 // ============================================================================
@@ -1462,9 +2352,9 @@ app.get("/api/search", async (req, res) => {
     if (!q || q.length < 2) return res.json([]);
     const pattern = `%${q}%`;
     const [todos, emails, notes, contacts] = await Promise.all([
-      pool.query("SELECT id, title, description, priority, horizon, 'todo' as type FROM todos WHERE deleted_at IS NULL AND (title ILIKE $1 OR description ILIKE $1) LIMIT 10", [pattern]),
-      pool.query("SELECT id, subject as title, recipient_name as description, status as priority, 'email' as type FROM emails WHERE deleted_at IS NULL AND (subject ILIKE $1 OR body ILIKE $1 OR recipient_name ILIKE $1) LIMIT 10", [pattern]),
-      pool.query("SELECT id, COALESCE(title, LEFT(content, 50)) as title, LEFT(content, 100) as description, 'note' as type FROM notes WHERE deleted_at IS NULL AND (title ILIKE $1 OR content ILIKE $1) LIMIT 10", [pattern]),
+      pool.query("SELECT id, title, description, priority, horizon, completed, recurring, 'todo' as type FROM todos WHERE deleted_at IS NULL AND (title ILIKE $1 OR description ILIKE $1) LIMIT 10", [pattern]),
+      pool.query("SELECT id, subject as title, recipient_name as description, status, status as priority, 'email' as type FROM emails WHERE deleted_at IS NULL AND (subject ILIKE $1 OR body ILIKE $1 OR recipient_name ILIKE $1) LIMIT 10", [pattern]),
+      pool.query("SELECT id, COALESCE(title, LEFT(content, 50)) as title, LEFT(content, 100) as description, pinned, 'note' as type FROM notes WHERE deleted_at IS NULL AND (title ILIKE $1 OR content ILIKE $1) LIMIT 10", [pattern]),
       pool.query("SELECT id, name as title, email as description, 'contact' as type FROM contacts WHERE name ILIKE $1 OR email ILIKE $1 LIMIT 10", [pattern]),
     ]);
     res.json([...todos.rows, ...emails.rows, ...notes.rows, ...contacts.rows]);
@@ -1481,12 +2371,59 @@ app.get("/api/calendar", async (req, res) => {
     const y = parseInt(year, 10) || new Date().getFullYear();
     const startDate = `${y}-${String(m).padStart(2,"0")}-01`;
     const endDate = m === 12 ? `${y+1}-01-01` : `${y}-${String(m+1).padStart(2,"0")}-01`;
-    const [todos, emails, notes] = await Promise.all([
+    const [todos, emails, notes, recurring] = await Promise.all([
       pool.query("SELECT id, title, due_date as event_date, priority, 'todo' as type FROM todos WHERE deleted_at IS NULL AND due_date >= $1 AND due_date < $2 AND NOT completed", [startDate, endDate]),
       pool.query("SELECT id, subject as title, scheduled_at as event_date, status as priority, 'email' as type FROM emails WHERE deleted_at IS NULL AND scheduled_at >= $1 AND scheduled_at < $2", [startDate, endDate]),
       pool.query("SELECT id, COALESCE(title, LEFT(content,30)) as title, reminder_at as event_date, 'note' as type FROM notes WHERE deleted_at IS NULL AND reminder_at >= $1 AND reminder_at < $2", [startDate, endDate]),
+      pool.query("SELECT id, title, due_date, recurrence_rule, recurrence_interval, priority FROM todos WHERE deleted_at IS NULL AND recurring = true AND completed = false AND due_date IS NOT NULL"),
     ]);
-    res.json([...todos.rows, ...emails.rows, ...notes.rows]);
+    // Project future recurring instances into this month
+    const projected = [];
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    for (const t of recurring.rows) {
+      let nextDate = new Date(t.due_date);
+      let safety = 0;
+      while (nextDate < end && safety++ < 100) {
+        if (nextDate >= start && nextDate < end) {
+          // Only add if not already in the actual todos
+          const dateStr = nextDate.toISOString().split("T")[0];
+          if (!todos.rows.some(x => x.id === t.id && x.event_date && new Date(x.event_date).toISOString().split("T")[0] === dateStr)) {
+            projected.push({ id: t.id, title: t.title, event_date: dateStr, priority: t.priority, type: "todo", recurring_projection: true });
+          }
+        }
+        nextDate = advanceRecurrence(nextDate, t.recurrence_rule, t.recurrence_interval || 1);
+      }
+    }
+    res.json([...todos.rows, ...emails.rows, ...notes.rows, ...projected]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — iCal Export
+// ============================================================================
+app.get("/api/calendar.ics", async (req, res) => {
+  try {
+    const [todos, emails] = await Promise.all([
+      pool.query("SELECT id, title, description, due_date, priority FROM todos WHERE deleted_at IS NULL AND due_date IS NOT NULL AND completed = false ORDER BY due_date"),
+      pool.query("SELECT id, subject, recipient_email, scheduled_at FROM emails WHERE deleted_at IS NULL AND scheduled_at IS NOT NULL AND status = 'scheduled' ORDER BY scheduled_at"),
+    ]);
+    let ical = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Per-sistant//EN\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\nX-WR-CALNAME:Per-sistant Tasks\r\n";
+    for (const t of todos.rows) {
+      const d = new Date(t.due_date);
+      const dateStr = d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+      const dateOnly = dateStr.substring(0, 8);
+      ical += `BEGIN:VEVENT\r\nUID:todo-${t.id}@per-sistant\r\nDTSTART;VALUE=DATE:${dateOnly}\r\nDTEND;VALUE=DATE:${dateOnly}\r\nSUMMARY:[${t.priority.toUpperCase()}] ${t.title.replace(/[\\,;]/g, " ")}\r\n${t.description ? "DESCRIPTION:" + t.description.replace(/\n/g, "\\n").replace(/[\\,;]/g, " ") + "\r\n" : ""}END:VEVENT\r\n`;
+    }
+    for (const e of emails.rows) {
+      const d = new Date(e.scheduled_at);
+      const dateStr = d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+      ical += `BEGIN:VEVENT\r\nUID:email-${e.id}@per-sistant\r\nDTSTART:${dateStr}\r\nDTEND:${dateStr}\r\nSUMMARY:Email: ${e.subject.replace(/[\\,;]/g, " ")}\r\nDESCRIPTION:To: ${e.recipient_email}\r\nEND:VEVENT\r\n`;
+    }
+    ical += "END:VCALENDAR\r\n";
+    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="per-sistant.ics"');
+    res.send(ical);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1581,61 +2518,115 @@ app.get("/", async (req, res) => {
 ${themeScript()}
 <div class="container">
   ${navBar("/")}
-  <h1>Dashboard</h1>
-  <p class="subtitle">Your personal command center</p>
-
-  <!-- Global Search -->
-  <div class="search-bar">
-    <span class="search-icon">&#128269;</span>
-    <input type="text" id="global-search" placeholder="Search todos, emails, notes, contacts... (press /)" oninput="doSearch(this.value)">
+  <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div><h1>Dashboard</h1><p class="subtitle" style="margin-bottom:0;">Your personal command center</p></div>
+    <button id="customize-btn" onclick="toggleCustomize()" style="padding:6px 14px;font-size:10px;font-weight:500;letter-spacing:0.5px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;text-transform:uppercase;">Customize</button>
   </div>
-  <div class="section search-results" id="search-results" style="display:none;margin-bottom:24px;"></div>
+  <div style="margin-bottom:36px;"></div>
 
-  <div class="top-cards" id="cards"></div>
-
-  <!-- AI Daily Briefing -->
-  <div id="briefing-section" style="display:none;margin-bottom:24px;">
-    <div class="section">
-      <h2>Today's Briefing</h2>
-      <div id="briefing-content" style="font-size:14px;font-weight:300;line-height:1.7;"></div>
+  <!-- Customization panel -->
+  <div id="customize-panel" style="display:none;margin-bottom:24px;padding:16px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--warm);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <span style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;">Widget Visibility &amp; Order</span>
+      <button onclick="resetLayout()" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Reset</button>
     </div>
+    <div id="widget-toggles" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+    <div style="margin-top:10px;font-size:10px;color:var(--text-muted);">Drag widgets below to reorder. Click toggles above to show/hide.</div>
   </div>
 
-  <!-- Task Overview with Tabs -->
-  <div class="section" style="margin-bottom:24px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-      <h2 style="margin-bottom:0;">Task Overview</h2>
+  <div id="dash-widgets">
+    <!-- Search widget -->
+    <div class="dash-widget" data-widget="search" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div class="search-bar">
+        <span class="search-icon">&#128269;</span>
+        <input type="text" id="global-search" placeholder="Search todos, emails, notes, contacts... (press /)" oninput="doSearch(this.value)">
+      </div>
+      <div class="section search-results" id="search-results" style="display:none;margin-bottom:24px;"></div>
     </div>
-    <div class="filters" id="dash-task-filters">
-      <button class="active" onclick="setDashView(this,'all')">All</button>
-      <button onclick="setDashView(this,'category')">By Category</button>
-      <button onclick="setDashView(this,'urgency')">By Urgency</button>
-      <button onclick="setDashView(this,'due')">Due Soon</button>
-    </div>
-    <div id="dash-tasks"></div>
-  </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
-    <div class="section">
-      <h2>Upcoming Tasks</h2>
-      <div id="upcoming-tasks"></div>
+    <!-- Cards widget -->
+    <div class="dash-widget" data-widget="cards" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div class="top-cards" id="cards"></div>
     </div>
-    <div class="section">
-      <h2>Scheduled Emails</h2>
-      <div id="scheduled-emails"></div>
-    </div>
-  </div>
 
-  <!-- Perfin Integration -->
-  <div id="perfin-section" style="display:none;margin-top:24px;">
-    <div class="section">
-      <h2>Perfin — Financial Overview</h2>
-      <div id="perfin-data"></div>
+    <!-- AI Daily Briefing widget -->
+    <div class="dash-widget" data-widget="briefing" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div id="briefing-section" style="display:none;margin-bottom:24px;">
+        <div class="section">
+          <h2>Today's Briefing</h2>
+          <div id="briefing-content" style="font-size:14px;font-weight:300;line-height:1.7;"></div>
+        </div>
+      </div>
     </div>
-  </div>
 
-  <div style="margin-top:24px;text-align:center;">
-    <p style="font-size:11px;color:var(--text-muted);">Keyboard shortcuts: <span class="kbd">/</span> Search &middot; <span class="kbd">N</span> New task &middot; <span class="kbd">E</span> New email &middot; <span class="kbd">?</span> Show all</p>
+    <!-- AI Smart Suggestions widget -->
+    <div class="dash-widget" data-widget="suggestions" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div id="suggestions-section" style="display:none;margin-bottom:24px;">
+        <div class="section">
+          <h2>Smart Suggestions</h2>
+          <div id="suggestions-content"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI Natural Language Query widget -->
+    <div class="dash-widget" data-widget="ai_query" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div class="section" style="margin-bottom:24px;">
+        <h2>Ask Your Assistant</h2>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="ai-query-input" placeholder="Ask anything... &quot;What did I do last week?&quot; &quot;How many tasks are overdue?&quot;" style="flex:1;padding:10px 14px;font-size:13px;font-family:inherit;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);outline:none;" onkeydown="if(event.key==='Enter')askAI()">
+          <button onclick="askAI()" style="padding:10px 18px;font-size:12px;font-weight:500;letter-spacing:0.5px;border:1px solid var(--teal);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;">Ask</button>
+        </div>
+        <div id="ai-query-answer" style="display:none;margin-top:12px;padding:12px 16px;background:var(--surface-2);border-radius:8px;font-size:13px;font-weight:300;line-height:1.6;white-space:pre-wrap;"></div>
+      </div>
+    </div>
+
+    <!-- Task Overview widget -->
+    <div class="dash-widget" data-widget="tasks" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div class="section" style="margin-bottom:24px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <h2 style="margin-bottom:0;">Task Overview</h2>
+        </div>
+        <div class="filters" id="dash-task-filters">
+          <button class="active" onclick="setDashView(this,'all')">All</button>
+          <button onclick="setDashView(this,'category')">By Category</button>
+          <button onclick="setDashView(this,'urgency')">By Urgency</button>
+          <button onclick="setDashView(this,'due')">Due Soon</button>
+        </div>
+        <div id="dash-tasks"></div>
+      </div>
+    </div>
+
+    <!-- Upcoming + Emails widget -->
+    <div class="dash-widget" data-widget="upcoming_emails" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div class="dash-two-col" style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+        <div class="section">
+          <h2>Upcoming Tasks</h2>
+          <div id="upcoming-tasks"></div>
+        </div>
+        <div class="section">
+          <h2>Scheduled Emails</h2>
+          <div id="scheduled-emails"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Perfin widget -->
+    <div class="dash-widget" data-widget="perfin" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div id="perfin-section" style="display:none;margin-top:24px;">
+        <div class="section">
+          <h2>Perfin — Financial Overview</h2>
+          <div id="perfin-data"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Shortcuts widget -->
+    <div class="dash-widget" data-widget="shortcuts" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+      <div style="margin-top:24px;text-align:center;">
+        <p style="font-size:11px;color:var(--text-muted);">Keyboard shortcuts: <span class="kbd">/</span> Search &middot; <span class="kbd">N</span> New task &middot; <span class="kbd">E</span> New email &middot; <span class="kbd">?</span> Show all</p>
+      </div>
+    </div>
   </div>
 </div>
 <script>
@@ -1649,7 +2640,15 @@ function doSearch(q) {
     else {
       document.getElementById('search-results').innerHTML = results.map(r => {
         var href = r.type==='todo'?'/todos':r.type==='email'?'/emails':r.type==='note'?'/notes':'/contacts';
-        return '<a href="'+href+'" class="result-item" style="display:block;text-decoration:none;color:inherit;"><div class="result-type">'+r.type+'</div><div style="font-size:14px;">'+esc(r.title||'')+'</div>'+(r.description?'<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+esc(r.description)+'</div>':'')+'</a>';
+        var actions = '';
+        if (r.type === 'todo' && !r.completed) {
+          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button onclick="event.preventDefault();event.stopPropagation();searchComplete('+r.id+','+!!r.recurring+')" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Complete</button></div>';
+        } else if (r.type === 'email' && r.status === 'scheduled') {
+          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button onclick="event.preventDefault();event.stopPropagation();searchSendEmail('+r.id+')" style="background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Send Now</button></div>';
+        } else if (r.type === 'note') {
+          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button onclick="event.preventDefault();event.stopPropagation();searchTogglePin('+r.id+','+!r.pinned+')" style="background:var(--yellow-bg);color:var(--yellow);border:1px solid var(--yellow);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(r.pinned?'Unpin':'Pin')+'</button></div>';
+        }
+        return '<a href="'+href+'" class="result-item" style="display:block;text-decoration:none;color:inherit;"><div class="result-type">'+r.type+(r.type==='todo'&&r.completed?' (done)':'')+'</div><div style="font-size:14px;">'+esc(r.title||'')+'</div>'+(r.description?'<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+esc(r.description)+'</div>':'')+actions+'</a>';
       }).join('');
     }
     document.getElementById('search-results').style.display='block';
@@ -1698,13 +2697,15 @@ function renderDashTodo(t) {
   var completeBtn = t.recurring
     ? '<button onclick="event.stopPropagation();dashCompleteRecurring('+t.id+')" title="Complete & create next" style="background:none;border:1px solid var(--green);color:var(--green);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">&#10003;</button>'
     : '<button onclick="event.stopPropagation();dashComplete('+t.id+')" title="Mark complete" style="background:none;border:1px solid var(--green);color:var(--green);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">&#10003;</button>';
-  return '<div class="todo-item" style="display:flex;align-items:center;gap:10px;">'+completeBtn+'<div class="todo-content" style="flex:1;"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span>'+(t.category?'<span>'+esc(t.category)+'</span>':'')+(t.due_date?'<span'+overdue+'>Due: '+new Date(t.due_date).toLocaleDateString()+'</span>':'')+(t.recurring?'<span class="badge recurring">recurring</span>':'')+'</div></div></div>';
+  var streakBadge = t.recurring && t.streak_count > 0 ? '<span class="badge streak">&#x1F525; '+t.streak_count+'</span>' : '';
+  return '<div class="todo-item" style="display:flex;align-items:center;gap:10px;">'+completeBtn+'<div class="todo-content" style="flex:1;"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span>'+(t.category?'<span>'+esc(t.category)+'</span>':'')+(t.due_date?'<span'+overdue+'>Due: '+new Date(t.due_date).toLocaleDateString()+'</span>':'')+(t.recurring?'<span class="badge recurring">recurring</span>':'')+streakBadge+'</div></div></div>';
 }
 
 async function dashComplete(id) {
   await fetch('/api/todos/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({completed:true})});
   allTodos = allTodos.filter(t=>t.id!==id);
   renderDashTasks();
+  showUndo('Task completed','todo',id,'complete');
 }
 
 async function dashCompleteRecurring(id) {
@@ -1715,7 +2716,30 @@ async function dashCompleteRecurring(id) {
 
 async function dashSendEmail(id) {
   var r = await fetch('/api/emails/'+id+'/send', {method:'POST'}).then(r=>r.json());
-  if (r.ok) { load(); } else { alert('Failed: '+(r.error||'Unknown error')); }
+  if (r.ok) { showUndo('Email sent','email',id,'send'); load(); } else { alert('Failed: '+(r.error||'Unknown error')); }
+}
+
+// Search quick actions
+async function searchComplete(id, isRecurring) {
+  if (isRecurring) await fetch('/api/todos/'+id+'/complete-recurring', {method:'POST'});
+  else await fetch('/api/todos/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({completed:true})});
+  showUndo('Task completed','todo',id,'complete');
+  document.getElementById('search-results').style.display='none';
+  document.getElementById('global-search').value='';
+  load();
+}
+async function searchSendEmail(id) {
+  var r = await fetch('/api/emails/'+id+'/send', {method:'POST'}).then(r=>r.json());
+  if (r.ok) { showUndo('Email sent','email',id,'send'); }
+  document.getElementById('search-results').style.display='none';
+  document.getElementById('global-search').value='';
+  load();
+}
+async function searchTogglePin(id, pinned) {
+  await fetch('/api/notes/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({pinned:pinned})});
+  document.getElementById('search-results').style.display='none';
+  document.getElementById('global-search').value='';
+  load();
 }
 
 async function load() {
@@ -1765,6 +2789,16 @@ async function load() {
     }
   } catch {}
 
+  // Check notifications and show browser alerts
+  fetch('/api/notifications/check').then(r=>r.json()).then(d => {
+    if (d.notifications && d.notifications.length && 'Notification' in window && Notification.permission === 'granted') {
+      var important = d.notifications.filter(n => n.type === 'overdue' || n.type === 'streak_at_risk');
+      important.slice(0,3).forEach(n => {
+        new Notification('Per-sistant', { body: (n.type==='overdue'?'Overdue: ':'Streak at risk: ')+n.title, icon: '/icon-192.svg' });
+      });
+    }
+  }).catch(function(){});
+
   // Load AI daily briefing (non-blocking)
   fetch('/api/ai/daily-briefing').then(r=>r.json()).then(d => {
     if (d.briefing) {
@@ -1772,6 +2806,107 @@ async function load() {
       document.getElementById('briefing-section').style.display = 'block';
     }
   }).catch(function(){});
+
+  // Load AI smart suggestions (non-blocking)
+  fetch('/api/ai/smart-suggestions').then(r=>r.json()).then(d => {
+    if (d.suggestions && d.suggestions.length) {
+      document.getElementById('suggestions-content').innerHTML = d.suggestions.map(s =>
+        '<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:13px;font-weight:300;line-height:1.5;">'+
+        '<span style="color:var(--teal);margin-right:8px;">&#9733;</span>'+esc(s.suggestion)+'</div>'
+      ).join('');
+      document.getElementById('suggestions-section').style.display = 'block';
+    }
+  }).catch(function(){});
+}
+
+async function askAI() {
+  var input = document.getElementById('ai-query-input');
+  var q = input.value.trim();
+  if (!q) return;
+  var answerEl = document.getElementById('ai-query-answer');
+  answerEl.textContent = 'Thinking...';
+  answerEl.style.display = 'block';
+  try {
+    var r = await fetch('/api/ai/query', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})}).then(r=>r.json());
+    answerEl.textContent = r.answer || 'No answer available.';
+  } catch (err) { answerEl.textContent = 'Error: '+err.message; }
+}
+
+// Dashboard widget customization
+var widgetNames = {search:'Search',cards:'Stats Cards',briefing:'AI Briefing',suggestions:'Smart Suggestions',ai_query:'Ask AI',tasks:'Task Overview',upcoming_emails:'Upcoming & Emails',perfin:'Perfin',shortcuts:'Shortcuts'};
+var dashLayout = {widgets:['search','cards','briefing','suggestions','ai_query','tasks','upcoming_emails','perfin','shortcuts'],hidden:[]};
+var wdragSrcWidget = null;
+
+async function loadLayout() {
+  try {
+    var settings = await fetch('/api/settings').then(r=>r.json());
+    if (settings.dashboard_layout) dashLayout = settings.dashboard_layout;
+  } catch {}
+  applyLayout();
+}
+
+function applyLayout() {
+  var container = document.getElementById('dash-widgets');
+  var widgets = container.querySelectorAll('.dash-widget');
+  var map = {};
+  widgets.forEach(w => { map[w.dataset.widget] = w; });
+  // Reorder
+  dashLayout.widgets.forEach(id => { if (map[id]) container.appendChild(map[id]); });
+  // Show/hide
+  widgets.forEach(w => {
+    w.style.display = dashLayout.hidden.includes(w.dataset.widget) ? 'none' : 'block';
+  });
+  renderToggles();
+}
+
+function renderToggles() {
+  var html = '';
+  dashLayout.widgets.forEach(id => {
+    var hidden = dashLayout.hidden.includes(id);
+    html += '<button onclick="toggleWidget(\\''+id+'\\');event.stopPropagation();" style="padding:4px 12px;font-size:10px;font-weight:500;border-radius:20px;cursor:pointer;font-family:inherit;border:1px solid '+(hidden?'var(--border)':'var(--warm)')+';background:'+(hidden?'transparent':'rgba(212,165,116,0.1)')+';color:'+(hidden?'var(--text-muted)':'var(--warm)')+';">'+(widgetNames[id]||id)+'</button>';
+  });
+  document.getElementById('widget-toggles').innerHTML = html;
+}
+
+function toggleWidget(id) {
+  var idx = dashLayout.hidden.indexOf(id);
+  if (idx > -1) dashLayout.hidden.splice(idx, 1);
+  else dashLayout.hidden.push(id);
+  applyLayout();
+  saveLayout();
+}
+
+function toggleCustomize() {
+  var panel = document.getElementById('customize-panel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  document.getElementById('customize-btn').textContent = panel.style.display === 'none' ? 'Customize' : 'Done';
+}
+
+function resetLayout() {
+  dashLayout = {widgets:['search','cards','briefing','tasks','upcoming_emails','perfin','shortcuts'],hidden:[]};
+  applyLayout();
+  saveLayout();
+}
+
+async function saveLayout() {
+  await fetch('/api/settings', {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({dashboard_layout:dashLayout})});
+}
+
+function wdragStart(e) { wdragSrcWidget = e.currentTarget.dataset.widget; e.currentTarget.style.opacity = '0.4'; }
+function wdragOver(e) { e.preventDefault(); e.currentTarget.style.borderTop = '2px solid var(--warm)'; }
+function wdragEnd(e) { document.querySelectorAll('.dash-widget').forEach(w => { w.style.opacity = '1'; w.style.borderTop = ''; }); }
+function wdrop(e) {
+  e.preventDefault(); e.currentTarget.style.borderTop = '';
+  var target = e.currentTarget.dataset.widget;
+  if (wdragSrcWidget === target) return;
+  var srcIdx = dashLayout.widgets.indexOf(wdragSrcWidget);
+  var tgtIdx = dashLayout.widgets.indexOf(target);
+  if (srcIdx > -1 && tgtIdx > -1) {
+    dashLayout.widgets.splice(srcIdx, 1);
+    dashLayout.widgets.splice(tgtIdx, 0, wdragSrcWidget);
+    applyLayout();
+    saveLayout();
+  }
 }
 
 // Keyboard shortcuts
@@ -1784,7 +2919,7 @@ document.addEventListener('keydown', function(e) {
   else if (e.key === 'r' || e.key === 'R') { location.href = '/review'; }
 });
 
-
+loadLayout();
 load();
 </script>
 </body></html>`);
@@ -1805,6 +2940,7 @@ ${themeScript()}
   <div class="actions">
     <button class="primary" onclick="openAdd()">+ New Task</button>
     <button onclick="openQuickTodo()">Quick Add</button>
+    <button onclick="openTemplateList()">From Template</button>
     <button id="select-toggle" onclick="toggleSelectMode()">Select</button>
   </div>
   <div id="bulk-bar" style="display:none;padding:10px 16px;margin-bottom:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);display:none;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;">
@@ -1883,7 +3019,15 @@ ${themeScript()}
       </div>
       <div id="f-recurrence" style="display:none;">
         <label>Repeat</label>
-        <select id="f-recurrence-rule"><option value="daily">Daily</option><option value="weekdays">Weekdays</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select>
+        <select id="f-recurrence-rule" onchange="document.getElementById('f-interval-row').style.display=this.value.startsWith('custom')?'flex':'none'">
+          <option value="daily">Daily</option><option value="weekdays">Weekdays</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option>
+          <option value="custom_days">Every N Days</option><option value="custom_weeks">Every N Weeks</option><option value="custom_months">Every N Months</option>
+        </select>
+        <div id="f-interval-row" style="display:none;gap:8px;align-items:center;margin-top:6px;">
+          <label style="margin:0;font-size:11px;white-space:nowrap;">Every</label>
+          <input type="number" id="f-interval" min="1" max="365" value="2" style="width:60px;font-size:12px;">
+          <span id="f-interval-unit" style="font-size:11px;color:var(--text-muted);">days</span>
+        </div>
       </div>
     </div>
     <div id="subtasks-section" style="display:none;margin-top:16px;">
@@ -1894,10 +3038,45 @@ ${themeScript()}
         <button onclick="addSubtask()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
       </div>
     </div>
+    <!-- Location reminder (edit mode only) -->
+    <div id="location-section" style="display:none;margin-top:16px;">
+      <label>Location Reminder</label>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="text" id="f-location-name" placeholder="e.g. Home, Office, Grocery Store" style="flex:1">
+        <button onclick="getLocation()" title="Use current location" style="padding:10px 14px;font-size:14px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);flex-shrink:0;">&#128205;</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px;">
+        <input type="number" step="any" id="f-location-lat" placeholder="Latitude" style="font-size:11px;">
+        <input type="number" step="any" id="f-location-lng" placeholder="Longitude" style="font-size:11px;">
+        <input type="number" id="f-location-radius" placeholder="Radius (m)" value="200" style="font-size:11px;">
+      </div>
+      <div id="location-status" style="font-size:10px;color:var(--text-muted);margin-top:4px;"></div>
+    </div>
+    <!-- Dependencies section (edit mode only) -->
+    <div id="deps-section" style="display:none;margin-top:16px;">
+      <label>Dependencies</label>
+      <div id="deps-list" style="margin-bottom:8px;"></div>
+      <div style="display:flex;gap:8px;">
+        <select id="dep-select" style="flex:1"><option value="">Select a task this depends on...</option></select>
+        <button onclick="addDep()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
+      </div>
+    </div>
     <div class="modal-actions">
       <button onclick="closeModal()">Cancel</button>
       <button class="primary" onclick="saveTodo()">Save</button>
+      <button id="save-template-btn" style="display:none;padding:10px 20px;font-size:13px;font-weight:500;border:1px solid var(--teal);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;" onclick="saveAsTemplate()">Save as Template</button>
       <button class="danger" id="delete-btn" style="display:none" onclick="deleteTodo()">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Template List Modal -->
+<div class="modal-overlay" id="template-modal">
+  <div class="modal">
+    <h2>Task Templates</h2>
+    <div id="template-list" style="margin-bottom:16px;"></div>
+    <div class="modal-actions">
+      <button onclick="closeTemplateList()">Close</button>
     </div>
   </div>
 </div>
@@ -1910,7 +3089,10 @@ ${themeScript()}
       Examples: "Buy groceries tomorrow" &middot; "Call dentist Friday at 2PM" &middot; "Finish report by March 20"
     </p>
     <label>What needs to be done?</label>
-    <input type="text" id="qt-input" placeholder="Type a task..." onkeydown="if(event.key==='Enter')parseQuickTodo()">
+    <div style="display:flex;gap:8px;">
+      <input type="text" id="qt-input" placeholder="Type or speak a task..." onkeydown="if(event.key==='Enter')parseQuickTodo()" style="flex:1">
+      <button onclick="startVoiceInput('qt-input')" title="Voice input" style="padding:10px 14px;font-size:16px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);flex-shrink:0;">&#127908;</button>
+    </div>
     <div id="qt-preview" style="display:none;margin-top:16px;" class="section">
       <h2>Preview</h2>
       <div id="qt-preview-content"></div>
@@ -1985,10 +3167,11 @@ async function load() {
   var todos = await fetch('/api/todos'+(q.length?'?'+q.join('&'):'')).then(r=>r.json());
   if (!todos.length) { document.getElementById('todo-list').innerHTML = '<div class="empty-msg">No tasks found</div>'; return; }
 
-  // Fetch subtasks for all todos
-  var subtaskMap = {};
+  // Fetch subtasks and dependencies for all todos
+  var subtaskMap = {}, depMap = {};
   await Promise.all(todos.map(async t => {
     try { subtaskMap[t.id] = await fetch('/api/todos/'+t.id+'/subtasks').then(r=>r.json()); } catch { subtaskMap[t.id] = []; }
+    try { depMap[t.id] = await fetch('/api/todos/'+t.id+'/dependencies').then(r=>r.json()); } catch { depMap[t.id] = {blocked_by:[],blocking:[]}; }
   }));
 
   document.getElementById('todo-list').innerHTML = todos.map((t, idx) => {
@@ -2003,7 +3186,26 @@ async function load() {
         '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" onclick="event.stopPropagation();toggleSubtask('+s.id+','+!s.completed+')"></div><span class="subtask-text'+(s.completed?' done':'')+'" ondblclick="event.stopPropagation();inlineEditSubtask(this,'+s.id+')">'+esc(s.title)+'</span><button class="subtask-edit-btn" onclick="event.stopPropagation();inlineEditSubtask(this.previousElementSibling,'+s.id+')">&#9998;</button></div>'
       ).join('')+'</div>';
     }
-    return '<div class="todo-item" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><input type="checkbox" class="bulk-check" data-id="'+t.id+'" style="display:'+(selectMode?'inline-block':'none')+';accent-color:var(--warm);margin-right:4px;cursor:pointer;" onchange="toggleBulkItem('+t.id+',this.checked)"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" onclick="toggleTodo('+t.id+','+!t.completed+','+!!t.recurring+')"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+(t.recurring?'<span class="badge recurring">'+t.recurrence_rule+'</span>':'')+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions"><button onclick="openEdit('+t.id+')">&#9998;</button></div></div>';
+    var deps = depMap[t.id] || {blocked_by:[],blocking:[]};
+    var unblockedBy = deps.blocked_by.filter(d=>!d.completed);
+    var isBlocked = unblockedBy.length > 0;
+    var depBadges = '';
+    if (isBlocked) depBadges += '<span class="badge blocked" title="Blocked by: '+unblockedBy.map(d=>esc(d.title)).join(', ')+'">blocked ('+unblockedBy.length+')</span>';
+    if (deps.blocking.length) depBadges += '<span class="badge blocking" title="Blocking: '+deps.blocking.map(d=>esc(d.title)).join(', ')+'">blocking ('+deps.blocking.length+')</span>';
+    if (t.streak_count > 0) depBadges += '<span class="badge streak" title="Best: '+t.best_streak+'">&#x1F525; '+t.streak_count+' streak</span>';
+    if (t.location_name) depBadges += '<span title="'+esc(t.location_name)+'" style="font-size:10px;color:var(--teal);">&#128205; '+esc(t.location_name)+'</span>';
+    if (t.snoozed_until) depBadges += '<span style="font-size:10px;color:var(--yellow);" title="Snoozed until '+t.snoozed_until+'">&#128164; snoozed</span>';
+    var recurInfo = '';
+    if (t.recurring) {
+      var ruleLabel = t.recurrence_rule;
+      if (t.recurrence_rule && t.recurrence_rule.startsWith('custom') && t.recurrence_interval > 1) {
+        var unit = t.recurrence_rule.replace('custom_','');
+        ruleLabel = 'every '+t.recurrence_interval+' '+unit;
+      }
+      recurInfo = '<span class="badge recurring">'+ruleLabel+'</span>';
+    }
+    var skipSnoozeButtons = t.recurring && !t.completed ? '<button onclick="event.stopPropagation();skipTodo('+t.id+')" title="Skip this occurrence" style="font-size:10px;padding:2px 6px;">Skip</button><button onclick="event.stopPropagation();snoozeTodo('+t.id+')" title="Snooze" style="font-size:10px;padding:2px 6px;">&#128164;</button>' : '';
+    return '<div class="todo-item'+(isBlocked?' todo-blocked':'')+'" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><input type="checkbox" class="bulk-check" data-id="'+t.id+'" style="display:'+(selectMode?'inline-block':'none')+';accent-color:var(--warm);margin-right:4px;cursor:pointer;" onchange="toggleBulkItem('+t.id+',this.checked)"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" onclick="toggleTodo('+t.id+','+!t.completed+','+!!t.recurring+')"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+recurInfo+depBadges+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions">'+skipSnoozeButtons+'<button onclick="openEdit('+t.id+')">&#9998;</button></div></div>';
   }).join('');
 }
 
@@ -2119,7 +3321,15 @@ function openAdd() {
   document.getElementById('f-recurrence').style.display = 'none';
   document.getElementById('f-recurrence-rule').value = 'weekly';
   document.getElementById('delete-btn').style.display = 'none';
+  document.getElementById('save-template-btn').style.display = 'inline-block';
   document.getElementById('subtasks-section').style.display = 'block';
+  document.getElementById('deps-section').style.display = 'none';
+  document.getElementById('location-section').style.display = 'block';
+  document.getElementById('f-location-name').value = '';
+  document.getElementById('f-location-lat').value = '';
+  document.getElementById('f-location-lng').value = '';
+  document.getElementById('f-location-radius').value = 200;
+  document.getElementById('location-status').textContent = '';
   editSubtasks = [];
   renderEditSubtasks();
   document.getElementById('modal').classList.add('active');
@@ -2150,9 +3360,20 @@ async function openEdit(id) {
   document.getElementById('f-recurring').checked = t.recurring||false;
   document.getElementById('f-recurrence').style.display = t.recurring ? 'block' : 'none';
   document.getElementById('f-recurrence-rule').value = t.recurrence_rule || 'weekly';
+  document.getElementById('f-interval').value = t.recurrence_interval || 1;
+  document.getElementById('f-interval-row').style.display = (t.recurrence_rule||'').startsWith('custom') ? 'flex' : 'none';
   document.getElementById('delete-btn').style.display = 'inline-block';
+  document.getElementById('save-template-btn').style.display = 'inline-block';
   document.getElementById('subtasks-section').style.display = 'block';
+  document.getElementById('deps-section').style.display = 'block';
+  document.getElementById('location-section').style.display = 'block';
+  document.getElementById('f-location-name').value = t.location_name || '';
+  document.getElementById('f-location-lat').value = t.location_lat || '';
+  document.getElementById('f-location-lng').value = t.location_lng || '';
+  document.getElementById('f-location-radius').value = t.location_radius || 200;
+  document.getElementById('location-status').textContent = t.location_lat ? 'Location: ' + t.location_lat.toFixed(4) + ', ' + t.location_lng.toFixed(4) : '';
   loadEditSubtasks(id);
+  loadDeps(id);
   document.getElementById('modal').classList.add('active');
 }
 
@@ -2170,6 +3391,11 @@ async function saveTodo() {
     due_date: document.getElementById('f-due').value || null,
     recurring: isRecurring,
     recurrence_rule: isRecurring ? document.getElementById('f-recurrence-rule').value : null,
+    recurrence_interval: isRecurring ? (parseInt(document.getElementById('f-interval').value) || 1) : 1,
+    location_name: document.getElementById('f-location-name').value || null,
+    location_lat: parseFloat(document.getElementById('f-location-lat').value) || null,
+    location_lng: parseFloat(document.getElementById('f-location-lng').value) || null,
+    location_radius: parseInt(document.getElementById('f-location-radius').value) || 200,
   };
   if (!data.title) return alert('Title is required');
   var result;
@@ -2193,6 +3419,19 @@ async function toggleTodo(id, completed, isRecurring) {
   } else {
     await fetch('/api/todos/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({completed})});
   }
+  if (completed) showUndo('Task completed','todo',id,'complete');
+  load();
+}
+
+async function skipTodo(id) {
+  await fetch('/api/todos/'+id+'/skip-recurring', {method:'POST'});
+  load();
+}
+
+async function snoozeTodo(id) {
+  var until = prompt('Snooze until (YYYY-MM-DD):');
+  if (!until) return;
+  await fetch('/api/todos/'+id+'/snooze', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({until:until})});
   load();
 }
 
@@ -2201,6 +3440,81 @@ async function deleteTodo() {
   await fetch('/api/todos/'+id, {method:'DELETE'});
   closeModal(); load();
   showUndo('Task moved to trash','todo',id);
+}
+
+// Location
+function getLocation() {
+  if (!navigator.geolocation) { alert('Geolocation not supported'); return; }
+  document.getElementById('location-status').textContent = 'Getting location...';
+  navigator.geolocation.getCurrentPosition(function(pos) {
+    document.getElementById('f-location-lat').value = pos.coords.latitude.toFixed(6);
+    document.getElementById('f-location-lng').value = pos.coords.longitude.toFixed(6);
+    document.getElementById('location-status').textContent = 'Location set: ' + pos.coords.latitude.toFixed(4) + ', ' + pos.coords.longitude.toFixed(4);
+  }, function(err) {
+    document.getElementById('location-status').textContent = 'Error: ' + err.message;
+  }, {enableHighAccuracy: true});
+}
+
+// Check location reminders periodically
+function checkLocationReminders() {
+  if (!navigator.geolocation || !('Notification' in window) || Notification.permission !== 'granted') return;
+  navigator.geolocation.getCurrentPosition(async function(pos) {
+    try {
+      var todos = await fetch('/api/todos?completed=false').then(r=>r.json());
+      todos.filter(t => t.location_lat && t.location_lng).forEach(t => {
+        var dist = haversine(pos.coords.latitude, pos.coords.longitude, t.location_lat, t.location_lng);
+        if (dist <= (t.location_radius || 200)) {
+          new Notification('Per-sistant Reminder', { body: t.title + (t.location_name ? ' (near ' + t.location_name + ')' : ''), icon: '/icon-192.svg' });
+        }
+      });
+    } catch {}
+  }, function(){}, {enableHighAccuracy: false, timeout: 5000});
+}
+function haversine(lat1, lon1, lat2, lon2) {
+  var R = 6371000; var p = Math.PI / 180;
+  var a = 0.5 - Math.cos((lat2-lat1)*p)/2 + Math.cos(lat1*p)*Math.cos(lat2*p)*(1-Math.cos((lon2-lon1)*p))/2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+if (typeof setInterval !== 'undefined') setInterval(checkLocationReminders, 300000); // every 5 min
+
+// Dependencies
+async function loadDeps(todoId) {
+  var deps = await fetch('/api/todos/'+todoId+'/dependencies').then(r=>r.json());
+  var html = '';
+  if (deps.blocked_by.length) {
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Blocked by:</div>';
+    deps.blocked_by.forEach(d => {
+      html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:12px;"><span class="badge blocked">blocked by</span><span'+(d.completed?' style="text-decoration:line-through;opacity:0.5"':'')+'>'+esc(d.title)+'</span><button onclick="removeDep('+d.dep_id+','+todoId+')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:4px;">&times;</button></div>';
+    });
+  }
+  if (deps.blocking.length) {
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;margin-top:6px;">Blocking:</div>';
+    deps.blocking.forEach(d => {
+      html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:12px;"><span class="badge blocking">blocking</span><span>'+esc(d.title)+'</span></div>';
+    });
+  }
+  if (!deps.blocked_by.length && !deps.blocking.length) html = '<div style="font-size:11px;color:var(--text-muted);">No dependencies</div>';
+  document.getElementById('deps-list').innerHTML = html;
+  // Populate select with other todos
+  var todos = await fetch('/api/todos?completed=false').then(r=>r.json());
+  var existing = new Set(deps.blocked_by.map(d=>d.depends_on_id));
+  var sel = document.getElementById('dep-select');
+  sel.innerHTML = '<option value="">Select a task this depends on...</option>';
+  todos.filter(t => t.id !== parseInt(todoId) && !existing.has(t.id)).forEach(t => {
+    sel.innerHTML += '<option value="'+t.id+'">'+esc(t.title)+'</option>';
+  });
+}
+async function addDep() {
+  var todoId = document.getElementById('edit-id').value;
+  var depId = document.getElementById('dep-select').value;
+  if (!depId || !todoId) return;
+  var r = await fetch('/api/todos/'+todoId+'/dependencies', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({depends_on_id:parseInt(depId)})}).then(r=>r.json());
+  if (r.error) { alert(r.error); return; }
+  loadDeps(todoId);
+}
+async function removeDep(depId, todoId) {
+  await fetch('/api/dependencies/'+depId, {method:'DELETE'});
+  loadDeps(todoId);
 }
 
 // Quick Add (natural language)
@@ -2290,6 +3604,57 @@ async function parseQuickTodoAI() {
     document.getElementById('qt-confirm').style.display = 'inline-block';
   } catch { parseQuickTodo(); } // Fallback to regex
   finally { btn.textContent = 'Parse'; btn.disabled = false; }
+}
+
+// Templates
+async function openTemplateList() {
+  var templates = await fetch('/api/todo-templates').then(r=>r.json());
+  var el = document.getElementById('template-list');
+  if (!templates.length) { el.innerHTML = '<div class="empty-msg">No templates yet. Edit a task and click "Save as Template" to create one.</div>'; }
+  else {
+    el.innerHTML = templates.map(t => {
+      var subs = t.subtasks || [];
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="flex:1;"><div style="font-size:14px;font-weight:400;">'+esc(t.name)+'</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+esc(t.title)+' &middot; <span class="badge '+t.priority+'">'+t.priority+'</span> &middot; '+t.horizon+(subs.length?' &middot; '+subs.length+' subtasks':'')+'</div></div><div style="display:flex;gap:6px;"><button onclick="applyTemplate('+t.id+')" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Use</button><button onclick="deleteTemplate('+t.id+')" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">&#10005;</button></div></div>';
+    }).join('');
+  }
+  document.getElementById('template-modal').classList.add('active');
+}
+function closeTemplateList() { document.getElementById('template-modal').classList.remove('active'); }
+async function applyTemplate(id) {
+  await fetch('/api/todo-templates/'+id+'/apply', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+  closeTemplateList();
+  load();
+}
+async function deleteTemplate(id) {
+  await fetch('/api/todo-templates/'+id, {method:'DELETE'});
+  openTemplateList();
+}
+async function saveAsTemplate() {
+  var name = prompt('Template name:');
+  if (!name) return;
+  var isRecurring = document.getElementById('f-recurring').checked;
+  var data = {
+    name: name,
+    title: document.getElementById('f-title').value,
+    description: document.getElementById('f-desc').value || null,
+    priority: document.getElementById('f-priority').value,
+    horizon: document.getElementById('f-horizon').value,
+    category: (document.getElementById('f-category-select').value === '__custom__' ? document.getElementById('f-category-custom').value : document.getElementById('f-category-select').value) || null,
+    recurring: isRecurring,
+    recurrence_rule: isRecurring ? document.getElementById('f-recurrence-rule').value : null,
+    recurrence_interval: isRecurring ? parseInt(document.getElementById('f-interval').value) || 1 : 1,
+    subtasks: editSubtasks.map(s => s.title),
+  };
+  // If editing existing, get subtasks from the server
+  var todoId = document.getElementById('edit-id').value;
+  if (todoId) {
+    try {
+      var subs = await fetch('/api/todos/'+todoId+'/subtasks').then(r=>r.json());
+      data.subtasks = subs.map(s => s.title);
+    } catch {}
+  }
+  await fetch('/api/todo-templates', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  alert('Template saved!');
 }
 
 // Keyboard shortcuts
@@ -2726,8 +4091,18 @@ ${themeScript()}
     <input type="hidden" id="n-id">
     <label>Title</label>
     <input type="text" id="n-title" placeholder="Optional title">
-    <label>Content</label>
-    <textarea id="n-content" style="min-height:200px" placeholder="Write your note..."></textarea>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
+      <label style="margin:0;">Content</label>
+      <label style="display:inline;cursor:pointer;font-size:11px;margin:0;">
+        <input type="checkbox" id="n-markdown" style="width:auto;margin-right:4px;" onchange="toggleMdPreview()"> Markdown
+      </label>
+      <button id="n-preview-btn" onclick="toggleMdPreview()" style="display:none;padding:2px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;">Preview</button>
+    </div>
+    <div style="position:relative;">
+      <textarea id="n-content" style="min-height:200px" placeholder="Write your note... (supports **bold**, *italic*, - lists, > quotes, [links](url))"></textarea>
+      <button onclick="startVoiceInput('n-content')" title="Voice input" style="position:absolute;top:10px;right:10px;padding:6px 10px;font-size:14px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:var(--surface);color:var(--warm);z-index:1;">&#127908;</button>
+    </div>
+    <div id="n-md-preview" style="display:none;min-height:100px;max-height:300px;overflow-y:auto;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);font-size:13px;line-height:1.6;margin-bottom:12px;"></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div><label>Color</label>
         <select id="n-color"><option value="default">Default</option><option value="warm">Warm</option><option value="teal">Teal</option><option value="green">Green</option><option value="blue">Blue</option></select>
@@ -2813,13 +4188,33 @@ async function load() {
     return '<div class="note-card'+(n.pinned?' pinned':'')+'" style="position:relative;'+borderStyle+'" onclick="openEditNote('+n.id+')">'+
       '<input type="checkbox" class="note-bulk-check" data-id="'+n.id+'" style="display:'+(noteSelectMode?'block':'none')+';position:absolute;top:10px;right:10px;accent-color:var(--warm);cursor:pointer;z-index:2;" onclick="event.stopPropagation()" onchange="toggleNoteBulkItem('+n.id+',this.checked,event)">'+
       (n.pinned?'<div style="font-size:10px;color:var(--warm);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">&#128204; Pinned</div>':'')+
-      (n.title?'<div class="note-title">'+esc(n.title)+'</div>':'')+
-      '<div class="note-preview">'+esc(n.content)+'</div>'+
+      (n.title?'<div class="note-title">'+esc(n.title)+(n.format==='markdown'?'<span class="md-badge">MD</span>':'')+'</div>':(!n.title && n.format==='markdown'?'<div style="margin-bottom:4px;"><span class="md-badge">MD</span></div>':''))+
+      '<div class="note-preview'+(n.format==='markdown'?' md':'')+'">'+(n.format==='markdown'?renderMd(n.content):esc(n.content))+'</div>'+
       tagsHtml+
       '<div class="note-date">'+new Date(n.updated_at).toLocaleDateString()+
       (n.reminder_at?' &bull; Reminder: '+new Date(n.reminder_at).toLocaleString():'')+
       '</div></div>';
   }).join('');
+}
+
+function toggleMdPreview() {
+  var isMd = document.getElementById('n-markdown').checked;
+  var previewBtn = document.getElementById('n-preview-btn');
+  var previewEl = document.getElementById('n-md-preview');
+  previewBtn.style.display = isMd ? 'inline-block' : 'none';
+  if (isMd && previewEl.style.display !== 'none') {
+    previewEl.innerHTML = renderMd(document.getElementById('n-content').value);
+  } else if (!isMd) {
+    previewEl.style.display = 'none';
+  }
+  if (isMd && previewBtn.textContent === 'Preview') {
+    previewEl.style.display = 'block';
+    previewEl.innerHTML = renderMd(document.getElementById('n-content').value);
+    previewBtn.textContent = 'Edit';
+  } else if (previewBtn.textContent === 'Edit') {
+    previewEl.style.display = 'none';
+    previewBtn.textContent = 'Preview';
+  }
 }
 
 function openNote() {
@@ -2830,6 +4225,9 @@ function openNote() {
   document.getElementById('n-color').value = 'default';
   document.getElementById('n-reminder').value = '';
   document.getElementById('n-pinned').checked = false;
+  document.getElementById('n-markdown').checked = false;
+  document.getElementById('n-preview-btn').style.display = 'none';
+  document.getElementById('n-md-preview').style.display = 'none';
   document.getElementById('n-delete-btn').style.display = 'none';
   currentTags = []; renderTags();
   document.getElementById('note-modal').classList.add('active');
@@ -2846,6 +4244,10 @@ async function openEditNote(id) {
   document.getElementById('n-color').value = n.color||'default';
   document.getElementById('n-reminder').value = n.reminder_at?n.reminder_at.slice(0,16):'';
   document.getElementById('n-pinned').checked = n.pinned;
+  document.getElementById('n-markdown').checked = n.format === 'markdown';
+  document.getElementById('n-preview-btn').style.display = n.format === 'markdown' ? 'inline-block' : 'none';
+  document.getElementById('n-preview-btn').textContent = 'Preview';
+  document.getElementById('n-md-preview').style.display = 'none';
   document.getElementById('n-delete-btn').style.display = 'inline-block';
   currentTags = n.tags || []; renderTags();
   document.getElementById('note-modal').classList.add('active');
@@ -2861,6 +4263,7 @@ async function saveNote() {
     pinned: document.getElementById('n-pinned').checked,
     reminder_at: document.getElementById('n-reminder').value ? new Date(document.getElementById('n-reminder').value).toISOString() : null,
     tags: currentTags.length ? currentTags : null,
+    format: document.getElementById('n-markdown').checked ? 'markdown' : 'plain',
   };
   if (!data.content) return alert('Content is required');
   var id = document.getElementById('n-id').value;
@@ -2896,11 +4299,14 @@ ${themeScript()}
 
   <div class="actions">
     <button class="primary" onclick="openAdd()">+ Add Contact</button>
+    <button onclick="document.getElementById('csv-file').click()">Import CSV</button>
+    <input type="file" id="csv-file" accept=".csv" style="display:none" onchange="importCSV(this)">
   </div>
 
   <div class="section">
     <div id="contact-list"></div>
   </div>
+  <div id="import-status" class="status-msg"></div>
 </div>
 
 <div class="modal-overlay" id="contact-modal">
@@ -2977,6 +4383,32 @@ async function deleteDirect(id) {
   load();
 }
 
+function importCSV(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = async function(e) {
+    var lines = e.target.result.split('\\n').filter(l => l.trim());
+    var contacts = [];
+    for (var i = 0; i < lines.length; i++) {
+      var parts = lines[i].split(',').map(s => s.trim().replace(/^["']|["']$/g, ''));
+      if (parts.length >= 2) {
+        // Skip header row
+        if (i === 0 && (parts[0].toLowerCase() === 'name' || parts[1].toLowerCase() === 'email')) continue;
+        contacts.push({ name: parts[0], email: parts[1] });
+      }
+    }
+    if (!contacts.length) { alert('No valid contacts found in CSV. Expected format: name,email'); return; }
+    var r = await fetch('/api/contacts/import', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contacts:contacts})}).then(r=>r.json());
+    var el = document.getElementById('import-status');
+    el.className = 'status-msg success';
+    el.textContent = 'Imported '+r.imported+' contacts'+(r.errors?' ('+r.errors+' errors)':'');
+    setTimeout(function(){el.className='status-msg';},5000);
+    load();
+  };
+  reader.readAsText(file);
+  input.value = '';
+}
 
 load();
 </script>
@@ -3000,6 +4432,7 @@ ${themeScript()}
     <button onclick="prevMonth()">&larr; Previous</button>
     <span id="cal-title" style="font-size:18px;font-weight:300;padding:0 16px;"></span>
     <button onclick="nextMonth()">Next &rarr;</button>
+    <a href="/api/calendar.ics" class="btn" style="margin-left:auto;" download>Export iCal</a>
     <button onclick="goToday()" style="margin-left:auto;">Today</button>
   </div>
 
@@ -3042,7 +4475,7 @@ async function load() {
     });
     html += '<div class="cal-day'+(isToday?' today':'')+'"><div class="cal-day-num">'+d+'</div>';
     dayEvents.slice(0,3).forEach(e => {
-      html += '<div class="cal-event '+e.type+'">'+esc(e.title)+'</div>';
+      html += '<div class="cal-event '+e.type+(e.recurring_projection?' recurring-proj':'')+'">'+( e.recurring_projection?'&#x1F501; ':'')+esc(e.title)+'</div>';
     });
     if (dayEvents.length > 3) html += '<div style="font-size:9px;color:var(--text-muted)">+'+(dayEvents.length-3)+' more</div>';
     html += '</div>';
@@ -3139,6 +4572,154 @@ async function load() {
       document.getElementById('review-summary-section').style.display = 'block';
     }
   }).catch(function(){});
+}
+
+load();
+</script>
+</body></html>`);
+});
+
+// ============================================================================
+// Page — Analytics
+// ============================================================================
+app.get("/analytics", (req, res) => {
+  res.send(`${pageHead("Analytics")}
+<body>
+${themeScript()}
+<div class="container">
+  ${navBar("/analytics")}
+  <h1>Analytics</h1>
+  <p class="subtitle">Productivity insights and trends</p>
+
+  <div class="filters" id="period-filters">
+    <button onclick="setPeriod(this,'week')" class="active">This Week</button>
+    <button onclick="setPeriod(this,'month')">This Month</button>
+    <button onclick="setPeriod(this,'quarter')">Quarter</button>
+    <button onclick="setPeriod(this,'year')">Year</button>
+  </div>
+
+  <div class="top-cards" id="overview-cards"></div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px;" class="dash-two-col">
+    <div class="section">
+      <h2>Completion Trend</h2>
+      <div id="completion-chart" style="height:200px;display:flex;align-items:flex-end;gap:4px;padding-top:24px;"></div>
+    </div>
+    <div class="section">
+      <h2>Productivity by Day</h2>
+      <div id="dow-chart" style="height:200px;display:flex;align-items:flex-end;gap:8px;justify-content:space-around;padding-top:24px;"></div>
+    </div>
+  </div>
+
+  <div class="section" style="margin-bottom:24px;">
+    <h2>Activity Heatmap (90 Days)</h2>
+    <div id="heatmap" style="display:flex;flex-wrap:wrap;gap:2px;"></div>
+    <div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-top:8px;font-size:10px;color:var(--text-muted);">
+      Less <div style="width:12px;height:12px;border-radius:2px;background:var(--surface-2);"></div>
+      <div style="width:12px;height:12px;border-radius:2px;background:rgba(111,207,151,0.3);"></div>
+      <div style="width:12px;height:12px;border-radius:2px;background:rgba(111,207,151,0.6);"></div>
+      <div style="width:12px;height:12px;border-radius:2px;background:var(--green);"></div> More
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px;" class="dash-two-col">
+    <div class="section">
+      <h2>Priority Breakdown</h2>
+      <div id="priority-chart"></div>
+    </div>
+    <div class="section">
+      <h2>Category Performance</h2>
+      <div id="category-chart"></div>
+    </div>
+  </div>
+
+  <div class="section" style="margin-bottom:24px;">
+    <h2>Streak Leaders</h2>
+    <div id="streak-leaders"></div>
+  </div>
+</div>
+<script>
+var curPeriod = 'week';
+function setPeriod(btn, p) { curPeriod = p; document.querySelectorAll('#period-filters button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); load(); }
+
+async function load() {
+  var data = await fetch('/api/analytics?period='+curPeriod).then(r=>r.json());
+
+  // Overview cards
+  var scoreColor = data.productivity_score >= 70 ? 'green' : data.productivity_score >= 40 ? 'yellow' : 'red';
+  document.getElementById('overview-cards').innerHTML = [
+    {label:'Productivity Score',value:data.productivity_score,cls:scoreColor},
+    {label:'Tasks Completed',value:data.total_completed,cls:'green'},
+    {label:'Tasks Created',value:data.total_created,cls:'warm'},
+    {label:'Completion Rate',value:data.completion_rate+'%',cls:data.completion_rate>=70?'green':data.completion_rate>=40?'yellow':'red'},
+    {label:'Avg. Completion Time',value:data.avg_completion_hours?data.avg_completion_hours+'h':'N/A',cls:'teal'},
+    {label:'Emails Sent',value:data.emails_sent||0,cls:'blue'},
+    {label:'Notes Created',value:data.notes_created||0,cls:'warm'},
+  ].map(c => '<div class="card"><div class="label">'+c.label+'</div><div class="value '+c.cls+'">'+c.value+'</div></div>').join('');
+
+  // Completion trend bar chart
+  var days = data.completed_by_day || [];
+  var maxDay = Math.max(...days.map(d=>parseInt(d.count)), 1);
+  document.getElementById('completion-chart').innerHTML = days.length
+    ? days.map(d => {
+        var h = Math.max((parseInt(d.count)/maxDay)*160, 4);
+        var label = new Date(d.day).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
+        return '<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0;"><div style="background:var(--green);width:100%;max-width:40px;height:'+h+'px;border-radius:4px 4px 0 0;transition:height 0.3s;"></div><div style="font-size:9px;color:var(--text-muted);margin-top:4px;text-align:center;white-space:nowrap;">'+label+'</div><div style="font-size:11px;font-weight:500;margin-top:2px;">'+d.count+'</div></div>';
+      }).join('')
+    : '<div class="empty-msg">No data yet</div>';
+
+  // Productivity by day of week
+  var dowNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  var dowData = new Array(7).fill(0);
+  (data.productivity_by_dow||[]).forEach(d => { dowData[parseInt(d.dow)] = parseInt(d.count); });
+  var maxDow = Math.max(...dowData, 1);
+  document.getElementById('dow-chart').innerHTML = dowData.map((count,i) => {
+    var h = Math.max((count/maxDow)*160, 4);
+    return '<div style="display:flex;flex-direction:column;align-items:center;flex:1;"><div style="background:var(--teal);width:100%;max-width:36px;height:'+h+'px;border-radius:4px 4px 0 0;"></div><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">'+dowNames[i]+'</div><div style="font-size:11px;font-weight:500;margin-top:2px;">'+count+'</div></div>';
+  }).join('');
+
+  // Priority breakdown
+  var priColors = {urgent:'var(--red)',high:'var(--yellow)',medium:'var(--blue)',low:'var(--green)'};
+  var priTotal = (data.priority_breakdown||[]).reduce((s,p)=>s+parseInt(p.count),0) || 1;
+  document.getElementById('priority-chart').innerHTML = (data.priority_breakdown||[]).length
+    ? (data.priority_breakdown||[]).map(p => {
+        var pct = Math.round(parseInt(p.count)/priTotal*100);
+        return '<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="width:70px;font-size:12px;font-weight:400;text-transform:capitalize;">'+p.priority+'</div><div style="flex:1;height:20px;background:var(--surface-2);border-radius:4px;overflow:hidden;"><div style="height:100%;width:'+pct+'%;background:'+priColors[p.priority]+';border-radius:4px;transition:width 0.3s;"></div></div><div style="width:50px;text-align:right;font-size:12px;font-weight:500;">'+p.count+'</div></div>';
+      }).join('')
+    : '<div class="empty-msg">No active tasks</div>';
+
+  // Category breakdown
+  document.getElementById('category-chart').innerHTML = (data.category_breakdown||[]).length
+    ? (data.category_breakdown||[]).map(c => {
+        var total = parseInt(c.count), done = parseInt(c.completed);
+        var pct = total > 0 ? Math.round(done/total*100) : 0;
+        return '<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="width:100px;font-size:12px;font-weight:400;text-transform:capitalize;">'+esc(c.category)+'</div><div style="flex:1;height:20px;background:var(--surface-2);border-radius:4px;overflow:hidden;"><div style="height:100%;width:'+pct+'%;background:var(--warm);border-radius:4px;"></div></div><div style="width:80px;text-align:right;font-size:11px;color:var(--text-muted);">'+done+'/'+total+' ('+pct+'%)</div></div>';
+      }).join('')
+    : '<div class="empty-msg">No data yet</div>';
+
+  // Streak leaders
+  document.getElementById('streak-leaders').innerHTML = (data.streak_leaders||[]).length
+    ? (data.streak_leaders||[]).map((s,i) =>
+        '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="font-size:18px;font-weight:300;color:var(--text-muted);width:30px;text-align:center;">'+(i+1)+'</div><div style="flex:1;"><div style="font-size:14px;font-weight:400;">'+esc(s.title)+'</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+s.recurrence_rule+' &middot; Best: '+s.best_streak+'</div></div><div style="text-align:right;"><span class="badge streak">&#x1F525; '+s.streak_count+'</span></div></div>'
+      ).join('')
+    : '<div class="empty-msg">No streaks yet. Complete recurring tasks to build streaks!</div>';
+
+  // Heatmap (GitHub-style, 90 days)
+  var heatmap = data.heatmap || [];
+  var heatmapMap = {};
+  heatmap.forEach(h => { heatmapMap[h.day ? new Date(h.day).toISOString().split('T')[0] : ''] = parseInt(h.count); });
+  var maxHeat = Math.max(...heatmap.map(h => parseInt(h.count)), 1);
+  var heatHtml = '';
+  var today = new Date();
+  for (var i = 90; i >= 0; i--) {
+    var d = new Date(today); d.setDate(d.getDate() - i);
+    var key = d.toISOString().split('T')[0];
+    var count = heatmapMap[key] || 0;
+    var intensity = count === 0 ? 0 : count <= maxHeat * 0.33 ? 1 : count <= maxHeat * 0.66 ? 2 : 3;
+    var colors = ['var(--surface-2)', 'rgba(111,207,151,0.3)', 'rgba(111,207,151,0.6)', 'var(--green)'];
+    heatHtml += '<div title="'+key+': '+count+' tasks" style="width:12px;height:12px;border-radius:2px;background:'+colors[intensity]+';"></div>';
+  }
+  document.getElementById('heatmap').innerHTML = heatHtml;
 }
 
 load();
@@ -3283,7 +4864,100 @@ ${themeScript()}
     </div>
   </div>
 
+  <div class="section">
+    <h2>Automations</h2>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Create rules that trigger actions automatically when events occur.</p>
+    <div id="automations-list" style="margin-bottom:12px;"></div>
+    <button onclick="openAutoModal()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;text-transform:uppercase;">+ New Rule</button>
+  </div>
+
+  <div class="section">
+    <h2>Webhooks</h2>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Configure external webhook endpoints to receive event notifications.</p>
+    <div id="webhooks-list" style="margin-bottom:12px;"></div>
+    <button onclick="openWebhookModal()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;text-transform:uppercase;">+ New Webhook</button>
+  </div>
+
+  <div class="section">
+    <h2>Slack Integration</h2>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Add a Slack Incoming Webhook URL to receive notifications in Slack.</p>
+    <div style="display:flex;gap:12px;align-items:center;">
+      <input type="url" id="s-slack" placeholder="https://hooks.slack.com/services/..." style="flex:1;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
+      <button onclick="saveSlack()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save</button>
+    </div>
+  </div>
+
   ${AUTH_SECRET ? '<div class="section"><h2>Session</h2><div class="actions" style="margin-bottom:0;"><button class="danger" style="border-color:var(--red);color:var(--red);" onclick="logout()">Log Out</button></div></div>' : ''}
+</div>
+
+<!-- Automation Modal -->
+<div class="modal-overlay" id="auto-modal">
+  <div class="modal">
+    <h2 id="auto-modal-title">New Automation</h2>
+    <input type="hidden" id="auto-id">
+    <label>Name</label>
+    <input type="text" id="auto-name" placeholder="e.g. Auto-prioritize work tasks">
+    <label>When (Trigger)</label>
+    <select id="auto-trigger" style="width:100%;padding:10px 14px;font-size:14px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
+      <option value="todo_created">Task Created</option>
+      <option value="todo_completed">Task Completed</option>
+      <option value="email_created">Email Created</option>
+      <option value="note_created">Note Created</option>
+    </select>
+    <label>If (Condition — optional)</label>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div>
+        <select id="auto-cond-field" style="width:100%;padding:8px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);">
+          <option value="">Any</option>
+          <option value="category">Category equals</option>
+          <option value="priority">Priority equals</option>
+          <option value="title_contains">Title contains</option>
+          <option value="horizon">Horizon equals</option>
+        </select>
+      </div>
+      <input type="text" id="auto-cond-value" placeholder="Value..." style="padding:8px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);">
+    </div>
+    <label>Then (Action)</label>
+    <select id="auto-action" style="width:100%;padding:10px 14px;font-size:14px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);" onchange="updateActionFields()">
+      <option value="set_priority">Set Priority</option>
+      <option value="set_category">Set Category</option>
+      <option value="set_horizon">Set Horizon</option>
+      <option value="add_tag">Add Tag (notes)</option>
+      <option value="create_todo">Create Follow-up Task</option>
+    </select>
+    <label>Action Value</label>
+    <input type="text" id="auto-action-value" placeholder="e.g. urgent, work, short...">
+    <div class="modal-actions">
+      <button onclick="closeAutoModal()">Cancel</button>
+      <button class="primary" onclick="saveAutomation()">Save</button>
+      <button class="danger" id="auto-delete-btn" style="display:none" onclick="deleteAutomation()">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Webhook Modal -->
+<div class="modal-overlay" id="webhook-modal">
+  <div class="modal">
+    <h2 id="wh-modal-title">New Webhook</h2>
+    <input type="hidden" id="wh-id">
+    <label>Name</label>
+    <input type="text" id="wh-name" placeholder="e.g. Slack notifications, Zapier">
+    <label>URL</label>
+    <input type="url" id="wh-url" placeholder="https://example.com/webhook">
+    <label>Events</label>
+    <div id="wh-events" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">
+      <label style="display:inline;font-size:11px;cursor:pointer;"><input type="checkbox" value="todo_created" style="width:auto;margin-right:4px;">Task Created</label>
+      <label style="display:inline;font-size:11px;cursor:pointer;"><input type="checkbox" value="todo_completed" style="width:auto;margin-right:4px;">Task Completed</label>
+      <label style="display:inline;font-size:11px;cursor:pointer;"><input type="checkbox" value="email_sent" style="width:auto;margin-right:4px;">Email Sent</label>
+      <label style="display:inline;font-size:11px;cursor:pointer;"><input type="checkbox" value="note_created" style="width:auto;margin-right:4px;">Note Created</label>
+      <label style="display:inline;font-size:11px;cursor:pointer;"><input type="checkbox" value="streak_milestone" style="width:auto;margin-right:4px;">Streak Milestone</label>
+    </div>
+    <div class="modal-actions">
+      <button onclick="closeWebhookModal()">Cancel</button>
+      <button class="primary" onclick="saveWebhook()">Save</button>
+      <button class="danger" id="wh-delete-btn" style="display:none" onclick="deleteWebhook()">Delete</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -3317,6 +4991,7 @@ async function load() {
       });
     } catch {}
   }
+  document.getElementById('s-slack').value = s.slack_webhook_url || '';
   if ('Notification' in window && Notification.permission === 'granted') {
     document.getElementById('notif-btn').textContent = 'Notifications Enabled';
     document.getElementById('notif-btn').disabled = true;
@@ -3412,12 +5087,166 @@ async function emptyTrash() {
   setTimeout(function(){ el.className = 'status-msg'; }, 3000);
 }
 
+// Automations
+async function loadAutomations() {
+  var autos = await fetch('/api/automations').then(r=>r.json());
+  var el = document.getElementById('automations-list');
+  if (!autos.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">No automation rules configured.</div>'; return; }
+  el.innerHTML = autos.map(a => {
+    var condText = '';
+    if (a.conditions) {
+      var keys = Object.keys(a.conditions).filter(k=>a.conditions[k]);
+      condText = keys.length ? ' when ' + keys.map(k=>k+'='+a.conditions[k]).join(' & ') : '';
+    }
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px;">'
+      +'<div style="flex:1;"><div style="font-weight:400;">'+esc(a.name)+'</div>'
+      +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">'+a.trigger_type+condText+' &rarr; '+a.action_type+'</div></div>'
+      +'<div style="display:flex;gap:6px;align-items:center;">'
+      +'<button onclick="toggleAutomation('+a.id+','+!a.enabled+')" style="background:'+(a.enabled?'var(--green-bg)':'var(--surface-2)')+';color:'+(a.enabled?'var(--green)':'var(--text-muted)')+';border:1px solid '+(a.enabled?'var(--green)':'var(--border)')+';padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(a.enabled?'On':'Off')+'</button>'
+      +'<button onclick="editAutomation('+a.id+')" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Edit</button>'
+      +'</div></div>';
+  }).join('');
+}
+function openAutoModal() {
+  document.getElementById('auto-modal-title').textContent = 'New Automation';
+  document.getElementById('auto-id').value = '';
+  document.getElementById('auto-name').value = '';
+  document.getElementById('auto-trigger').value = 'todo_created';
+  document.getElementById('auto-cond-field').value = '';
+  document.getElementById('auto-cond-value').value = '';
+  document.getElementById('auto-action').value = 'set_priority';
+  document.getElementById('auto-action-value').value = '';
+  document.getElementById('auto-delete-btn').style.display = 'none';
+  document.getElementById('auto-modal').classList.add('active');
+}
+function closeAutoModal() { document.getElementById('auto-modal').classList.remove('active'); }
+async function editAutomation(id) {
+  var autos = await fetch('/api/automations').then(r=>r.json());
+  var a = autos.find(x=>x.id===id); if (!a) return;
+  document.getElementById('auto-modal-title').textContent = 'Edit Automation';
+  document.getElementById('auto-id').value = id;
+  document.getElementById('auto-name').value = a.name;
+  document.getElementById('auto-trigger').value = a.trigger_type;
+  var condKeys = Object.keys(a.conditions||{}).filter(k=>a.conditions[k]);
+  document.getElementById('auto-cond-field').value = condKeys[0] || '';
+  document.getElementById('auto-cond-value').value = condKeys.length ? a.conditions[condKeys[0]] : '';
+  document.getElementById('auto-action').value = a.action_type;
+  var actData = a.action_data||{};
+  document.getElementById('auto-action-value').value = actData[Object.keys(actData)[0]] || '';
+  document.getElementById('auto-delete-btn').style.display = 'inline-block';
+  document.getElementById('auto-modal').classList.add('active');
+}
+async function saveAutomation() {
+  var id = document.getElementById('auto-id').value;
+  var condField = document.getElementById('auto-cond-field').value;
+  var condValue = document.getElementById('auto-cond-value').value;
+  var actionType = document.getElementById('auto-action').value;
+  var actionValue = document.getElementById('auto-action-value').value;
+  var conditions = {};
+  if (condField && condValue) conditions[condField] = condValue;
+  var actionKey = actionType === 'set_priority' ? 'priority' : actionType === 'set_category' ? 'category' : actionType === 'set_horizon' ? 'horizon' : actionType === 'add_tag' ? 'tag' : 'title';
+  var action_data = {}; action_data[actionKey] = actionValue;
+  var data = {
+    name: document.getElementById('auto-name').value,
+    trigger_type: document.getElementById('auto-trigger').value,
+    conditions: conditions,
+    action_type: actionType,
+    action_data: action_data,
+  };
+  if (!data.name) return alert('Name is required');
+  if (id) await fetch('/api/automations/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  else await fetch('/api/automations', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  closeAutoModal(); loadAutomations();
+}
+async function deleteAutomation() {
+  var id = document.getElementById('auto-id').value;
+  await fetch('/api/automations/'+id, {method:'DELETE'});
+  closeAutoModal(); loadAutomations();
+}
+async function toggleAutomation(id, enabled) {
+  await fetch('/api/automations/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})});
+  loadAutomations();
+}
+function updateActionFields() {}
+
+// Webhooks
+async function loadWebhooks() {
+  var whs = await fetch('/api/webhooks').then(r=>r.json());
+  var el = document.getElementById('webhooks-list');
+  if (!whs.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">No webhooks configured.</div>'; return; }
+  el.innerHTML = whs.map(w =>
+    '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px;">'
+    +'<div style="flex:1;"><div style="font-weight:400;">'+esc(w.name)+'</div>'
+    +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">'+esc(w.url.substring(0,50))+(w.url.length>50?'...':'')+'</div>'
+    +'<div style="font-size:9px;color:var(--text-muted);margin-top:2px;">Events: '+(w.events||[]).join(', ')+(w.last_status?' &middot; Last: '+w.last_status:'')+'</div></div>'
+    +'<div style="display:flex;gap:6px;align-items:center;">'
+    +'<button onclick="testWebhook('+w.id+')" style="background:none;border:1px solid var(--teal);color:var(--teal);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Test</button>'
+    +'<button onclick="toggleWebhook('+w.id+','+!w.enabled+')" style="background:'+(w.enabled?'var(--green-bg)':'var(--surface-2)')+';color:'+(w.enabled?'var(--green)':'var(--text-muted)')+';border:1px solid '+(w.enabled?'var(--green)':'var(--border)')+';padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(w.enabled?'On':'Off')+'</button>'
+    +'<button onclick="editWebhook('+w.id+')" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Edit</button>'
+    +'</div></div>'
+  ).join('');
+}
+function openWebhookModal() {
+  document.getElementById('wh-modal-title').textContent='New Webhook';
+  document.getElementById('wh-id').value='';
+  document.getElementById('wh-name').value='';
+  document.getElementById('wh-url').value='';
+  document.querySelectorAll('#wh-events input').forEach(cb=>cb.checked=false);
+  document.getElementById('wh-delete-btn').style.display='none';
+  document.getElementById('webhook-modal').classList.add('active');
+}
+function closeWebhookModal() { document.getElementById('webhook-modal').classList.remove('active'); }
+async function editWebhook(id) {
+  var whs = await fetch('/api/webhooks').then(r=>r.json());
+  var w = whs.find(x=>x.id===id); if (!w) return;
+  document.getElementById('wh-modal-title').textContent='Edit Webhook';
+  document.getElementById('wh-id').value=id;
+  document.getElementById('wh-name').value=w.name;
+  document.getElementById('wh-url').value=w.url;
+  document.querySelectorAll('#wh-events input').forEach(cb=>{cb.checked=(w.events||[]).includes(cb.value);});
+  document.getElementById('wh-delete-btn').style.display='inline-block';
+  document.getElementById('webhook-modal').classList.add('active');
+}
+async function saveWebhook() {
+  var events=[];document.querySelectorAll('#wh-events input:checked').forEach(cb=>events.push(cb.value));
+  var data={name:document.getElementById('wh-name').value,url:document.getElementById('wh-url').value,events:events};
+  if(!data.name||!data.url)return alert('Name and URL required');
+  var id=document.getElementById('wh-id').value;
+  if(id) await fetch('/api/webhooks/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  else await fetch('/api/webhooks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  closeWebhookModal();loadWebhooks();
+}
+async function deleteWebhook() {
+  var id=document.getElementById('wh-id').value;
+  await fetch('/api/webhooks/'+id,{method:'DELETE'});
+  closeWebhookModal();loadWebhooks();
+}
+async function toggleWebhook(id,enabled) {
+  await fetch('/api/webhooks/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})});
+  loadWebhooks();
+}
+async function testWebhook(id) {
+  var r=await fetch('/api/webhooks/'+id+'/test',{method:'POST'}).then(r=>r.json());
+  alert(r.ok?'Webhook test successful (status: '+r.status+')':'Webhook test failed'+(r.status?' (status: '+r.status+')':''));
+  loadWebhooks();
+}
+
+// Slack
+async function saveSlack() {
+  var url=document.getElementById('s-slack').value||null;
+  await fetch('/api/settings',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({slack_webhook_url:url})});
+  var el=document.getElementById('status');el.className='status-msg success';el.textContent='Slack webhook saved.';
+  setTimeout(function(){el.className='status-msg';},3000);
+}
+
 async function logout() {
   await fetch('/api/logout', {method:'POST'});
   location.href = '/login';
 }
 
 load();
+loadAutomations();
+loadWebhooks();
 </script>
 </body></html>`);
 });
@@ -3443,10 +5272,73 @@ app.get("/manifest.json", (req, res) => {
 
 app.get("/sw.js", (req, res) => {
   res.type("application/javascript").send(`
-    const CACHE = 'per-sistant-v1';
-    self.addEventListener('install', e => { self.skipWaiting(); });
-    self.addEventListener('activate', e => { e.waitUntil(clients.claim()); });
-    self.addEventListener('fetch', e => { e.respondWith(fetch(e.request).catch(() => caches.match(e.request))); });
+    const CACHE = 'per-sistant-v2';
+    const PAGES = ['/', '/todos', '/emails', '/notes', '/calendar', '/contacts', '/review', '/analytics', '/settings'];
+    const OFFLINE_KEY = 'per-sistant-offline-queue';
+
+    self.addEventListener('install', e => {
+      e.waitUntil(caches.open(CACHE).then(cache => cache.addAll(PAGES)).then(() => self.skipWaiting()));
+    });
+
+    self.addEventListener('activate', e => {
+      e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+    });
+
+    self.addEventListener('fetch', e => {
+      const url = new URL(e.request.url);
+      // API requests: network-first, cache fallback for GET
+      if (url.pathname.startsWith('/api/')) {
+        if (e.request.method === 'GET') {
+          e.respondWith(
+            fetch(e.request).then(r => {
+              const rc = r.clone();
+              caches.open(CACHE).then(cache => cache.put(e.request, rc));
+              return r;
+            }).catch(() => caches.match(e.request))
+          );
+        } else {
+          // POST/PATCH/DELETE: try network, queue if offline
+          e.respondWith(
+            fetch(e.request.clone()).catch(async () => {
+              // Store in offline queue for sync later
+              const body = await e.request.clone().text();
+              const queue = JSON.parse(await (await caches.match(OFFLINE_KEY))?.text() || '[]');
+              queue.push({ url: e.request.url, method: e.request.method, body, headers: Object.fromEntries(e.request.headers) });
+              const queueResponse = new Response(JSON.stringify(queue));
+              await caches.open(CACHE).then(c => c.put(OFFLINE_KEY, queueResponse));
+              return new Response(JSON.stringify({ ok: true, offline: true }), { headers: { 'Content-Type': 'application/json' } });
+            })
+          );
+        }
+        return;
+      }
+      // Page requests: network-first with cache fallback
+      e.respondWith(
+        fetch(e.request).then(r => {
+          const rc = r.clone();
+          caches.open(CACHE).then(cache => cache.put(e.request, rc));
+          return r;
+        }).catch(() => caches.match(e.request))
+      );
+    });
+
+    // Sync offline queue when back online
+    self.addEventListener('message', e => {
+      if (e.data === 'sync') {
+        caches.open(CACHE).then(async cache => {
+          const resp = await cache.match(OFFLINE_KEY);
+          if (!resp) return;
+          const queue = JSON.parse(await resp.text());
+          for (const req of queue) {
+            try {
+              await fetch(req.url, { method: req.method, body: req.body, headers: req.headers });
+            } catch {}
+          }
+          await cache.delete(OFFLINE_KEY);
+          self.clients.matchAll().then(clients => clients.forEach(c => c.postMessage('synced')));
+        });
+      }
+    });
   `);
 });
 
@@ -3518,25 +5410,19 @@ async function start() {
       try {
         const r = await pool.query("SELECT * FROM todos WHERE deleted_at IS NULL AND recurring = true AND completed = false AND due_date < CURRENT_DATE");
         for (const todo of r.rows) {
-          // Auto-complete and create next
-          await pool.query("UPDATE todos SET completed = true, completed_at = now() WHERE id = $1", [todo.id]);
+          // Auto-complete and reset streak (overdue = missed)
+          await pool.query("UPDATE todos SET completed = true, completed_at = now(), streak_count = 0 WHERE id = $1", [todo.id]);
           const rule = todo.recurrence_rule;
+          const interval = todo.recurrence_interval || 1;
           let nextDue = new Date(todo.due_date);
-          if (rule === "daily") nextDue.setDate(nextDue.getDate() + 1);
-          else if (rule === "weekdays") { do { nextDue.setDate(nextDue.getDate() + 1); } while (nextDue.getDay() === 0 || nextDue.getDay() === 6); }
-          else if (rule === "weekly") nextDue.setDate(nextDue.getDate() + 7);
-          else if (rule === "monthly") nextDue.setMonth(nextDue.getMonth() + 1);
-          else if (rule === "yearly") nextDue.setFullYear(nextDue.getFullYear() + 1);
+          nextDue = advanceRecurrence(nextDue, rule, interval);
           let catchupLimit = 365;
           while (nextDue <= new Date() && catchupLimit-- > 0) {
-            if (rule === "daily") nextDue.setDate(nextDue.getDate() + 1);
-            else if (rule === "weekly") nextDue.setDate(nextDue.getDate() + 7);
-            else if (rule === "monthly") nextDue.setMonth(nextDue.getMonth() + 1);
-            else break;
+            nextDue = advanceRecurrence(nextDue, rule, interval);
           }
           await pool.query(
-            "INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_parent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-            [todo.title, todo.description, todo.priority, todo.horizon, todo.category, nextDue.toISOString().split("T")[0], true, rule, todo.recurrence_parent_id || todo.id]
+            "INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_interval, recurrence_parent_id, streak_count, best_streak) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,0,$11)",
+            [todo.title, todo.description, todo.priority, todo.horizon, todo.category, nextDue.toISOString().split("T")[0], true, rule, interval, todo.recurrence_parent_id || todo.id, todo.best_streak || 0]
           );
         }
         if (r.rows.length) console.log(`Processed ${r.rows.length} recurring tasks`);
