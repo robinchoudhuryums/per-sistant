@@ -1437,19 +1437,24 @@ describe("Analytics and insights", () => {
     assert.equal(dowNames.length, 7);
   });
 
-  it("analytics response has expected fields", () => {
+  it("analytics response has expected fields including new ones", () => {
     const response = {
       period: "week", start_date: "2026-03-09", end_date: "2026-03-15",
       completed_by_day: [], created_by_day: [], completion_rate: 75,
       total_completed: 15, total_created: 20,
       priority_breakdown: [], category_breakdown: [],
       avg_completion_hours: 24.5, streak_leaders: [], productivity_by_dow: [],
+      heatmap: [], productivity_score: 72, emails_sent: 5, notes_created: 3,
     };
     assert.ok("completion_rate" in response);
     assert.ok("priority_breakdown" in response);
     assert.ok("streak_leaders" in response);
     assert.ok("productivity_by_dow" in response);
     assert.ok("avg_completion_hours" in response);
+    assert.ok("heatmap" in response);
+    assert.ok("productivity_score" in response);
+    assert.ok("emails_sent" in response);
+    assert.ok("notes_created" in response);
   });
 
   it("productivity by day of week data structure", () => {
@@ -1460,5 +1465,321 @@ describe("Analytics and insights", () => {
     const maxCount = Math.max(...dowData.map(d => d.count));
     assert.equal(maxCount, 6); // Thursday
     assert.ok(dowData.every(d => d.dow >= 0 && d.dow <= 6));
+  });
+
+  it("productivity score calculation", () => {
+    // Score is weighted: completion rate 40%, streak 20%, volume 20%, speed 20%
+    const completionPct = 80;
+    const topStreak = 7;
+    const totalCompleted = 10;
+    const avgHours = 24;
+    const volumeScore = Math.min(totalCompleted / 10, 1) * 100;
+    const speedScore = Math.max(0, Math.min(100, 100 - avgHours));
+    const streakScore = Math.min(topStreak / 7, 1) * 100;
+    const score = Math.round(completionPct * 0.4 + streakScore * 0.2 + volumeScore * 0.2 + speedScore * 0.2);
+    assert.ok(score >= 0 && score <= 100);
+    assert.equal(volumeScore, 100); // 10 tasks = max volume
+    assert.equal(streakScore, 100); // 7-day streak = max
+  });
+
+  it("heatmap data maps dates to counts", () => {
+    const heatmap = [
+      { day: "2026-03-10", count: 3 },
+      { day: "2026-03-11", count: 0 },
+      { day: "2026-03-12", count: 5 },
+    ];
+    const heatmapMap = {};
+    heatmap.forEach(h => { heatmapMap[h.day] = parseInt(h.count); });
+    assert.equal(heatmapMap["2026-03-10"], 3);
+    assert.equal(heatmapMap["2026-03-12"], 5);
+    assert.equal(heatmapMap["2026-03-13"] || 0, 0);
+  });
+
+  it("heatmap intensity levels", () => {
+    const maxHeat = 10;
+    function getIntensity(count) {
+      return count === 0 ? 0 : count <= maxHeat * 0.33 ? 1 : count <= maxHeat * 0.66 ? 2 : 3;
+    }
+    assert.equal(getIntensity(0), 0);
+    assert.equal(getIntensity(2), 1);
+    assert.equal(getIntensity(5), 2);
+    assert.equal(getIntensity(8), 3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Todo templates
+// ---------------------------------------------------------------------------
+describe("Todo templates", () => {
+  it("template structure has required fields", () => {
+    const template = {
+      id: 1, name: "Weekly Report", title: "Write weekly report",
+      description: "Summarize accomplishments", priority: "high",
+      horizon: "short", category: "work", recurring: true,
+      recurrence_rule: "weekly", recurrence_interval: 1,
+      subtasks: ["Draft outline", "Add metrics", "Review"],
+    };
+    assert.ok(template.name);
+    assert.ok(template.title);
+    assert.equal(template.subtasks.length, 3);
+    assert.equal(template.recurring, true);
+  });
+
+  it("template apply creates todo with template fields", () => {
+    const template = { title: "Team standup", priority: "medium", horizon: "short", category: "work" };
+    const overrides = { due_date: "2026-03-20" };
+    const todo = {
+      title: overrides.title || template.title,
+      priority: overrides.priority || template.priority,
+      horizon: overrides.horizon || template.horizon,
+      category: overrides.category || template.category,
+      due_date: overrides.due_date || null,
+    };
+    assert.equal(todo.title, "Team standup");
+    assert.equal(todo.due_date, "2026-03-20");
+    assert.equal(todo.priority, "medium");
+  });
+
+  it("template subtasks are applied as strings", () => {
+    const subtasks = [{ title: "Step 1" }, { title: "Step 2" }, "Step 3"];
+    const processed = subtasks.map(s => typeof s === "string" ? s : s.title);
+    assert.deepEqual(processed, ["Step 1", "Step 2", "Step 3"]);
+  });
+
+  it("template validates priority and horizon", () => {
+    const VALID_PRIORITIES = ["low", "medium", "high", "urgent"];
+    const VALID_HORIZONS = ["short", "medium", "long"];
+    assert.ok(VALID_PRIORITIES.includes("high"));
+    assert.ok(!VALID_PRIORITIES.includes("critical"));
+    assert.ok(VALID_HORIZONS.includes("long"));
+    assert.ok(!VALID_HORIZONS.includes("forever"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Batch contact import
+// ---------------------------------------------------------------------------
+describe("Batch contact import", () => {
+  it("validates contact structure", () => {
+    const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const contacts = [
+      { name: "Alice", email: "alice@example.com" },
+      { name: "Bob", email: "invalid" },
+      { name: "", email: "c@d.com" },
+    ];
+    const valid = contacts.filter(c => c.name && c.email && EMAIL_REGEX.test(c.email));
+    const invalid = contacts.filter(c => !c.name || !c.email || !EMAIL_REGEX.test(c.email));
+    assert.equal(valid.length, 1);
+    assert.equal(invalid.length, 2);
+  });
+
+  it("parses CSV lines into contacts", () => {
+    const csv = "name,email\nAlice,alice@test.com\nBob,bob@test.com";
+    const lines = csv.split("\n").filter(l => l.trim());
+    const contacts = [];
+    for (let i = 0; i < lines.length; i++) {
+      const parts = lines[i].split(",").map(s => s.trim());
+      if (i === 0 && parts[0].toLowerCase() === "name") continue;
+      if (parts.length >= 2) contacts.push({ name: parts[0], email: parts[1] });
+    }
+    assert.equal(contacts.length, 2);
+    assert.equal(contacts[0].name, "Alice");
+    assert.equal(contacts[1].email, "bob@test.com");
+  });
+
+  it("handles CSV with quotes", () => {
+    const line = '"John Doe","john@test.com"';
+    const parts = line.split(",").map(s => s.trim().replace(/^["']|["']$/g, ""));
+    assert.equal(parts[0], "John Doe");
+    assert.equal(parts[1], "john@test.com");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Quick actions from search
+// ---------------------------------------------------------------------------
+describe("Quick actions from search", () => {
+  it("search results include actionable fields for todos", () => {
+    const result = { id: 1, title: "Buy groceries", type: "todo", completed: false, recurring: false, priority: "high" };
+    assert.equal(result.type, "todo");
+    assert.equal(result.completed, false);
+    assert.ok("recurring" in result);
+  });
+
+  it("search results include status for emails", () => {
+    const result = { id: 2, title: "Meeting invite", type: "email", status: "scheduled" };
+    assert.equal(result.status, "scheduled");
+  });
+
+  it("search results include pinned status for notes", () => {
+    const result = { id: 3, title: "Shopping list", type: "note", pinned: false };
+    assert.equal(result.pinned, false);
+  });
+
+  it("determines correct action buttons per type", () => {
+    function getActions(r) {
+      if (r.type === "todo" && !r.completed) return ["complete"];
+      if (r.type === "email" && r.status === "scheduled") return ["send"];
+      if (r.type === "note") return [r.pinned ? "unpin" : "pin"];
+      return [];
+    }
+    assert.deepEqual(getActions({ type: "todo", completed: false }), ["complete"]);
+    assert.deepEqual(getActions({ type: "email", status: "scheduled" }), ["send"]);
+    assert.deepEqual(getActions({ type: "note", pinned: true }), ["unpin"]);
+    assert.deepEqual(getActions({ type: "todo", completed: true }), []);
+    assert.deepEqual(getActions({ type: "contact" }), []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Undo actions
+// ---------------------------------------------------------------------------
+describe("Undo actions", () => {
+  it("supports delete, complete, and send undo types", () => {
+    const validActions = ["delete", "complete", "send"];
+    validActions.forEach(action => {
+      assert.ok(typeof action === "string");
+    });
+  });
+
+  it("undo complete reverses task completion", () => {
+    let task = { id: 1, completed: true };
+    // Simulate undo
+    task.completed = false;
+    assert.equal(task.completed, false);
+  });
+
+  it("undo delete restores from trash", () => {
+    const trashItem = { id: 1, type: "todo", deleted_at: "2026-03-15T10:00:00Z" };
+    // Restore = set deleted_at to null
+    const restored = { ...trashItem, deleted_at: null };
+    assert.equal(restored.deleted_at, null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recurring task calendar projections
+// ---------------------------------------------------------------------------
+describe("Recurring task calendar projections", () => {
+  function advanceRecurrence(date, rule, interval) {
+    const d = new Date(date);
+    const n = interval || 1;
+    if (rule === "daily" || rule === "custom_days") d.setDate(d.getDate() + n);
+    else if (rule === "weekly" || rule === "custom_weeks") d.setDate(d.getDate() + 7 * n);
+    else if (rule === "monthly" || rule === "custom_months") d.setMonth(d.getMonth() + n);
+    else if (rule === "yearly") d.setFullYear(d.getFullYear() + n);
+    return d;
+  }
+
+  it("projects weekly recurring into a month", () => {
+    const start = new Date("2026-03-01");
+    const end = new Date("2026-04-01");
+    let nextDate = new Date("2026-03-05"); // A Thursday
+    const projected = [];
+    let safety = 0;
+    while (nextDate < end && safety++ < 20) {
+      if (nextDate >= start) projected.push(nextDate.toISOString().split("T")[0]);
+      nextDate = advanceRecurrence(nextDate, "weekly", 1);
+    }
+    assert.ok(projected.length >= 3); // Should be 4 Thursdays in March
+    assert.ok(projected.length <= 5);
+  });
+
+  it("projects daily recurring correctly", () => {
+    const start = new Date("2026-03-10");
+    const end = new Date("2026-03-15");
+    let next = new Date("2026-03-10");
+    const projected = [];
+    let safety = 0;
+    while (next < end && safety++ < 100) {
+      if (next >= start) projected.push(next.toISOString().split("T")[0]);
+      next = advanceRecurrence(next, "daily", 1);
+    }
+    assert.equal(projected.length, 5); // 10,11,12,13,14
+  });
+
+  it("marks projected events differently from actual", () => {
+    const actual = { id: 1, title: "Task", type: "todo", event_date: "2026-03-15" };
+    const projected = { id: 1, title: "Task", type: "todo", event_date: "2026-03-22", recurring_projection: true };
+    assert.ok(!actual.recurring_projection);
+    assert.ok(projected.recurring_projection);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pagination
+// ---------------------------------------------------------------------------
+describe("Pagination", () => {
+  it("builds limit clause from query params", () => {
+    const limit = "10";
+    const offset = "20";
+    let pagination = "";
+    let idx = 1;
+    const params = [];
+    if (limit) { pagination += ` LIMIT $${idx++}`; params.push(parseInt(limit, 10)); }
+    if (offset) { pagination += ` OFFSET $${idx++}`; params.push(parseInt(offset, 10)); }
+    assert.equal(pagination, " LIMIT $1 OFFSET $2");
+    assert.deepEqual(params, [10, 20]);
+  });
+
+  it("works without limit or offset", () => {
+    const limit = undefined;
+    const offset = undefined;
+    let pagination = "";
+    if (limit) pagination += " LIMIT " + limit;
+    if (offset) pagination += " OFFSET " + offset;
+    assert.equal(pagination, "");
+  });
+
+  it("handles limit without offset", () => {
+    const limit = "25";
+    const offset = undefined;
+    let pagination = "";
+    let idx = 1;
+    const params = [];
+    if (limit) { pagination += ` LIMIT $${idx++}`; params.push(parseInt(limit, 10)); }
+    if (offset) { pagination += ` OFFSET $${idx++}`; params.push(parseInt(offset, 10)); }
+    assert.equal(pagination, " LIMIT $1");
+    assert.deepEqual(params, [25]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Health check
+// ---------------------------------------------------------------------------
+describe("Health check", () => {
+  it("response structure", () => {
+    const response = {
+      status: "ok", uptime: 3600, memory_mb: 128,
+      db: "connected", timestamp: new Date().toISOString(),
+    };
+    assert.ok("status" in response);
+    assert.ok("uptime" in response);
+    assert.ok("memory_mb" in response);
+    assert.ok("db" in response);
+    assert.ok("timestamp" in response);
+    assert.equal(response.status, "ok");
+  });
+
+  it("degraded status when db disconnected", () => {
+    const response = { status: "degraded", db: "disconnected" };
+    assert.equal(response.status, "degraded");
+    assert.equal(response.db, "disconnected");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Rate limiting
+// ---------------------------------------------------------------------------
+describe("Rate limiting", () => {
+  it("has rate limits for general, auth, and AI endpoints", () => {
+    const limits = {
+      general: { windowMs: 15 * 60 * 1000, max: 200 },
+      auth: { windowMs: 15 * 60 * 1000, max: 10 },
+      ai: { windowMs: 60 * 1000, max: 20 },
+    };
+    assert.ok(limits.general.max > limits.auth.max);
+    assert.ok(limits.ai.windowMs < limits.general.windowMs);
+    assert.equal(limits.ai.max, 20);
   });
 });

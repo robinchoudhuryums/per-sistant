@@ -74,6 +74,7 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 - **Name→email mapping**: For quick email addressing
 - **Lookup API**: Used by email composer and Quick Send
 - **Environment contacts**: Set `CONTACTS` env var for static contacts
+- **CSV import**: Bulk import contacts from a CSV file (name,email format)
 
 ### Dashboard
 - **Overview cards**: Task counts, email stats, note totals
@@ -91,6 +92,7 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 
 ### Calendar View
 - **Monthly calendar**: Visual overview of all events
+- **Recurring projections**: Future recurring task instances shown as dashed entries
 - **Color-coded**: Tasks, emails, and notes shown with distinct colors
 - **Navigate**: Browse months with previous/next controls
 
@@ -107,11 +109,14 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 - **Bidirectional**: Links show on both sides of the relationship
 
 ### Analytics & Insights Dashboard
+- **Productivity score**: Weighted composite score (completion rate, streaks, volume, speed)
 - **Completion trends**: Visual bar charts of tasks completed over time
+- **Activity heatmap**: GitHub-style 90-day activity heatmap
 - **Productivity by day**: See which days of the week you're most productive
 - **Priority breakdown**: Distribution of tasks across priority levels
 - **Category breakdown**: How your work splits across categories
 - **Period filters**: View analytics for the past week, month, quarter, or year
+- **Emails sent / notes created**: Tracked per period
 - **CSS-rendered charts**: No external charting library needed
 
 ### Webhooks & Integrations
@@ -146,6 +151,25 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 
 ### Voice Input
 - **Web Speech API**: Microphone button on Quick Add and notes (Chrome/Edge)
+
+### Todo Templates
+- **Save task structures**: Create reusable templates from existing tasks (with subtasks)
+- **Apply templates**: One-click task creation from saved templates
+- **Template management**: Create, browse, and delete templates from the todos page
+
+### Quick Actions from Search
+- **Complete tasks**: Mark tasks done directly from search results
+- **Send emails**: Send scheduled emails from search results
+- **Pin/unpin notes**: Toggle note pins from search results
+
+### Undo for More Actions
+- **Undo complete**: Revert task completion
+- **Undo send**: Revert sent email to draft status
+- **Undo delete**: Restore deleted items from trash (existing)
+
+### Health Check & Monitoring
+- **`/api/health`**: Returns server status, uptime, memory usage, DB connectivity (no auth required)
+- **Rate limiting**: General (200/15min), auth (10/15min), AI (20/min)
 
 ### Location-Based Reminders
 - **Geofencing**: Set location (name + coordinates + radius) on tasks
@@ -240,7 +264,7 @@ docker compose up --build
 npm test
 ```
 
-144 tests across 43 suites covering: time parsing, input validation, data structures, sorting, security, recurring tasks, custom recurrence intervals, skip/snooze, subtasks, email templates, natural language parsing, global search, calendar, weekly review, drag-and-drop, keyboard shortcuts, AI model selection, AI task breakdown, AI tone adjustment, todo categories, note tags, dashboard views, task dependencies, streaks, bulk actions, trash/undo, automations, attachments, location reminders, cross-entity links, webhooks, Slack integration, notifications, and analytics.
+170 tests across 51 suites covering: time parsing, input validation, data structures, sorting, security, recurring tasks, custom recurrence intervals, skip/snooze, subtasks, email templates, natural language parsing, global search, calendar, weekly review, drag-and-drop, keyboard shortcuts, AI model selection, AI task breakdown, AI tone adjustment, todo categories, note tags, dashboard views, task dependencies, streaks, bulk actions, trash/undo, automations, attachments, location reminders, cross-entity links, webhooks, Slack integration, notifications, analytics, productivity score, heatmap, todo templates, batch contact import, quick search actions, undo actions, calendar projections, pagination, health check, and rate limiting.
 
 ## API Endpoints
 
@@ -294,6 +318,13 @@ npm test
 | `PUT` | `/api/email-templates/:id` | Update template |
 | `DELETE` | `/api/email-templates/:id` | Delete template |
 | `GET` | `/api/todo-categories` | List all categories (defaults + custom) |
+| `GET` | `/api/todo-templates` | List todo templates |
+| `POST` | `/api/todo-templates` | Create todo template |
+| `PATCH` | `/api/todo-templates/:id` | Update todo template |
+| `DELETE` | `/api/todo-templates/:id` | Delete todo template |
+| `POST` | `/api/todo-templates/:id/apply` | Create todo from template |
+| `POST` | `/api/contacts/import` | Batch import contacts (JSON array) |
+| `GET` | `/api/health` | Health check (no auth required) |
 | `GET` | `/api/trash` | List all trashed items |
 | `POST` | `/api/trash/:type/:id/restore` | Restore item from trash |
 | `DELETE` | `/api/trash/:type/:id` | Permanently delete trashed item |

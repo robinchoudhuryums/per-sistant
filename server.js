@@ -136,9 +136,20 @@ app.use(session({
   },
 }));
 
+// Health check — no auth required
+app.get("/api/health", (req, res) => {
+  const uptime = process.uptime();
+  const mem = process.memoryUsage();
+  pool.query("SELECT 1").then(() => {
+    res.json({ status: "ok", uptime: Math.floor(uptime), memory_mb: Math.round(mem.rss / 1048576), db: "connected", timestamp: new Date().toISOString() });
+  }).catch(() => {
+    res.status(503).json({ status: "degraded", uptime: Math.floor(uptime), memory_mb: Math.round(mem.rss / 1048576), db: "disconnected", timestamp: new Date().toISOString() });
+  });
+});
+
 function requireAuth(req, res, next) {
   if (!AUTH_SECRET) return next();
-  if (["/login", "/api/login", "/manifest.json", "/sw.js"].includes(req.path)) return next();
+  if (["/login", "/api/login", "/manifest.json", "/sw.js", "/api/health"].includes(req.path)) return next();
   if (req.session && req.session.authenticated) {
     const timeout = (req.session.timeoutMinutes || 15) * 60 * 1000;
     if (Date.now() - req.session.lastActivity < timeout) {
@@ -183,6 +194,13 @@ const authLimiter = rateLimit({
   message: { error: "Too many login attempts, please try again later." },
 });
 app.use("/api/login", authLimiter);
+
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  message: { error: "Too many AI requests, please slow down." },
+});
+app.use("/api/ai/", aiLimiter);
 
 // ---------------------------------------------------------------------------
 // Shared CSS — companion to Perfin (indigo/lavender palette vs Perfin's warm/amber)
@@ -429,6 +447,7 @@ const SHARED_CSS = `
     .cal-event { font-size: 9px; padding: 2px 4px; border-radius: 3px; margin-bottom: 2px;
                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .cal-event.todo { background: var(--blue-bg); color: var(--blue); }
+    .cal-event.todo.recurring-proj { background: rgba(160,140,212,0.12); color: var(--warm); border: 1px dashed var(--warm); }
     .cal-event.email { background: var(--yellow-bg); color: var(--yellow); }
     .cal-event.note { background: var(--green-bg); color: var(--green); }
 
@@ -623,19 +642,29 @@ function startVoiceInput(targetId, onDone) {
   recognition.start();
 }
 var _undoTimer=null;
-function showUndo(msg,type,id){
+function showUndo(msg,type,id,action){
   clearTimeout(_undoTimer);
   var el=document.getElementById('undo-toast');
   if(!el){el=document.createElement('div');el.id='undo-toast';el.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface-2);border:1px solid var(--border);padding:12px 20px;border-radius:12px;display:flex;align-items:center;gap:12px;z-index:9999;backdrop-filter:blur(20px);font-size:14px;color:var(--text);box-shadow:0 8px 32px rgba(0,0,0,0.3);';document.body.appendChild(el);}
-  el.innerHTML=esc(msg)+' <button onclick="undoDelete(\\''+type+'\\','+id+')" style="background:var(--warm);color:#fff;border:none;padding:4px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;">Undo</button>';
+  var undoAction = action || 'delete';
+  el.innerHTML=esc(msg)+' <button onclick="undoAction(\\''+type+'\\','+id+',\\''+undoAction+'\\');event.stopPropagation();" style="background:var(--warm);color:#fff;border:none;padding:4px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;">Undo</button>';
   el.style.display='flex';
   _undoTimer=setTimeout(function(){el.style.display='none';},6000);
 }
-async function undoDelete(type,id){
-  await fetch('/api/trash/'+type+'/'+id+'/restore',{method:'POST'});
+async function undoAction(type,id,action){
+  if(action==='delete'){
+    await fetch('/api/trash/'+type+'/'+id+'/restore',{method:'POST'});
+  } else if(action==='complete'){
+    await fetch('/api/todos/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({completed:false})});
+  } else if(action==='send'){
+    // Can't unsend, but mark as draft
+    await fetch('/api/emails/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'draft'})});
+  }
   var el=document.getElementById('undo-toast');if(el)el.style.display='none';
   if(typeof load==='function')load();
 }
+// Backward compat
+function undoDelete(type,id){undoAction(type,id,'delete');}
 `;
 
 // ---------------------------------------------------------------------------
@@ -784,7 +813,7 @@ app.post("/api/logout", (req, res) => {
 // ============================================================================
 app.get("/api/todos", async (req, res) => {
   try {
-    const { horizon, priority, completed, category, limit } = req.query;
+    const { horizon, priority, completed, category, limit, offset } = req.query;
     let where = ["deleted_at IS NULL"];
     let params = [];
     let idx = 1;
@@ -793,9 +822,10 @@ app.get("/api/todos", async (req, res) => {
     if (completed !== undefined) { where.push(`completed = $${idx++}`); params.push(completed === "true"); }
     if (category) { where.push(`category = $${idx++}`); params.push(category); }
     const clause = "WHERE " + where.join(" AND ");
-    const limitClause = limit ? ` LIMIT $${idx++}` : "";
-    if (limit) params.push(parseInt(limit, 10));
-    const r = await pool.query(`SELECT * FROM todos ${clause} ORDER BY completed ASC, sort_order ASC, CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at DESC${limitClause}`, params);
+    let pagination = "";
+    if (limit) { pagination += ` LIMIT $${idx++}`; params.push(parseInt(limit, 10)); }
+    if (offset) { pagination += ` OFFSET $${idx++}`; params.push(parseInt(offset, 10)); }
+    const r = await pool.query(`SELECT * FROM todos ${clause} ORDER BY completed ASC, sort_order ASC, CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at DESC${pagination}`, params);
     res.json(r.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -878,10 +908,15 @@ app.delete("/api/todos/:id", async (req, res) => {
 // ============================================================================
 app.get("/api/emails", async (req, res) => {
   try {
-    const { status } = req.query;
-    const where = status ? "WHERE deleted_at IS NULL AND status = $1" : "WHERE deleted_at IS NULL";
-    const params = status ? [status] : [];
-    const r = await pool.query(`SELECT * FROM emails ${where} ORDER BY CASE status WHEN 'scheduled' THEN 0 WHEN 'draft' THEN 1 WHEN 'sent' THEN 2 ELSE 3 END, created_at DESC`, params);
+    const { status, limit, offset } = req.query;
+    let where = ["deleted_at IS NULL"];
+    let params = [];
+    let idx = 1;
+    if (status) { where.push(`status = $${idx++}`); params.push(status); }
+    let pagination = "";
+    if (limit) { pagination += ` LIMIT $${idx++}`; params.push(parseInt(limit, 10)); }
+    if (offset) { pagination += ` OFFSET $${idx++}`; params.push(parseInt(offset, 10)); }
+    const r = await pool.query(`SELECT * FROM emails WHERE ${where.join(" AND ")} ORDER BY CASE status WHEN 'scheduled' THEN 0 WHEN 'draft' THEN 1 WHEN 'sent' THEN 2 ELSE 3 END, created_at DESC${pagination}`, params);
     res.json(r.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -976,7 +1011,13 @@ app.post("/api/emails/:id/send", async (req, res) => {
 // ============================================================================
 app.get("/api/notes", async (req, res) => {
   try {
-    const r = await pool.query("SELECT * FROM notes WHERE deleted_at IS NULL ORDER BY pinned DESC, updated_at DESC");
+    const { limit, offset } = req.query;
+    let params = [];
+    let idx = 1;
+    let pagination = "";
+    if (limit) { pagination += ` LIMIT $${idx++}`; params.push(parseInt(limit, 10)); }
+    if (offset) { pagination += ` OFFSET $${idx++}`; params.push(parseInt(offset, 10)); }
+    const r = await pool.query(`SELECT * FROM notes WHERE deleted_at IS NULL ORDER BY pinned DESC, updated_at DESC${pagination}`, params);
     res.json(r.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1650,40 +1691,58 @@ app.get("/api/analytics", async (req, res) => {
     const sd = startDate.toISOString().split("T")[0];
     const ed = now.toISOString().split("T")[0];
 
-    const [completedByDay, createdByDay, completionRate, priorityBreakdown, categoryBreakdown, avgCompletionTime, streakLeaders, productivityByDow] = await Promise.all([
-      // Completed tasks per day
+    // Heatmap date: 90 days ago
+    const heatmapStart = new Date(now);
+    heatmapStart.setDate(heatmapStart.getDate() - 90);
+    const hsd = heatmapStart.toISOString().split("T")[0];
+
+    const [completedByDay, createdByDay, completionRate, priorityBreakdown, categoryBreakdown, avgCompletionTime, streakLeaders, productivityByDow, heatmapData, emailsSent, notesMade] = await Promise.all([
       pool.query(`SELECT DATE(completed_at) as day, COUNT(*) as count FROM todos WHERE deleted_at IS NULL AND completed = true AND completed_at >= $1 GROUP BY DATE(completed_at) ORDER BY day`, [sd]),
-      // Created tasks per day
       pool.query(`SELECT DATE(created_at) as day, COUNT(*) as count FROM todos WHERE deleted_at IS NULL AND created_at >= $1 GROUP BY DATE(created_at) ORDER BY day`, [sd]),
-      // Completion rate
       pool.query(`SELECT COUNT(*) FILTER (WHERE completed) as done, COUNT(*) as total FROM todos WHERE deleted_at IS NULL AND created_at >= $1`, [sd]),
-      // Priority breakdown of active tasks
       pool.query(`SELECT priority, COUNT(*) as count FROM todos WHERE deleted_at IS NULL AND completed = false GROUP BY priority ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END`),
-      // Category breakdown
       pool.query(`SELECT COALESCE(category, 'uncategorized') as category, COUNT(*) as count, COUNT(*) FILTER (WHERE completed) as completed FROM todos WHERE deleted_at IS NULL AND created_at >= $1 GROUP BY category ORDER BY count DESC`, [sd]),
-      // Average time to complete (in hours)
       pool.query(`SELECT AVG(EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600) as avg_hours FROM todos WHERE deleted_at IS NULL AND completed = true AND completed_at >= $1`, [sd]),
-      // Top streaks
       pool.query(`SELECT title, streak_count, best_streak, recurrence_rule FROM todos WHERE deleted_at IS NULL AND recurring = true AND completed = false AND streak_count > 0 ORDER BY streak_count DESC LIMIT 5`),
-      // Productivity by day of week
       pool.query(`SELECT EXTRACT(DOW FROM completed_at) as dow, COUNT(*) as count FROM todos WHERE deleted_at IS NULL AND completed = true AND completed_at >= $1 GROUP BY dow ORDER BY dow`, [sd]),
+      // Heatmap: completions per day for last 90 days
+      pool.query(`SELECT DATE(completed_at) as day, COUNT(*) as count FROM todos WHERE deleted_at IS NULL AND completed = true AND completed_at >= $1 GROUP BY DATE(completed_at) ORDER BY day`, [hsd]),
+      // Emails sent in period
+      pool.query(`SELECT COUNT(*) as count FROM emails WHERE deleted_at IS NULL AND sent_at >= $1`, [sd]),
+      // Notes created in period
+      pool.query(`SELECT COUNT(*) as count FROM notes WHERE deleted_at IS NULL AND created_at >= $1`, [sd]),
     ]);
 
     const rate = completionRate.rows[0];
+    const totalCompleted = parseInt(rate.done);
+    const totalCreated = parseInt(rate.total);
+    const completionPct = totalCreated > 0 ? Math.round((totalCompleted / totalCreated) * 100) : 0;
+    const avgHours = avgCompletionTime.rows[0]?.avg_hours ? Math.round(avgCompletionTime.rows[0].avg_hours * 10) / 10 : null;
+    const topStreak = streakLeaders.rows[0]?.streak_count || 0;
+    // Productivity score: weighted composite (completion rate 40%, streak bonus 20%, volume 20%, speed 20%)
+    const volumeScore = Math.min(totalCompleted / 10, 1) * 100; // 10 tasks = max
+    const speedScore = avgHours ? Math.max(0, Math.min(100, 100 - avgHours)) : 50;
+    const streakScore = Math.min(topStreak / 7, 1) * 100;
+    const productivityScore = Math.round(completionPct * 0.4 + streakScore * 0.2 + volumeScore * 0.2 + speedScore * 0.2);
+
     res.json({
       period: period || "week",
       start_date: sd,
       end_date: ed,
       completed_by_day: completedByDay.rows,
       created_by_day: createdByDay.rows,
-      completion_rate: rate.total > 0 ? Math.round((rate.done / rate.total) * 100) : 0,
-      total_completed: parseInt(rate.done),
-      total_created: parseInt(rate.total),
+      completion_rate: completionPct,
+      total_completed: totalCompleted,
+      total_created: totalCreated,
       priority_breakdown: priorityBreakdown.rows,
       category_breakdown: categoryBreakdown.rows,
-      avg_completion_hours: avgCompletionTime.rows[0]?.avg_hours ? Math.round(avgCompletionTime.rows[0].avg_hours * 10) / 10 : null,
+      avg_completion_hours: avgHours,
       streak_leaders: streakLeaders.rows,
       productivity_by_dow: productivityByDow.rows,
+      heatmap: heatmapData.rows,
+      productivity_score: productivityScore,
+      emails_sent: parseInt(emailsSent.rows[0]?.count || 0),
+      notes_created: parseInt(notesMade.rows[0]?.count || 0),
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1908,6 +1967,99 @@ app.delete("/api/email-templates/:id", async (req, res) => {
     const r = await pool.query("DELETE FROM email_templates WHERE id = $1 RETURNING id", [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: "Not found." });
     res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Todo Templates
+// ============================================================================
+app.get("/api/todo-templates", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM todo_templates ORDER BY name ASC");
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/todo-templates", async (req, res) => {
+  try {
+    const { name, title, description, priority, horizon, category, recurring, recurrence_rule, recurrence_interval, subtasks } = req.body;
+    if (!name || !title) return res.status(400).json({ error: "Name and title required." });
+    if (priority && !VALID_PRIORITIES.includes(priority)) return res.status(400).json({ error: "Invalid priority." });
+    if (horizon && !VALID_HORIZONS.includes(horizon)) return res.status(400).json({ error: "Invalid horizon." });
+    const r = await pool.query(
+      "INSERT INTO todo_templates (name, title, description, priority, horizon, category, recurring, recurrence_rule, recurrence_interval, subtasks) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *",
+      [name, title, description || null, priority || "medium", horizon || "short", category || null, recurring || false, recurrence_rule || null, recurrence_interval || 1, JSON.stringify(subtasks || [])]
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch("/api/todo-templates/:id", async (req, res) => {
+  try {
+    const { name, title, description, priority, horizon, category, recurring, recurrence_rule, recurrence_interval, subtasks } = req.body;
+    const fields = []; const params = []; let idx = 1;
+    if (name !== undefined) { fields.push(`name = $${idx++}`); params.push(name); }
+    if (title !== undefined) { fields.push(`title = $${idx++}`); params.push(title); }
+    if (description !== undefined) { fields.push(`description = $${idx++}`); params.push(description); }
+    if (priority !== undefined) { fields.push(`priority = $${idx++}`); params.push(priority); }
+    if (horizon !== undefined) { fields.push(`horizon = $${idx++}`); params.push(horizon); }
+    if (category !== undefined) { fields.push(`category = $${idx++}`); params.push(category); }
+    if (recurring !== undefined) { fields.push(`recurring = $${idx++}`); params.push(recurring); }
+    if (recurrence_rule !== undefined) { fields.push(`recurrence_rule = $${idx++}`); params.push(recurrence_rule); }
+    if (recurrence_interval !== undefined) { fields.push(`recurrence_interval = $${idx++}`); params.push(recurrence_interval); }
+    if (subtasks !== undefined) { fields.push(`subtasks = $${idx++}`); params.push(JSON.stringify(subtasks)); }
+    if (!fields.length) return res.status(400).json({ error: "No fields." });
+    params.push(req.params.id);
+    const r = await pool.query(`UPDATE todo_templates SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, params);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/todo-templates/:id", async (req, res) => {
+  try {
+    const r = await pool.query("DELETE FROM todo_templates WHERE id = $1 RETURNING id", [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/todo-templates/:id/apply", async (req, res) => {
+  try {
+    const template = (await pool.query("SELECT * FROM todo_templates WHERE id = $1", [req.params.id])).rows[0];
+    if (!template) return res.status(404).json({ error: "Template not found." });
+    const overrides = req.body || {};
+    const r = await pool.query(
+      "INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_interval) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *",
+      [overrides.title || template.title, overrides.description || template.description, overrides.priority || template.priority, overrides.horizon || template.horizon, overrides.category || template.category, overrides.due_date || null, template.recurring, template.recurrence_rule, template.recurrence_interval]
+    );
+    const todo = r.rows[0];
+    const subs = template.subtasks || [];
+    for (const sub of subs) {
+      await pool.query("INSERT INTO subtasks (todo_id, title) VALUES ($1, $2)", [todo.id, typeof sub === "string" ? sub : sub.title]);
+    }
+    res.json(todo);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================================
+// API — Batch Contact Import
+// ============================================================================
+app.post("/api/contacts/import", async (req, res) => {
+  try {
+    const { contacts } = req.body;
+    if (!Array.isArray(contacts) || !contacts.length) return res.status(400).json({ error: "contacts array required." });
+    const imported = [];
+    const errors = [];
+    for (const c of contacts) {
+      try {
+        if (!c.name || !c.email) { errors.push({ contact: c, error: "name and email required" }); continue; }
+        if (!EMAIL_REGEX.test(c.email)) { errors.push({ contact: c, error: "invalid email" }); continue; }
+        const r = await pool.query("INSERT INTO contacts (name, email) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING *", [c.name.trim(), c.email.trim().toLowerCase()]);
+        if (r.rows[0]) imported.push(r.rows[0]);
+      } catch (err) { errors.push({ contact: c, error: err.message }); }
+    }
+    res.json({ imported: imported.length, errors: errors.length, details: errors.length ? errors : undefined });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2187,9 +2339,9 @@ app.get("/api/search", async (req, res) => {
     if (!q || q.length < 2) return res.json([]);
     const pattern = `%${q}%`;
     const [todos, emails, notes, contacts] = await Promise.all([
-      pool.query("SELECT id, title, description, priority, horizon, 'todo' as type FROM todos WHERE deleted_at IS NULL AND (title ILIKE $1 OR description ILIKE $1) LIMIT 10", [pattern]),
-      pool.query("SELECT id, subject as title, recipient_name as description, status as priority, 'email' as type FROM emails WHERE deleted_at IS NULL AND (subject ILIKE $1 OR body ILIKE $1 OR recipient_name ILIKE $1) LIMIT 10", [pattern]),
-      pool.query("SELECT id, COALESCE(title, LEFT(content, 50)) as title, LEFT(content, 100) as description, 'note' as type FROM notes WHERE deleted_at IS NULL AND (title ILIKE $1 OR content ILIKE $1) LIMIT 10", [pattern]),
+      pool.query("SELECT id, title, description, priority, horizon, completed, recurring, 'todo' as type FROM todos WHERE deleted_at IS NULL AND (title ILIKE $1 OR description ILIKE $1) LIMIT 10", [pattern]),
+      pool.query("SELECT id, subject as title, recipient_name as description, status, status as priority, 'email' as type FROM emails WHERE deleted_at IS NULL AND (subject ILIKE $1 OR body ILIKE $1 OR recipient_name ILIKE $1) LIMIT 10", [pattern]),
+      pool.query("SELECT id, COALESCE(title, LEFT(content, 50)) as title, LEFT(content, 100) as description, pinned, 'note' as type FROM notes WHERE deleted_at IS NULL AND (title ILIKE $1 OR content ILIKE $1) LIMIT 10", [pattern]),
       pool.query("SELECT id, name as title, email as description, 'contact' as type FROM contacts WHERE name ILIKE $1 OR email ILIKE $1 LIMIT 10", [pattern]),
     ]);
     res.json([...todos.rows, ...emails.rows, ...notes.rows, ...contacts.rows]);
@@ -2206,12 +2358,31 @@ app.get("/api/calendar", async (req, res) => {
     const y = parseInt(year, 10) || new Date().getFullYear();
     const startDate = `${y}-${String(m).padStart(2,"0")}-01`;
     const endDate = m === 12 ? `${y+1}-01-01` : `${y}-${String(m+1).padStart(2,"0")}-01`;
-    const [todos, emails, notes] = await Promise.all([
+    const [todos, emails, notes, recurring] = await Promise.all([
       pool.query("SELECT id, title, due_date as event_date, priority, 'todo' as type FROM todos WHERE deleted_at IS NULL AND due_date >= $1 AND due_date < $2 AND NOT completed", [startDate, endDate]),
       pool.query("SELECT id, subject as title, scheduled_at as event_date, status as priority, 'email' as type FROM emails WHERE deleted_at IS NULL AND scheduled_at >= $1 AND scheduled_at < $2", [startDate, endDate]),
       pool.query("SELECT id, COALESCE(title, LEFT(content,30)) as title, reminder_at as event_date, 'note' as type FROM notes WHERE deleted_at IS NULL AND reminder_at >= $1 AND reminder_at < $2", [startDate, endDate]),
+      pool.query("SELECT id, title, due_date, recurrence_rule, recurrence_interval, priority FROM todos WHERE deleted_at IS NULL AND recurring = true AND completed = false AND due_date IS NOT NULL"),
     ]);
-    res.json([...todos.rows, ...emails.rows, ...notes.rows]);
+    // Project future recurring instances into this month
+    const projected = [];
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    for (const t of recurring.rows) {
+      let nextDate = new Date(t.due_date);
+      let safety = 0;
+      while (nextDate < end && safety++ < 100) {
+        if (nextDate >= start && nextDate < end) {
+          // Only add if not already in the actual todos
+          const dateStr = nextDate.toISOString().split("T")[0];
+          if (!todos.rows.some(x => x.id === t.id && x.event_date && new Date(x.event_date).toISOString().split("T")[0] === dateStr)) {
+            projected.push({ id: t.id, title: t.title, event_date: dateStr, priority: t.priority, type: "todo", recurring_projection: true });
+          }
+        }
+        nextDate = advanceRecurrence(nextDate, t.recurrence_rule, t.recurrence_interval || 1);
+      }
+    }
+    res.json([...todos.rows, ...emails.rows, ...notes.rows, ...projected]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2456,7 +2627,15 @@ function doSearch(q) {
     else {
       document.getElementById('search-results').innerHTML = results.map(r => {
         var href = r.type==='todo'?'/todos':r.type==='email'?'/emails':r.type==='note'?'/notes':'/contacts';
-        return '<a href="'+href+'" class="result-item" style="display:block;text-decoration:none;color:inherit;"><div class="result-type">'+r.type+'</div><div style="font-size:14px;">'+esc(r.title||'')+'</div>'+(r.description?'<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+esc(r.description)+'</div>':'')+'</a>';
+        var actions = '';
+        if (r.type === 'todo' && !r.completed) {
+          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button onclick="event.preventDefault();event.stopPropagation();searchComplete('+r.id+','+!!r.recurring+')" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Complete</button></div>';
+        } else if (r.type === 'email' && r.status === 'scheduled') {
+          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button onclick="event.preventDefault();event.stopPropagation();searchSendEmail('+r.id+')" style="background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Send Now</button></div>';
+        } else if (r.type === 'note') {
+          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button onclick="event.preventDefault();event.stopPropagation();searchTogglePin('+r.id+','+!r.pinned+')" style="background:var(--yellow-bg);color:var(--yellow);border:1px solid var(--yellow);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(r.pinned?'Unpin':'Pin')+'</button></div>';
+        }
+        return '<a href="'+href+'" class="result-item" style="display:block;text-decoration:none;color:inherit;"><div class="result-type">'+r.type+(r.type==='todo'&&r.completed?' (done)':'')+'</div><div style="font-size:14px;">'+esc(r.title||'')+'</div>'+(r.description?'<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+esc(r.description)+'</div>':'')+actions+'</a>';
       }).join('');
     }
     document.getElementById('search-results').style.display='block';
@@ -2513,6 +2692,7 @@ async function dashComplete(id) {
   await fetch('/api/todos/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({completed:true})});
   allTodos = allTodos.filter(t=>t.id!==id);
   renderDashTasks();
+  showUndo('Task completed','todo',id,'complete');
 }
 
 async function dashCompleteRecurring(id) {
@@ -2523,7 +2703,30 @@ async function dashCompleteRecurring(id) {
 
 async function dashSendEmail(id) {
   var r = await fetch('/api/emails/'+id+'/send', {method:'POST'}).then(r=>r.json());
-  if (r.ok) { load(); } else { alert('Failed: '+(r.error||'Unknown error')); }
+  if (r.ok) { showUndo('Email sent','email',id,'send'); load(); } else { alert('Failed: '+(r.error||'Unknown error')); }
+}
+
+// Search quick actions
+async function searchComplete(id, isRecurring) {
+  if (isRecurring) await fetch('/api/todos/'+id+'/complete-recurring', {method:'POST'});
+  else await fetch('/api/todos/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({completed:true})});
+  showUndo('Task completed','todo',id,'complete');
+  document.getElementById('search-results').style.display='none';
+  document.getElementById('global-search').value='';
+  load();
+}
+async function searchSendEmail(id) {
+  var r = await fetch('/api/emails/'+id+'/send', {method:'POST'}).then(r=>r.json());
+  if (r.ok) { showUndo('Email sent','email',id,'send'); }
+  document.getElementById('search-results').style.display='none';
+  document.getElementById('global-search').value='';
+  load();
+}
+async function searchTogglePin(id, pinned) {
+  await fetch('/api/notes/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({pinned:pinned})});
+  document.getElementById('search-results').style.display='none';
+  document.getElementById('global-search').value='';
+  load();
 }
 
 async function load() {
@@ -2724,6 +2927,7 @@ ${themeScript()}
   <div class="actions">
     <button class="primary" onclick="openAdd()">+ New Task</button>
     <button onclick="openQuickTodo()">Quick Add</button>
+    <button onclick="openTemplateList()">From Template</button>
     <button id="select-toggle" onclick="toggleSelectMode()">Select</button>
   </div>
   <div id="bulk-bar" style="display:none;padding:10px 16px;margin-bottom:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);display:none;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;">
@@ -2847,7 +3051,19 @@ ${themeScript()}
     <div class="modal-actions">
       <button onclick="closeModal()">Cancel</button>
       <button class="primary" onclick="saveTodo()">Save</button>
+      <button id="save-template-btn" style="display:none;padding:10px 20px;font-size:13px;font-weight:500;border:1px solid var(--teal);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;" onclick="saveAsTemplate()">Save as Template</button>
       <button class="danger" id="delete-btn" style="display:none" onclick="deleteTodo()">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Template List Modal -->
+<div class="modal-overlay" id="template-modal">
+  <div class="modal">
+    <h2>Task Templates</h2>
+    <div id="template-list" style="margin-bottom:16px;"></div>
+    <div class="modal-actions">
+      <button onclick="closeTemplateList()">Close</button>
     </div>
   </div>
 </div>
@@ -3092,6 +3308,7 @@ function openAdd() {
   document.getElementById('f-recurrence').style.display = 'none';
   document.getElementById('f-recurrence-rule').value = 'weekly';
   document.getElementById('delete-btn').style.display = 'none';
+  document.getElementById('save-template-btn').style.display = 'inline-block';
   document.getElementById('subtasks-section').style.display = 'block';
   document.getElementById('deps-section').style.display = 'none';
   document.getElementById('location-section').style.display = 'block';
@@ -3133,6 +3350,7 @@ async function openEdit(id) {
   document.getElementById('f-interval').value = t.recurrence_interval || 1;
   document.getElementById('f-interval-row').style.display = (t.recurrence_rule||'').startsWith('custom') ? 'flex' : 'none';
   document.getElementById('delete-btn').style.display = 'inline-block';
+  document.getElementById('save-template-btn').style.display = 'inline-block';
   document.getElementById('subtasks-section').style.display = 'block';
   document.getElementById('deps-section').style.display = 'block';
   document.getElementById('location-section').style.display = 'block';
@@ -3188,6 +3406,7 @@ async function toggleTodo(id, completed, isRecurring) {
   } else {
     await fetch('/api/todos/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({completed})});
   }
+  if (completed) showUndo('Task completed','todo',id,'complete');
   load();
 }
 
@@ -3372,6 +3591,57 @@ async function parseQuickTodoAI() {
     document.getElementById('qt-confirm').style.display = 'inline-block';
   } catch { parseQuickTodo(); } // Fallback to regex
   finally { btn.textContent = 'Parse'; btn.disabled = false; }
+}
+
+// Templates
+async function openTemplateList() {
+  var templates = await fetch('/api/todo-templates').then(r=>r.json());
+  var el = document.getElementById('template-list');
+  if (!templates.length) { el.innerHTML = '<div class="empty-msg">No templates yet. Edit a task and click "Save as Template" to create one.</div>'; }
+  else {
+    el.innerHTML = templates.map(t => {
+      var subs = t.subtasks || [];
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="flex:1;"><div style="font-size:14px;font-weight:400;">'+esc(t.name)+'</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+esc(t.title)+' &middot; <span class="badge '+t.priority+'">'+t.priority+'</span> &middot; '+t.horizon+(subs.length?' &middot; '+subs.length+' subtasks':'')+'</div></div><div style="display:flex;gap:6px;"><button onclick="applyTemplate('+t.id+')" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Use</button><button onclick="deleteTemplate('+t.id+')" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">&#10005;</button></div></div>';
+    }).join('');
+  }
+  document.getElementById('template-modal').classList.add('active');
+}
+function closeTemplateList() { document.getElementById('template-modal').classList.remove('active'); }
+async function applyTemplate(id) {
+  await fetch('/api/todo-templates/'+id+'/apply', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+  closeTemplateList();
+  load();
+}
+async function deleteTemplate(id) {
+  await fetch('/api/todo-templates/'+id, {method:'DELETE'});
+  openTemplateList();
+}
+async function saveAsTemplate() {
+  var name = prompt('Template name:');
+  if (!name) return;
+  var isRecurring = document.getElementById('f-recurring').checked;
+  var data = {
+    name: name,
+    title: document.getElementById('f-title').value,
+    description: document.getElementById('f-desc').value || null,
+    priority: document.getElementById('f-priority').value,
+    horizon: document.getElementById('f-horizon').value,
+    category: (document.getElementById('f-category-select').value === '__custom__' ? document.getElementById('f-category-custom').value : document.getElementById('f-category-select').value) || null,
+    recurring: isRecurring,
+    recurrence_rule: isRecurring ? document.getElementById('f-recurrence-rule').value : null,
+    recurrence_interval: isRecurring ? parseInt(document.getElementById('f-interval').value) || 1 : 1,
+    subtasks: editSubtasks.map(s => s.title),
+  };
+  // If editing existing, get subtasks from the server
+  var todoId = document.getElementById('edit-id').value;
+  if (todoId) {
+    try {
+      var subs = await fetch('/api/todos/'+todoId+'/subtasks').then(r=>r.json());
+      data.subtasks = subs.map(s => s.title);
+    } catch {}
+  }
+  await fetch('/api/todo-templates', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  alert('Template saved!');
 }
 
 // Keyboard shortcuts
@@ -4016,11 +4286,14 @@ ${themeScript()}
 
   <div class="actions">
     <button class="primary" onclick="openAdd()">+ Add Contact</button>
+    <button onclick="document.getElementById('csv-file').click()">Import CSV</button>
+    <input type="file" id="csv-file" accept=".csv" style="display:none" onchange="importCSV(this)">
   </div>
 
   <div class="section">
     <div id="contact-list"></div>
   </div>
+  <div id="import-status" class="status-msg"></div>
 </div>
 
 <div class="modal-overlay" id="contact-modal">
@@ -4097,6 +4370,32 @@ async function deleteDirect(id) {
   load();
 }
 
+function importCSV(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = async function(e) {
+    var lines = e.target.result.split('\\n').filter(l => l.trim());
+    var contacts = [];
+    for (var i = 0; i < lines.length; i++) {
+      var parts = lines[i].split(',').map(s => s.trim().replace(/^["']|["']$/g, ''));
+      if (parts.length >= 2) {
+        // Skip header row
+        if (i === 0 && (parts[0].toLowerCase() === 'name' || parts[1].toLowerCase() === 'email')) continue;
+        contacts.push({ name: parts[0], email: parts[1] });
+      }
+    }
+    if (!contacts.length) { alert('No valid contacts found in CSV. Expected format: name,email'); return; }
+    var r = await fetch('/api/contacts/import', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contacts:contacts})}).then(r=>r.json());
+    var el = document.getElementById('import-status');
+    el.className = 'status-msg success';
+    el.textContent = 'Imported '+r.imported+' contacts'+(r.errors?' ('+r.errors+' errors)':'');
+    setTimeout(function(){el.className='status-msg';},5000);
+    load();
+  };
+  reader.readAsText(file);
+  input.value = '';
+}
 
 load();
 </script>
@@ -4163,7 +4462,7 @@ async function load() {
     });
     html += '<div class="cal-day'+(isToday?' today':'')+'"><div class="cal-day-num">'+d+'</div>';
     dayEvents.slice(0,3).forEach(e => {
-      html += '<div class="cal-event '+e.type+'">'+esc(e.title)+'</div>';
+      html += '<div class="cal-event '+e.type+(e.recurring_projection?' recurring-proj':'')+'">'+( e.recurring_projection?'&#x1F501; ':'')+esc(e.title)+'</div>';
     });
     if (dayEvents.length > 3) html += '<div style="font-size:9px;color:var(--text-muted)">+'+(dayEvents.length-3)+' more</div>';
     html += '</div>';
@@ -4299,6 +4598,17 @@ ${themeScript()}
     </div>
   </div>
 
+  <div class="section" style="margin-bottom:24px;">
+    <h2>Activity Heatmap (90 Days)</h2>
+    <div id="heatmap" style="display:flex;flex-wrap:wrap;gap:2px;"></div>
+    <div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-top:8px;font-size:10px;color:var(--text-muted);">
+      Less <div style="width:12px;height:12px;border-radius:2px;background:var(--surface-2);"></div>
+      <div style="width:12px;height:12px;border-radius:2px;background:rgba(111,207,151,0.3);"></div>
+      <div style="width:12px;height:12px;border-radius:2px;background:rgba(111,207,151,0.6);"></div>
+      <div style="width:12px;height:12px;border-radius:2px;background:var(--green);"></div> More
+    </div>
+  </div>
+
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px;" class="dash-two-col">
     <div class="section">
       <h2>Priority Breakdown</h2>
@@ -4323,11 +4633,15 @@ async function load() {
   var data = await fetch('/api/analytics?period='+curPeriod).then(r=>r.json());
 
   // Overview cards
+  var scoreColor = data.productivity_score >= 70 ? 'green' : data.productivity_score >= 40 ? 'yellow' : 'red';
   document.getElementById('overview-cards').innerHTML = [
+    {label:'Productivity Score',value:data.productivity_score,cls:scoreColor},
     {label:'Tasks Completed',value:data.total_completed,cls:'green'},
     {label:'Tasks Created',value:data.total_created,cls:'warm'},
     {label:'Completion Rate',value:data.completion_rate+'%',cls:data.completion_rate>=70?'green':data.completion_rate>=40?'yellow':'red'},
     {label:'Avg. Completion Time',value:data.avg_completion_hours?data.avg_completion_hours+'h':'N/A',cls:'teal'},
+    {label:'Emails Sent',value:data.emails_sent||0,cls:'blue'},
+    {label:'Notes Created',value:data.notes_created||0,cls:'warm'},
   ].map(c => '<div class="card"><div class="label">'+c.label+'</div><div class="value '+c.cls+'">'+c.value+'</div></div>').join('');
 
   // Completion trend bar chart
@@ -4376,6 +4690,23 @@ async function load() {
         '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="font-size:18px;font-weight:300;color:var(--text-muted);width:30px;text-align:center;">'+(i+1)+'</div><div style="flex:1;"><div style="font-size:14px;font-weight:400;">'+esc(s.title)+'</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+s.recurrence_rule+' &middot; Best: '+s.best_streak+'</div></div><div style="text-align:right;"><span class="badge streak">&#x1F525; '+s.streak_count+'</span></div></div>'
       ).join('')
     : '<div class="empty-msg">No streaks yet. Complete recurring tasks to build streaks!</div>';
+
+  // Heatmap (GitHub-style, 90 days)
+  var heatmap = data.heatmap || [];
+  var heatmapMap = {};
+  heatmap.forEach(h => { heatmapMap[h.day ? new Date(h.day).toISOString().split('T')[0] : ''] = parseInt(h.count); });
+  var maxHeat = Math.max(...heatmap.map(h => parseInt(h.count)), 1);
+  var heatHtml = '';
+  var today = new Date();
+  for (var i = 90; i >= 0; i--) {
+    var d = new Date(today); d.setDate(d.getDate() - i);
+    var key = d.toISOString().split('T')[0];
+    var count = heatmapMap[key] || 0;
+    var intensity = count === 0 ? 0 : count <= maxHeat * 0.33 ? 1 : count <= maxHeat * 0.66 ? 2 : 3;
+    var colors = ['var(--surface-2)', 'rgba(111,207,151,0.3)', 'rgba(111,207,151,0.6)', 'var(--green)'];
+    heatHtml += '<div title="'+key+': '+count+' tasks" style="width:12px;height:12px;border-radius:2px;background:'+colors[intensity]+';"></div>';
+  }
+  document.getElementById('heatmap').innerHTML = heatHtml;
 }
 
 load();

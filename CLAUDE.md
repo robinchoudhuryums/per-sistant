@@ -9,7 +9,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **Database**: Neon PostgreSQL (schema in `db/`)
 - **Email**: nodemailer (SMTP) with scheduled sending via node-cron
 - **AI**: Anthropic Claude API — 9 AI features with per-feature model selection (Haiku/Sonnet/Off)
-- **Tests**: `tests/` (node:test runner, run with `npm test`, 144 tests)
+- **Tests**: `tests/` (node:test runner, run with `npm test`, 170 tests)
 - **Deployment**: `Dockerfile`, `fly.toml` (Fly.io), `render.yaml` (Render)
 
 ## Current State (as of March 2026)
@@ -61,7 +61,16 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **Backend Validation**: Server-side enum validation for priority, horizon, recurrence rules, note colors, email format
 - **Cross-Entity Links**: Link todos, emails, and notes to each other; create todos from notes or emails with auto-linking
 - **Notification System**: Centralized notification check for due tasks, overdue items, streaks at risk, and note reminders; browser push notifications on dashboard load
-- **Analytics Dashboard**: Productivity insights with completion trends, day-of-week analysis, priority/category breakdowns, average completion time, streak leaderboard; filterable by week/month/quarter/year
+- **Analytics Dashboard**: Productivity insights with completion trends, day-of-week analysis, priority/category breakdowns, average completion time, streak leaderboard, productivity score, activity heatmap (90 days), emails sent/notes created counts; filterable by week/month/quarter/year
+- **Todo Templates**: Save task structures (with subtasks) as reusable templates; apply from templates list; "Save as Template" from edit modal
+- **Batch Contact Import**: CSV upload for bulk contact import with validation and error reporting
+- **Quick Actions from Search**: Complete tasks, send emails, pin/unpin notes directly from search results
+- **Undo for More Actions**: Undo task completion, email send, and delete (not just delete)
+- **Recurring Task Calendar Projections**: Calendar shows future recurring task instances as dashed entries
+- **Health Check Endpoint**: `/api/health` returns server status, uptime, memory, DB connectivity (no auth required)
+- **API Pagination**: `limit` and `offset` query params on todos, emails, and notes list endpoints
+- **Performance Indexes**: Database indexes on common query patterns (completed, due_date, priority, category, recurring, etc.)
+- **Rate Limiting**: General (200/15min), auth (10/15min), and AI (20/min) rate limiters
 - **Webhooks**: Configure external webhook endpoints to receive event notifications (task created/completed, email sent, streak milestones); test webhooks from Settings
 - **Slack Integration**: Add Slack Incoming Webhook URL in Settings for notifications
 
@@ -76,8 +85,9 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - `db/005_dependencies_streaks_markdown.sql` — task dependencies, streak tracking, note format migration
 - `db/006_dashboard_automations.sql` — dashboard layout, automations, attachments, location reminders
 - `db/007_enhancements.sql` — custom recurrence, entity links, webhooks, notification preferences
+- `db/008_templates_performance.sql` — todo templates table, performance indexes
 - `uploads/` — local file attachment storage
-- `tests/api.test.js` — test suite (144 tests, 43 suites)
+- `tests/api.test.js` — test suite (170 tests, 51 suites)
 - `Dockerfile` / `docker-compose.yml` — container deployment
 - `fly.toml` — Fly.io config
 - `render.yaml` — Render blueprint
@@ -87,7 +97,7 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 # Install & run locally
 npm install && node server.js
 
-# Run tests (144 tests)
+# Run tests (170 tests)
 npm test
 
 # Pages
@@ -193,7 +203,17 @@ POST   /api/email-templates        # Create template
 PUT    /api/email-templates/:id    # Update template
 DELETE /api/email-templates/:id    # Delete template
 
-GET    /api/search                 # Global search (query: q)
+GET    /api/todo-templates          # List todo templates
+POST   /api/todo-templates          # Create todo template
+PATCH  /api/todo-templates/:id      # Update todo template
+DELETE /api/todo-templates/:id      # Delete todo template
+POST   /api/todo-templates/:id/apply  # Create todo from template
+
+POST   /api/contacts/import         # Batch import contacts (JSON array)
+
+GET    /api/health                  # Health check (no auth, returns uptime/db status)
+
+GET    /api/search                 # Global search (query: q, with quick action fields)
 GET    /api/calendar               # Calendar events (query: month, year)
 GET    /api/review                 # Weekly review stats
 GET    /api/perfin/stats           # Proxy to Perfin API
@@ -234,7 +254,7 @@ GET    /sw.js               # Service worker
 ## Database
 - Auto-migration runs on server startup — no manual SQL execution needed
 - `user_settings` table: single-row pattern (CHECK id = 1), includes ai_model_* columns
-- Tables: `todos`, `emails`, `notes`, `contacts`, `user_settings`, `subtasks`, `email_templates`, `weekly_reviews`, `task_dependencies`, `automations`, `attachments`
+- Tables: `todos`, `emails`, `notes`, `contacts`, `user_settings`, `subtasks`, `email_templates`, `todo_templates`, `weekly_reviews`, `task_dependencies`, `automations`, `attachments`
 
 ## AI Features & Models
 - 9 AI features, each independently configurable: Haiku (fast/cheap), Sonnet (smarter), or Off
