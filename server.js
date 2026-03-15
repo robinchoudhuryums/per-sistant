@@ -78,7 +78,7 @@ const VALID_RECURRENCE_RULES = ["daily", "weekly", "monthly", "yearly", "weekday
 const VALID_NOTE_COLORS = ["default", "warm", "teal", "green", "blue"];
 const VALID_EMAIL_STATUSES = ["draft", "scheduled", "sent", "failed"];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const VALID_AI_FEATURES = ["email_draft", "task_breakdown", "quick_add", "review_summary", "email_tone", "daily_briefing", "note_tagging"];
+const VALID_AI_FEATURES = ["email_draft", "task_breakdown", "quick_add", "review_summary", "email_tone", "daily_briefing", "note_tagging", "smart_suggestions", "natural_language_query"];
 
 async function callAI(model, prompt, maxTokens = 1024, systemPrompt = null) {
   if (!Anthropic || !process.env.ANTHROPIC_API_KEY) throw new Error("AI not configured");
@@ -112,6 +112,9 @@ const SESSION_PIN = process.env.SESSION_PIN;
 const AUTH_SECRET = SESSION_PASSWORD || SESSION_PIN || null;
 const AUTH_MODE = SESSION_PIN ? "pin" : (SESSION_PASSWORD ? "password" : null);
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
+if (!process.env.SESSION_SECRET) {
+  console.warn("WARNING: SESSION_SECRET not set — using random secret. Sessions will be invalidated on every restart.");
+}
 const PERFIN_URL = process.env.PERFIN_URL || null;
 
 // Contacts from env (name→email map)
@@ -129,6 +132,9 @@ app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 const pool = new Pool({
   connectionString: process.env.NEON_DATABASE_URL,
   ssl: process.env.NEON_DATABASE_URL ? { rejectUnauthorized: false } : false,
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
 });
 
 async function runMigrations() {
@@ -5565,12 +5571,27 @@ async function start() {
     console.log("Recurring task processor started (daily at midnight)");
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Per-sistant running on http://localhost:${PORT}`);
     if (PERFIN_URL) console.log(`Linked to Perfin: ${PERFIN_URL}`);
     if (AUTH_SECRET) console.log(`Authentication: ${AUTH_MODE} mode`);
     if (process.env.SMTP_HOST) console.log("SMTP configured for email sending");
   });
+
+  // Graceful shutdown — drain connections and stop cron jobs
+  function shutdown(signal) {
+    console.log(`\n${signal} received — shutting down gracefully...`);
+    server.close(() => {
+      pool.end().then(() => {
+        console.log("Database pool closed.");
+        process.exit(0);
+      }).catch(() => process.exit(1));
+    });
+    // Force exit after 10 seconds if graceful shutdown stalls
+    setTimeout(() => { console.error("Forced shutdown after timeout"); process.exit(1); }, 10000).unref();
+  }
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 start().catch(console.error);

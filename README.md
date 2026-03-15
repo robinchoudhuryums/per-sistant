@@ -264,7 +264,7 @@ docker compose up --build
 npm test
 ```
 
-176 tests across 52 suites covering: time parsing, input validation, data structures, sorting, security, recurring tasks, custom recurrence intervals, skip/snooze, subtasks, email templates, natural language parsing, global search, calendar, weekly review, drag-and-drop, keyboard shortcuts, AI model selection, AI task breakdown, AI tone adjustment, todo categories, note tags, dashboard views, task dependencies, streaks, bulk actions, trash/undo, automations, attachments, location reminders, cross-entity links, webhooks, Slack integration, notifications, analytics, productivity score, heatmap, todo templates, batch contact import, quick search actions, undo actions, calendar projections, pagination, health check, rate limiting, and AI API optimization.
+181 tests across 52 suites covering: time parsing, input validation, data structures, sorting, security, recurring tasks, custom recurrence intervals, skip/snooze, subtasks, email templates, natural language parsing, global search, calendar, weekly review, drag-and-drop, keyboard shortcuts, AI model selection, AI task breakdown, AI tone adjustment, todo categories, note tags, dashboard views, task dependencies, streaks, bulk actions, trash/undo, automations, attachments, location reminders, cross-entity links, webhooks, Slack integration, notifications, analytics, productivity score, heatmap, todo templates, batch contact import, quick search actions, undo actions, calendar projections, pagination, health check, rate limiting, and AI API optimization.
 
 ## API Endpoints
 
@@ -381,5 +381,5 @@ npm test
 | `SMTP_PASS` | SMTP password |
 | `SMTP_FROM` | From email address |
 | `CONTACTS` | JSON map of name→email |
-| `ANTHROPIC_API_KEY` | Claude API key for AI email drafting (optional) |
+| `ANTHROPIC_API_KEY` | Claude API key for all 9 AI features (optional) |
 | `PERFIN_URL` | URL to linked Perfin instance |
