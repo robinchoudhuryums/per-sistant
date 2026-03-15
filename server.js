@@ -44,11 +44,31 @@ try {
   Anthropic = require("@anthropic-ai/sdk").default || require("@anthropic-ai/sdk");
 } catch { Anthropic = null; }
 
+// Singleton Anthropic client — reused across all AI calls
+let anthropicClient = null;
+function getAnthropicClient() {
+  if (!anthropicClient && Anthropic && process.env.ANTHROPIC_API_KEY) {
+    anthropicClient = new Anthropic();
+  }
+  return anthropicClient;
+}
+
 // AI model mapping — always use latest versions
 const AI_MODELS = {
   haiku: "claude-haiku-4-5-20251001",
   sonnet: "claude-sonnet-4-6-20250415",
 };
+
+// Simple TTL cache for AI responses (briefing, suggestions)
+const aiCache = new Map();
+function getCached(key, ttlMs) {
+  const entry = aiCache.get(key);
+  if (entry && Date.now() - entry.ts < ttlMs) return entry.value;
+  return null;
+}
+function setCache(key, value) {
+  aiCache.set(key, { value, ts: Date.now() });
+}
 
 // Validation constants
 const VALID_PRIORITIES = ["low", "medium", "high", "urgent"];
@@ -59,15 +79,22 @@ const VALID_EMAIL_STATUSES = ["draft", "scheduled", "sent", "failed"];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const VALID_AI_FEATURES = ["email_draft", "task_breakdown", "quick_add", "review_summary", "email_tone", "daily_briefing", "note_tagging"];
 
-async function callAI(model, prompt, maxTokens = 1024) {
+async function callAI(model, prompt, maxTokens = 1024, systemPrompt = null) {
   if (!Anthropic || !process.env.ANTHROPIC_API_KEY) throw new Error("AI not configured");
   if (!AI_MODELS[model]) throw new Error("Invalid model: " + model);
-  const client = new Anthropic();
-  const msg = await client.messages.create({
+  const client = getAnthropicClient();
+  if (!client) throw new Error("AI not configured");
+  const params = {
     model: AI_MODELS[model],
     max_tokens: maxTokens,
     messages: [{ role: "user", content: prompt }],
-  });
+  };
+  // Use system prompt with prompt caching when provided — the system prompt
+  // is stable across calls so Anthropic can cache the prefix, reducing latency and cost
+  if (systemPrompt) {
+    params.system = [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }];
+  }
+  const msg = await client.messages.create(params);
   return msg.content[0].text.trim();
 }
 
@@ -2072,13 +2099,10 @@ app.post("/api/ai/draft-email", async (req, res) => {
     if (model === "off") return res.status(400).json({ error: "AI email drafting is disabled. Enable it in Settings." });
     const { prompt, recipient_name } = req.body;
     if (!prompt) return res.status(400).json({ error: "Prompt is required." });
-    const text = await callAI(model, `Draft a professional email based on this request: "${prompt}"${recipient_name ? ` The recipient's name is ${recipient_name}.` : ""}
-
-Return ONLY a JSON object with these fields:
-- "subject": the email subject line
-- "body": the email body text (plain text, no HTML)
-
-Keep the tone professional but warm. Do not include any other text outside the JSON.`);
+    const text = await callAI(model,
+      `Draft an email based on this request: "${prompt}"${recipient_name ? ` The recipient's name is ${recipient_name}.` : ""}`,
+      1024,
+      `You are a professional email drafting assistant. Return ONLY a JSON object with these fields:\n- "subject": the email subject line\n- "body": the email body text (plain text, no HTML)\n\nKeep the tone professional but warm. Do not include any other text outside the JSON.`);
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
     const draft = JSON.parse(jsonMatch[0]);
@@ -2097,12 +2121,10 @@ app.post("/api/ai/task-breakdown", async (req, res) => {
     if (model === "off") return res.status(400).json({ error: "AI task breakdown is disabled. Enable it in Settings." });
     const { title, description } = req.body;
     if (!title) return res.status(400).json({ error: "Task title is required." });
-    const text = await callAI(model, `Break down this task into actionable subtasks (3-8 items):
-
-Task: "${title}"${description ? `\nDetails: "${description}"` : ""}
-
-Return ONLY a JSON array of strings, where each string is a subtask. Keep them specific and actionable.
-Example: ["Research options", "Compare prices", "Make decision"]`, 512);
+    const text = await callAI(model,
+      `Task: "${title}"${description ? `\nDetails: "${description}"` : ""}`,
+      512,
+      `You are a task breakdown assistant. Break down the given task into 3-8 actionable subtasks. Return ONLY a JSON array of strings, where each string is a subtask. Keep them specific and actionable.\nExample: ["Research options", "Compare prices", "Make decision"]`);
     const jsonMatch = text.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
     const subtasks = JSON.parse(jsonMatch[0]);
@@ -2122,18 +2144,10 @@ app.post("/api/ai/parse-todo", async (req, res) => {
     const { input } = req.body;
     if (!input) return res.status(400).json({ error: "Input is required." });
     const today = new Date().toISOString().split("T")[0];
-    const text = await callAI(model, `Parse this natural language task description into structured data. Today is ${today}.
-
-Input: "${input}"
-
-Return ONLY a JSON object with:
-- "title": clean task title (remove time/priority words)
-- "priority": one of "low", "medium", "high", "urgent"
-- "horizon": one of "short", "medium", "long"
-- "category": inferred category (e.g. "work", "personal", "health", "finance", "errands", "home") or null
-- "due_date": ISO date string (YYYY-MM-DD) if a date/time is mentioned, or null
-
-Be smart about inferring: "ASAP" = urgent, "someday" = low priority long-term, "this week" = short-term, etc.`, 256);
+    const text = await callAI(model,
+      `Today is ${today}.\nInput: "${input}"`,
+      256,
+      `You are a task parser. Parse natural language task descriptions into structured data.\n\nReturn ONLY a JSON object with:\n- "title": clean task title (remove time/priority words)\n- "priority": one of "low", "medium", "high", "urgent"\n- "horizon": one of "short", "medium", "long"\n- "category": inferred category (e.g. "work", "personal", "health", "finance", "errands", "home") or null\n- "due_date": ISO date string (YYYY-MM-DD) if a date/time is mentioned, or null\n\nBe smart about inferring: "ASAP" = urgent, "someday" = low priority long-term, "this week" = short-term, etc.`);
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
     const parsed = JSON.parse(jsonMatch[0]);
@@ -2152,16 +2166,10 @@ app.post("/api/ai/review-summary", async (req, res) => {
     if (model === "off") return res.status(400).json({ error: "AI review summary is disabled." });
     const { stats } = req.body;
     if (!stats) return res.status(400).json({ error: "Stats required." });
-    const text = await callAI(model, `Write a brief, encouraging weekly review summary (2-4 sentences) based on these stats:
-
-- Tasks completed: ${stats.tasks_completed}
-- Tasks created: ${stats.tasks_created}
-- Emails sent: ${stats.emails_sent}
-- Notes created: ${stats.notes_created}
-- Overdue tasks: ${stats.overdue}
-- Completed task titles: ${stats.completed_titles || "none"}
-
-Be conversational and motivating. Highlight accomplishments. If there are overdue tasks, gently remind. Don't use emojis.`, 256);
+    const text = await callAI(model,
+      `Stats:\n- Tasks completed: ${stats.tasks_completed}\n- Tasks created: ${stats.tasks_created}\n- Emails sent: ${stats.emails_sent}\n- Notes created: ${stats.notes_created}\n- Overdue tasks: ${stats.overdue}\n- Completed task titles: ${stats.completed_titles || "none"}`,
+      256,
+      `You are a productivity coach. Write a brief, encouraging weekly review summary (2-4 sentences) based on the user's stats. Be conversational and motivating. Highlight accomplishments. If there are overdue tasks, gently remind. Don't use emojis.`);
     res.json({ summary: text });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2177,13 +2185,10 @@ app.post("/api/ai/adjust-tone", async (req, res) => {
     if (model === "off") return res.status(400).json({ error: "AI tone adjustment is disabled." });
     const { body, tone } = req.body;
     if (!body || !tone) return res.status(400).json({ error: "Body and tone are required." });
-    const text = await callAI(model, `Rewrite this email body with a "${tone}" tone. Keep the same meaning and content but adjust the language.
-
-Original email:
-${body}
-
-Return ONLY the rewritten email body text (plain text, no JSON wrapping, no quotes).
-Valid tones: more formal, more casual, shorter, friendlier, more direct.`, 1024);
+    const text = await callAI(model,
+      `Tone: "${tone}"\n\nOriginal email:\n${body}`,
+      1024,
+      `You are an email tone adjustment assistant. Rewrite the given email body with the requested tone. Keep the same meaning and content but adjust the language.\n\nReturn ONLY the rewritten email body text (plain text, no JSON wrapping, no quotes).\nValid tones: more formal, more casual, shorter, friendlier, more direct.`);
     res.json({ body: text });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2204,15 +2209,16 @@ app.get("/api/ai/daily-briefing", async (req, res) => {
       pool.query("SELECT subject, recipient_name, scheduled_at FROM emails WHERE deleted_at IS NULL AND status = 'scheduled' AND DATE(scheduled_at) = $1", [today]),
       pool.query("SELECT title, due_date FROM todos WHERE deleted_at IS NULL AND NOT completed AND due_date = $1", [today]),
     ]);
-    const text = await callAI(model, `Generate a brief, helpful daily briefing (3-5 sentences) for today (${today}). Be conversational and actionable.
+    // Check response cache (briefing cached for 10 minutes)
+    const cacheKey = `briefing_${today}`;
+    const cached = getCached(cacheKey, 10 * 60 * 1000);
+    if (cached) return res.json({ briefing: cached });
 
-Today's tasks (${upcoming.rows.length}): ${upcoming.rows.map(t => t.title).join(", ") || "none"}
-Overdue tasks (${overdue.rows.length}): ${overdue.rows.map(t => t.title).join(", ") || "none"}
-Scheduled emails today: ${scheduled.rows.map(e => `"${e.subject}" to ${e.recipient_name}`).join(", ") || "none"}
-Total pending tasks: ${pending.rows.length}
-Top priorities: ${pending.rows.slice(0, 5).map(t => `${t.title} (${t.priority})`).join(", ")}
-
-Summarize what needs attention today. Don't use emojis.`, 300);
+    const text = await callAI(model,
+      `Today: ${today}\nToday's tasks (${upcoming.rows.length}): ${upcoming.rows.map(t => t.title).join(", ") || "none"}\nOverdue tasks (${overdue.rows.length}): ${overdue.rows.map(t => t.title).join(", ") || "none"}\nScheduled emails today: ${scheduled.rows.map(e => `"${e.subject}" to ${e.recipient_name}`).join(", ") || "none"}\nTotal pending tasks: ${pending.rows.length}\nTop priorities: ${pending.rows.slice(0, 5).map(t => `${t.title} (${t.priority})`).join(", ")}`,
+      300,
+      `You are a daily briefing assistant. Generate a brief, helpful daily briefing (3-5 sentences). Be conversational and actionable. Summarize what needs attention today. Don't use emojis.`);
+    setCache(cacheKey, text);
     res.json({ briefing: text });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2228,13 +2234,10 @@ app.post("/api/ai/suggest-tags", async (req, res) => {
     if (model === "off") return res.status(400).json({ error: "AI note tagging is disabled." });
     const { title, content } = req.body;
     if (!content) return res.status(400).json({ error: "Content is required." });
-    const text = await callAI(model, `Suggest 1-4 short tags for this note. Tags should be lowercase single words or hyphenated phrases.
-
-${title ? `Title: "${title}"` : ""}
-Content: "${content.substring(0, 500)}"
-
-Return ONLY a JSON array of tag strings.
-Example: ["meeting-notes", "project-alpha", "action-items"]`, 128);
+    const text = await callAI(model,
+      `${title ? `Title: "${title}"\n` : ""}Content: "${content.substring(0, 500)}"`,
+      128,
+      `You are a note tagging assistant. Suggest 1-4 short tags for the given note. Tags should be lowercase single words or hyphenated phrases.\n\nReturn ONLY a JSON array of tag strings.\nExample: ["meeting-notes", "project-alpha", "action-items"]`);
     const jsonMatch = text.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
     const tags = JSON.parse(jsonMatch[0]);
@@ -2251,15 +2254,23 @@ app.get("/api/ai/smart-suggestions", async (req, res) => {
   try {
     const model = await getAIModelForFeature("daily_briefing");
     if (model === "off") return res.json({ suggestions: null });
+    // Check response cache (suggestions cached for 5 minutes)
+    const todayStr = new Date().toISOString().split("T")[0];
+    const suggestCacheKey = `suggestions_${todayStr}_${new Date().getHours()}`;
+    const cachedSuggestions = getCached(suggestCacheKey, 5 * 60 * 1000);
+    if (cachedSuggestions) return res.json({ suggestions: cachedSuggestions });
+
     const todos = await pool.query("SELECT id, title, priority, horizon, category, due_date, recurring, recurrence_rule, streak_count FROM todos WHERE deleted_at IS NULL AND completed = false ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, due_date NULLS LAST LIMIT 30");
     if (!todos.rows.length) return res.json({ suggestions: null });
-    const todayStr = new Date().toISOString().split("T")[0];
     const dayName = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][new Date().getDay()];
     const taskList = todos.rows.map(t => `- "${t.title}" [${t.priority}/${t.horizon}]${t.category ? ' ('+t.category+')' : ''}${t.due_date ? ' due:'+t.due_date.toISOString().split("T")[0] : ''}${t.recurring ? ' recurring:'+t.recurrence_rule : ''}${t.streak_count > 0 ? ' streak:'+t.streak_count : ''}`).join("\n");
-    const prompt = `You are a productivity coach. Today is ${dayName}, ${todayStr}. Here are the user's pending tasks:\n${taskList}\n\nProvide exactly 3 smart suggestions as a JSON array of objects with "suggestion" (short actionable advice) and "task_ids" (array of relevant task IDs). Consider: urgency, due dates, streaks at risk, workload balance, and day of week. Focus on what to tackle NOW.\nRespond with ONLY a JSON array, no other text.`;
-    const result = await callAI(model, prompt, 512);
+    const result = await callAI(model,
+      `Today is ${dayName}, ${todayStr}. Here are the user's pending tasks:\n${taskList}`,
+      512,
+      `You are a productivity coach. Provide exactly 3 smart suggestions as a JSON array of objects with "suggestion" (short actionable advice) and "task_ids" (array of relevant task IDs). Consider: urgency, due dates, streaks at risk, workload balance, and day of week. Focus on what to tackle NOW.\nRespond with ONLY a JSON array, no other text.`);
     const cleaned = result.replace(/```json?\s*|\s*```/g, "").trim();
     const suggestions = JSON.parse(cleaned);
+    setCache(suggestCacheKey, suggestions);
     res.json({ suggestions });
   } catch (err) { res.json({ suggestions: null, error: err.message }); }
 });
@@ -2281,8 +2292,10 @@ app.post("/api/ai/query", async (req, res) => {
     ]);
     const todayStr = new Date().toISOString().split("T")[0];
     const context = `Today: ${todayStr}\n\nTasks (${todos.rows.length}):\n${todos.rows.map(t => `- [${t.completed?'done':'pending'}] "${t.title}" priority:${t.priority} horizon:${t.horizon}${t.category?' cat:'+t.category:''}${t.due_date?' due:'+t.due_date.toISOString().split("T")[0]:''}${t.completed_at?' completed:'+t.completed_at.toISOString().split("T")[0]:''}${t.recurring?' recurring:'+t.recurrence_rule:''}`).join("\n")}\n\nEmails (${emails.rows.length}):\n${emails.rows.map(e => `- [${e.status}] "${e.subject}" to:${e.recipient_name||e.recipient_email}${e.sent_at?' sent:'+e.sent_at.toISOString().split("T")[0]:''}`).join("\n")}\n\nNotes (${notes.rows.length}):\n${notes.rows.map(n => `- "${n.title||n.content.substring(0,40)}"${n.tags?' tags:'+n.tags.join(','):''}${n.pinned?' pinned':''}`).join("\n")}`;
-    const prompt = `You are a personal assistant with access to the user's data. Answer their question based on the data below. Be concise and helpful. If the question asks for counts, lists, or stats, provide specific numbers.\n\nData:\n${context}\n\nUser question: "${query}"\n\nAnswer concisely:`;
-    const answer = await callAI(model, prompt, 1024);
+    const answer = await callAI(model,
+      `Data:\n${context}\n\nUser question: "${query}"`,
+      1024,
+      `You are a personal assistant with access to the user's data. Answer their question based on the provided data. Be concise and helpful. If the question asks for counts, lists, or stats, provide specific numbers. Answer concisely.`);
     res.json({ answer });
   } catch (err) { res.json({ answer: "Sorry, I couldn't process that query.", error: err.message }); }
 });

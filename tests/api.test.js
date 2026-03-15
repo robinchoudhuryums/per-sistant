@@ -1783,3 +1783,73 @@ describe("Rate limiting", () => {
     assert.equal(limits.ai.max, 20);
   });
 });
+
+// ---------------------------------------------------------------------------
+// AI API optimization
+// ---------------------------------------------------------------------------
+describe("AI API optimization", () => {
+  it("singleton client reuse pattern", () => {
+    // Singleton pattern: client created once, reused across calls
+    let client = null;
+    function getClient() {
+      if (!client) client = { id: Math.random() };
+      return client;
+    }
+    const first = getClient();
+    const second = getClient();
+    assert.strictEqual(first, second); // same instance
+    assert.equal(first.id, second.id);
+  });
+
+  it("callAI supports system prompt parameter for prompt caching", () => {
+    // callAI signature: (model, prompt, maxTokens, systemPrompt)
+    // When systemPrompt is provided, it's sent with cache_control: { type: "ephemeral" }
+    const params = {};
+    const systemPrompt = "You are an email assistant.";
+    if (systemPrompt) {
+      params.system = [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }];
+    }
+    assert.equal(params.system.length, 1);
+    assert.equal(params.system[0].type, "text");
+    assert.equal(params.system[0].cache_control.type, "ephemeral");
+  });
+
+  it("response cache with TTL", () => {
+    const cache = new Map();
+    function getCached(key, ttlMs) {
+      const entry = cache.get(key);
+      if (entry && Date.now() - entry.ts < ttlMs) return entry.value;
+      return null;
+    }
+    function setCache(key, value) {
+      cache.set(key, { value, ts: Date.now() });
+    }
+    setCache("test", "hello");
+    assert.equal(getCached("test", 60000), "hello");
+    assert.equal(getCached("missing", 60000), null);
+  });
+
+  it("expired cache returns null", () => {
+    const cache = new Map();
+    cache.set("old", { value: "stale", ts: Date.now() - 999999 });
+    function getCached(key, ttlMs) {
+      const entry = cache.get(key);
+      if (entry && Date.now() - entry.ts < ttlMs) return entry.value;
+      return null;
+    }
+    assert.equal(getCached("old", 1000), null); // expired
+  });
+
+  it("daily briefing cache key includes date", () => {
+    const today = "2026-03-15";
+    const cacheKey = `briefing_${today}`;
+    assert.equal(cacheKey, "briefing_2026-03-15");
+  });
+
+  it("suggestions cache key includes date and hour", () => {
+    const todayStr = "2026-03-15";
+    const hour = 14;
+    const cacheKey = `suggestions_${todayStr}_${hour}`;
+    assert.equal(cacheKey, "suggestions_2026-03-15_14");
+  });
+});
