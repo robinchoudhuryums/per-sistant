@@ -11,9 +11,9 @@ ${themeScript()}
   <p class="subtitle">Manage your email contacts for quick lookup</p>
 
   <div class="actions">
-    <button class="primary" onclick="openAdd()">+ Add Contact</button>
-    <button onclick="document.getElementById('csv-file').click()">Import CSV</button>
-    <input type="file" id="csv-file" accept=".csv" style="display:none" onchange="importCSV(this)">
+    <button class="primary" id="btn-add-contact">+ Add Contact</button>
+    <button id="btn-import-csv">Import CSV</button>
+    <input type="file" id="csv-file" accept=".csv" style="display:none">
   </div>
 
   <div class="section">
@@ -31,9 +31,9 @@ ${themeScript()}
     <label>Email</label>
     <input type="email" id="c-email" placeholder="email@example.com">
     <div class="modal-actions">
-      <button onclick="closeContact()">Cancel</button>
-      <button class="primary" onclick="saveContact()">Save</button>
-      <button class="danger" id="c-delete-btn" style="display:none" onclick="deleteContact()">Delete</button>
+      <button id="btn-cancel-contact">Cancel</button>
+      <button class="primary" id="btn-save-contact">Save</button>
+      <button class="danger" id="c-delete-btn" style="display:none">Delete</button>
     </div>
   </div>
 </div>
@@ -43,7 +43,7 @@ async function load() {
   var contacts = await fetch('/api/contacts').then(r=>r.json());
   if (!contacts.length) { document.getElementById('contact-list').innerHTML = '<div class="empty-msg">No contacts yet. Add contacts to use quick email addressing.</div>'; return; }
   document.getElementById('contact-list').innerHTML = '<table><thead><tr><th>Name</th><th>Email</th><th>Actions</th></tr></thead><tbody>' +
-    contacts.map(c => '<tr><td>'+esc(c.name)+'</td><td>'+esc(c.email)+'</td><td><div class="todo-actions"><button onclick="openEdit('+c.id+')">&#9998;</button><button class="delete" onclick="deleteDirect('+c.id+')">&#10005;</button></div></td></tr>').join('') +
+    contacts.map(c => '<tr><td>'+esc(c.name)+'</td><td>'+esc(c.email)+'</td><td><div class="todo-actions"><button data-action="editContact" data-id="'+c.id+'">&#9998;</button><button class="delete" data-action="deleteContact" data-id="'+c.id+'">&#10005;</button></div></td></tr>').join('') +
     '</tbody></table>';
 }
 
@@ -124,6 +124,16 @@ function importCSV(input) {
 }
 
 load();
+bindEvents([
+  ['btn-add-contact','click',openAdd],
+  ['btn-import-csv','click',function(){document.getElementById('csv-file').click();}],
+  ['csv-file','change',function(){importCSV(this);}],
+  ['btn-cancel-contact','click',closeContact],
+  ['btn-save-contact','click',saveContact],
+  ['c-delete-btn','click',deleteContact]
+]);
+onDelegate('contact-list','click','[data-action="editContact"]',function(){openEdit(parseInt(this.dataset.id));});
+onDelegate('contact-list','click','[data-action="deleteContact"]',function(){deleteDirect(parseInt(this.dataset.id));});
 </script>
 </body></html>`);
   };

@@ -11,44 +11,44 @@ ${themeScript()}
   <p class="subtitle">Short, medium, and long-term task management</p>
 
   <div class="actions">
-    <button class="primary" onclick="openAdd()">+ New Task</button>
-    <button onclick="openQuickTodo()">Quick Add</button>
-    <button onclick="openTemplateList()">From Template</button>
-    <button id="select-toggle" onclick="toggleSelectMode()">Select</button>
+    <button class="primary" id="add-task-btn">+ New Task</button>
+    <button id="quick-add-btn">Quick Add</button>
+    <button id="template-btn">From Template</button>
+    <button id="select-toggle">Select</button>
   </div>
   <div id="bulk-bar" style="display:none;padding:10px 16px;margin-bottom:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);display:none;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;">
     <span id="bulk-count">0 selected</span>
-    <button onclick="bulkAction('complete')" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Complete</button>
-    <button onclick="bulkAction('delete')" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
-    <select id="bulk-priority" onchange="if(this.value)bulkAction('set_priority',{priority:this.value});this.value='';" style="padding:4px 8px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);">
+    <button id="bulk-complete-btn" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Complete</button>
+    <button id="bulk-delete-btn" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
+    <select id="bulk-priority" style="padding:4px 8px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);">
       <option value="">Set Priority...</option><option value="urgent">Urgent</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option>
     </select>
-    <button onclick="selectAll()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
+    <button id="select-all-btn" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
   </div>
 
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;font-weight:500;">
     <span style="padding:6px 0;">View:</span>
   </div>
   <div class="filters" id="horizon-filters">
-    <button class="active" onclick="setHorizon(this,'')">All</button>
-    <button onclick="setHorizon(this,'short')">Short-term</button>
-    <button onclick="setHorizon(this,'medium')">Medium-term</button>
-    <button onclick="setHorizon(this,'long')">Long-term</button>
+    <button class="active" data-horizon="">All</button>
+    <button data-horizon="short">Short-term</button>
+    <button data-horizon="medium">Medium-term</button>
+    <button data-horizon="long">Long-term</button>
   </div>
   <div class="filters" id="status-filters">
-    <button class="active" onclick="setStatus(this,'pending')">Pending</button>
-    <button onclick="setStatus(this,'all')">All</button>
-    <button onclick="setStatus(this,'done')">Completed</button>
+    <button class="active" data-status="pending">Pending</button>
+    <button data-status="all">All</button>
+    <button data-status="done">Completed</button>
   </div>
   <div class="filters" id="priority-filters">
-    <button class="active" onclick="setPriority(this,'')">Any Priority</button>
-    <button onclick="setPriority(this,'urgent')">Urgent</button>
-    <button onclick="setPriority(this,'high')">High</button>
-    <button onclick="setPriority(this,'medium')">Medium</button>
-    <button onclick="setPriority(this,'low')">Low</button>
+    <button class="active" data-priority="">Any Priority</button>
+    <button data-priority="urgent">Urgent</button>
+    <button data-priority="high">High</button>
+    <button data-priority="medium">Medium</button>
+    <button data-priority="low">Low</button>
   </div>
   <div class="filters" id="category-filters">
-    <button class="active" onclick="setCategory(this,'')">All Categories</button>
+    <button class="active" data-cat="">All Categories</button>
   </div>
 
   <div class="section">
@@ -75,7 +75,7 @@ ${themeScript()}
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div><label>Category</label>
-        <select id="f-category-select" onchange="if(this.value==='__custom__'){document.getElementById('f-category-custom').style.display='block';document.getElementById('f-category-custom').focus();}else{document.getElementById('f-category-custom').style.display='none';}">
+        <select id="f-category-select">
           <option value="">None</option>
           <option value="__custom__">Custom...</option>
         </select>
@@ -87,12 +87,12 @@ ${themeScript()}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div style="margin-top:12px;">
         <label style="display:inline;cursor:pointer">
-          <input type="checkbox" id="f-recurring" style="width:auto;margin-right:6px;" onchange="document.getElementById('f-recurrence').style.display=this.checked?'block':'none'"> Recurring task
+          <input type="checkbox" id="f-recurring" style="width:auto;margin-right:6px;"> Recurring task
         </label>
       </div>
       <div id="f-recurrence" style="display:none;">
         <label>Repeat</label>
-        <select id="f-recurrence-rule" onchange="document.getElementById('f-interval-row').style.display=this.value.startsWith('custom')?'flex':'none'">
+        <select id="f-recurrence-rule">
           <option value="daily">Daily</option><option value="weekdays">Weekdays</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option>
           <option value="custom_days">Every N Days</option><option value="custom_weeks">Every N Weeks</option><option value="custom_months">Every N Months</option>
         </select>
@@ -104,11 +104,11 @@ ${themeScript()}
       </div>
     </div>
     <div id="subtasks-section" style="display:none;margin-top:16px;">
-      <label>Subtasks <button onclick="aiBreakdown()" id="ai-breakdown-btn" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Breakdown</button></label>
+      <label>Subtasks <button id="ai-breakdown-btn" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Breakdown</button></label>
       <div id="subtask-list-edit"></div>
       <div style="display:flex;gap:8px;margin-top:8px;">
         <input type="text" id="new-subtask" placeholder="Add subtask..." style="flex:1">
-        <button onclick="addSubtask()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
+        <button id="add-subtask-btn" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
       </div>
     </div>
     <!-- Location reminder (edit mode only) -->
@@ -116,7 +116,7 @@ ${themeScript()}
       <label>Location Reminder</label>
       <div style="display:flex;gap:8px;align-items:center;">
         <input type="text" id="f-location-name" placeholder="e.g. Home, Office, Grocery Store" style="flex:1">
-        <button onclick="getLocation()" title="Use current location" style="padding:10px 14px;font-size:14px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);flex-shrink:0;">&#128205;</button>
+        <button id="get-location-btn" title="Use current location" style="padding:10px 14px;font-size:14px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);flex-shrink:0;">&#128205;</button>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px;">
         <input type="number" step="any" id="f-location-lat" placeholder="Latitude" style="font-size:11px;">
@@ -131,14 +131,14 @@ ${themeScript()}
       <div id="deps-list" style="margin-bottom:8px;"></div>
       <div style="display:flex;gap:8px;">
         <select id="dep-select" style="flex:1"><option value="">Select a task this depends on...</option></select>
-        <button onclick="addDep()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
+        <button id="add-dep-btn" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
       </div>
     </div>
     <div class="modal-actions">
-      <button onclick="closeModal()">Cancel</button>
-      <button class="primary" onclick="saveTodo()">Save</button>
-      <button id="save-template-btn" style="display:none;padding:10px 20px;font-size:13px;font-weight:500;border:1px solid var(--teal);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;" onclick="saveAsTemplate()">Save as Template</button>
-      <button class="danger" id="delete-btn" style="display:none" onclick="deleteTodo()">Delete</button>
+      <button id="cancel-modal-btn">Cancel</button>
+      <button class="primary" id="save-todo-btn">Save</button>
+      <button id="save-template-btn" style="display:none;padding:10px 20px;font-size:13px;font-weight:500;border:1px solid var(--teal);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;">Save as Template</button>
+      <button class="danger" id="delete-btn" style="display:none">Delete</button>
     </div>
   </div>
 </div>
@@ -149,7 +149,7 @@ ${themeScript()}
     <h2>Task Templates</h2>
     <div id="template-list" style="margin-bottom:16px;"></div>
     <div class="modal-actions">
-      <button onclick="closeTemplateList()">Close</button>
+      <button id="close-template-btn">Close</button>
     </div>
   </div>
 </div>
@@ -163,17 +163,17 @@ ${themeScript()}
     </p>
     <label>What needs to be done?</label>
     <div style="display:flex;gap:8px;">
-      <input type="text" id="qt-input" placeholder="Type or speak a task..." onkeydown="if(event.key==='Enter')parseQuickTodo()" style="flex:1">
-      <button onclick="startVoiceInput('qt-input')" title="Voice input" style="padding:10px 14px;font-size:16px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);flex-shrink:0;">&#127908;</button>
+      <input type="text" id="qt-input" placeholder="Type or speak a task..." style="flex:1">
+      <button id="qt-voice-btn" title="Voice input" style="padding:10px 14px;font-size:16px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);flex-shrink:0;">&#127908;</button>
     </div>
     <div id="qt-preview" style="display:none;margin-top:16px;" class="section">
       <h2>Preview</h2>
       <div id="qt-preview-content"></div>
     </div>
     <div class="modal-actions">
-      <button onclick="closeQuickTodo()">Cancel</button>
-      <button class="primary" onclick="parseQuickTodoAI()">Parse</button>
-      <button class="primary" id="qt-confirm" style="display:none" onclick="confirmQuickTodo()">Create</button>
+      <button id="qt-cancel-btn">Cancel</button>
+      <button class="primary" id="qt-parse-btn">Parse</button>
+      <button class="primary" id="qt-confirm" style="display:none">Create</button>
     </div>
   </div>
 </div>
@@ -216,8 +216,8 @@ async function loadCategories() {
     var cats = await fetch('/api/todo-categories').then(r=>r.json());
     var container = document.getElementById('category-filters');
     var existing = container.querySelector('button.active');
-    var html = '<button class="'+(curCategory===''?'active':'')+'" onclick="setCategory(this,\\'\\')">All Categories</button>';
-    cats.forEach(c => { html += '<button class="'+(curCategory===c?'active':'')+'" onclick="setCategory(this,\\''+c+'\\')">'+c.charAt(0).toUpperCase()+c.slice(1)+'</button>'; });
+    var html = '<button class="'+(curCategory===''?'active':'')+'" data-cat="">All Categories</button>';
+    cats.forEach(c => { html += '<button class="'+(curCategory===c?'active':'')+'" data-cat="'+c+'">'+c.charAt(0).toUpperCase()+c.slice(1)+'</button>'; });
     container.innerHTML = html;
     // Also populate category select in modal
     var sel = document.getElementById('f-category-select');
@@ -256,7 +256,7 @@ async function load() {
     if (subs.length) {
       subHtml = '<div class="subtask-progress"><div class="subtask-progress-fill" style="width:'+(subDone/subs.length*100)+'%"></div></div>';
       subHtml += '<div class="subtask-list">'+subs.map(s =>
-        '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" onclick="event.stopPropagation();toggleSubtask('+s.id+','+!s.completed+')"></div><span class="subtask-text'+(s.completed?' done':'')+'" ondblclick="event.stopPropagation();inlineEditSubtask(this,'+s.id+')">'+esc(s.title)+'</span><button class="subtask-edit-btn" onclick="event.stopPropagation();inlineEditSubtask(this.previousElementSibling,'+s.id+')">&#9998;</button></div>'
+        '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" data-action="toggle-subtask" data-id="'+s.id+'" data-completed="'+(!s.completed)+'"></div><span class="subtask-text'+(s.completed?' done':'')+'" data-action="edit-subtask" data-id="'+s.id+'">'+esc(s.title)+'</span><button class="subtask-edit-btn" data-action="edit-subtask-btn" data-id="'+s.id+'">&#9998;</button></div>'
       ).join('')+'</div>';
     }
     var deps = depMap[t.id] || {blocked_by:[],blocking:[]};
@@ -277,8 +277,8 @@ async function load() {
       }
       recurInfo = '<span class="badge recurring">'+ruleLabel+'</span>';
     }
-    var skipSnoozeButtons = t.recurring && !t.completed ? '<button onclick="event.stopPropagation();skipTodo('+t.id+')" title="Skip this occurrence" style="font-size:10px;padding:2px 6px;">Skip</button><button onclick="event.stopPropagation();snoozeTodo('+t.id+')" title="Snooze" style="font-size:10px;padding:2px 6px;">&#128164;</button>' : '';
-    return '<div class="todo-item'+(isBlocked?' todo-blocked':'')+'" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><input type="checkbox" class="bulk-check" data-id="'+t.id+'" style="display:'+(selectMode?'inline-block':'none')+';accent-color:var(--warm);margin-right:4px;cursor:pointer;" onchange="toggleBulkItem('+t.id+',this.checked)"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" onclick="toggleTodo('+t.id+','+!t.completed+','+!!t.recurring+')"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+recurInfo+depBadges+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions">'+skipSnoozeButtons+'<button onclick="openEdit('+t.id+')">&#9998;</button></div></div>';
+    var skipSnoozeButtons = t.recurring && !t.completed ? '<button data-action="skip" data-id="'+t.id+'" title="Skip this occurrence" style="font-size:10px;padding:2px 6px;">Skip</button><button data-action="snooze" data-id="'+t.id+'" title="Snooze" style="font-size:10px;padding:2px 6px;">&#128164;</button>' : '';
+    return '<div class="todo-item'+(isBlocked?' todo-blocked':'')+'" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><input type="checkbox" class="bulk-check" data-id="'+t.id+'" style="display:'+(selectMode?'inline-block':'none')+';accent-color:var(--warm);margin-right:4px;cursor:pointer;"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" data-action="toggle" data-id="'+t.id+'" data-completed="'+(!t.completed)+'" data-recurring="'+!!t.recurring+'"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+recurInfo+depBadges+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions">'+skipSnoozeButtons+'<button data-action="edit" data-id="'+t.id+'">&#9998;</button></div></div>';
   }).join('');
 }
 
@@ -328,13 +328,13 @@ async function addSubtask() {
 }
 function renderEditSubtasks() {
   document.getElementById('subtask-list-edit').innerHTML = editSubtasks.map((s,i) =>
-    '<div class="subtask-item"><span class="subtask-text" ondblclick="inlineEditNewSubtask(this,'+i+')">'+esc(s.title)+'</span><button class="subtask-edit-btn" onclick="inlineEditNewSubtask(this.previousElementSibling,'+i+')" title="Edit">&#9998;</button><button onclick="editSubtasks.splice('+i+',1);renderEditSubtasks()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:8px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;">&#10005;</button></div>'
+    '<div class="subtask-item"><span class="subtask-text" data-action="edit-new-sub" data-idx="'+i+'">'+esc(s.title)+'</span><button class="subtask-edit-btn" data-action="edit-new-sub-btn" data-idx="'+i+'" title="Edit">&#9998;</button><button data-action="remove-new-sub" data-idx="'+i+'" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:8px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;">&#10005;</button></div>'
   ).join('');
 }
 async function loadEditSubtasks(todoId) {
   var subs = await fetch('/api/todos/'+todoId+'/subtasks').then(r=>r.json());
   document.getElementById('subtask-list-edit').innerHTML = subs.map(s =>
-    '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" onclick="toggleSubtask('+s.id+','+!s.completed+');loadEditSubtasks('+todoId+')"></div><span class="subtask-text'+(s.completed?' done':'')+'" ondblclick="inlineEditSubtask(this,'+s.id+','+todoId+')">'+esc(s.title)+'</span><button class="subtask-edit-btn" onclick="inlineEditSubtask(this.previousElementSibling,'+s.id+','+todoId+')" title="Edit">&#9998;</button><button onclick="deleteSubtask('+s.id+','+todoId+')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:8px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;">&#10005;</button></div>'
+    '<div class="subtask-item"><div class="subtask-check'+(s.completed?' done':'')+'" data-action="toggle-edit-sub" data-id="'+s.id+'" data-completed="'+(!s.completed)+'" data-todo="'+todoId+'"></div><span class="subtask-text'+(s.completed?' done':'')+'" data-action="inline-edit-sub" data-id="'+s.id+'" data-todo="'+todoId+'">'+esc(s.title)+'</span><button class="subtask-edit-btn" data-action="inline-edit-sub-btn" data-id="'+s.id+'" data-todo="'+todoId+'" title="Edit">&#9998;</button><button data-action="delete-sub" data-id="'+s.id+'" data-todo="'+todoId+'" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:8px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;">&#10005;</button></div>'
   ).join('');
 }
 async function deleteSubtask(id, todoId) {
@@ -557,7 +557,7 @@ async function loadDeps(todoId) {
   if (deps.blocked_by.length) {
     html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Blocked by:</div>';
     deps.blocked_by.forEach(d => {
-      html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:12px;"><span class="badge blocked">blocked by</span><span'+(d.completed?' style="text-decoration:line-through;opacity:0.5"':'')+'>'+esc(d.title)+'</span><button onclick="removeDep('+d.dep_id+','+todoId+')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:4px;">&times;</button></div>';
+      html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:12px;"><span class="badge blocked">blocked by</span><span'+(d.completed?' style="text-decoration:line-through;opacity:0.5"':'')+'>'+esc(d.title)+'</span><button data-action="remove-dep" data-dep-id="'+d.dep_id+'" data-todo="'+todoId+'" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:4px;">&times;</button></div>';
     });
   }
   if (deps.blocking.length) {
@@ -687,7 +687,7 @@ async function openTemplateList() {
   else {
     el.innerHTML = templates.map(t => {
       var subs = t.subtasks || [];
-      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="flex:1;"><div style="font-size:14px;font-weight:400;">'+esc(t.name)+'</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+esc(t.title)+' &middot; <span class="badge '+t.priority+'">'+t.priority+'</span> &middot; '+t.horizon+(subs.length?' &middot; '+subs.length+' subtasks':'')+'</div></div><div style="display:flex;gap:6px;"><button onclick="applyTemplate('+t.id+')" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Use</button><button onclick="deleteTemplate('+t.id+')" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">&#10005;</button></div></div>';
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="flex:1;"><div style="font-size:14px;font-weight:400;">'+esc(t.name)+'</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+esc(t.title)+' &middot; <span class="badge '+t.priority+'">'+t.priority+'</span> &middot; '+t.horizon+(subs.length?' &middot; '+subs.length+' subtasks':'')+'</div></div><div style="display:flex;gap:6px;"><button data-action="apply-template" data-id="'+t.id+'" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Use</button><button data-action="delete-template" data-id="'+t.id+'" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">&#10005;</button></div></div>';
     }).join('');
   }
   document.getElementById('template-modal').classList.add('active');
@@ -737,6 +737,61 @@ document.addEventListener('keydown', function(e) {
   else if (e.key === 'q' || e.key === 'Q') { e.preventDefault(); openQuickTodo(); }
 });
 
+
+bindEvents([
+  ['add-task-btn','click',openAdd],
+  ['quick-add-btn','click',openQuickTodo],
+  ['template-btn','click',openTemplateList],
+  ['select-toggle','click',toggleSelectMode],
+  ['bulk-complete-btn','click',function(){bulkAction('complete');}],
+  ['bulk-delete-btn','click',function(){bulkAction('delete');}],
+  ['select-all-btn','click',selectAll],
+  ['ai-breakdown-btn','click',aiBreakdown],
+  ['add-subtask-btn','click',addSubtask],
+  ['get-location-btn','click',getLocation],
+  ['add-dep-btn','click',addDep],
+  ['cancel-modal-btn','click',closeModal],
+  ['save-todo-btn','click',saveTodo],
+  ['save-template-btn','click',saveAsTemplate],
+  ['delete-btn','click',deleteTodo],
+  ['close-template-btn','click',closeTemplateList],
+  ['qt-voice-btn','click',function(){startVoiceInput('qt-input');}],
+  ['qt-cancel-btn','click',closeQuickTodo],
+  ['qt-parse-btn','click',parseQuickTodoAI],
+  ['qt-confirm','click',confirmQuickTodo],
+]);
+document.getElementById('bulk-priority').addEventListener('change',function(){if(this.value){bulkAction('set_priority',{priority:this.value});this.value='';}});
+document.getElementById('f-category-select').addEventListener('change',function(){if(this.value==='__custom__'){document.getElementById('f-category-custom').style.display='block';document.getElementById('f-category-custom').focus();}else{document.getElementById('f-category-custom').style.display='none';}});
+document.getElementById('f-recurring').addEventListener('change',function(){document.getElementById('f-recurrence').style.display=this.checked?'block':'none';});
+document.getElementById('f-recurrence-rule').addEventListener('change',function(){document.getElementById('f-interval-row').style.display=this.value.startsWith('custom')?'flex':'none';});
+document.getElementById('qt-input').addEventListener('keydown',function(e){if(e.key==='Enter')parseQuickTodo();});
+onDelegate('horizon-filters','click','button[data-horizon]',function(){setHorizon(this,this.dataset.horizon);});
+onDelegate('status-filters','click','button[data-status]',function(){setStatus(this,this.dataset.status);});
+onDelegate('priority-filters','click','button[data-priority]',function(){setPriority(this,this.dataset.priority);});
+onDelegate('category-filters','click','button[data-cat]',function(){setCategory(this,this.dataset.cat);});
+document.addEventListener('click',function(e){
+  var btn=e.target.closest('[data-action]');
+  if(!btn)return;
+  var id=parseInt(btn.dataset.id),act=btn.dataset.action;
+  e.stopPropagation();
+  if(act==='toggle')toggleTodo(id,btn.dataset.completed==='true',btn.dataset.recurring==='true');
+  else if(act==='edit')openEdit(id);
+  else if(act==='skip')skipTodo(id);
+  else if(act==='snooze')snoozeTodo(id);
+  else if(act==='toggle-subtask'){toggleSubtask(id,btn.dataset.completed==='true');}
+  else if(act==='edit-subtask'||act==='edit-subtask-btn'){inlineEditSubtask(act==='edit-subtask-btn'?btn.previousElementSibling:btn,id);}
+  else if(act==='toggle-edit-sub'){toggleSubtask(id,btn.dataset.completed==='true');loadEditSubtasks(parseInt(btn.dataset.todo));}
+  else if(act==='inline-edit-sub'||act==='inline-edit-sub-btn'){inlineEditSubtask(act==='inline-edit-sub-btn'?btn.previousElementSibling:btn,id,parseInt(btn.dataset.todo));}
+  else if(act==='delete-sub')deleteSubtask(id,parseInt(btn.dataset.todo));
+  else if(act==='edit-new-sub'||act==='edit-new-sub-btn'){inlineEditNewSubtask(act==='edit-new-sub-btn'?btn.previousElementSibling:btn,parseInt(btn.dataset.idx));}
+  else if(act==='remove-new-sub'){editSubtasks.splice(parseInt(btn.dataset.idx),1);renderEditSubtasks();}
+  else if(act==='remove-dep')removeDep(parseInt(btn.dataset.depId),parseInt(btn.dataset.todo));
+  else if(act==='apply-template')applyTemplate(id);
+  else if(act==='delete-template')deleteTemplate(id);
+});
+document.addEventListener('change',function(e){
+  if(e.target.classList.contains('bulk-check'))toggleBulkItem(parseInt(e.target.dataset.id),e.target.checked);
+});
 
 load();
 </script>

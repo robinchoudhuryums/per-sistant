@@ -9,7 +9,7 @@ ${themeScript()}
   ${navBar("/")}
   <div style="display:flex;align-items:center;justify-content:space-between;">
     <div><h1>Dashboard</h1><p class="subtitle" style="margin-bottom:0;">Your personal command center</p></div>
-    <button id="customize-btn" onclick="toggleCustomize()" style="padding:6px 14px;font-size:10px;font-weight:500;letter-spacing:0.5px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;text-transform:uppercase;">Customize</button>
+    <button id="customize-btn" style="padding:6px 14px;font-size:10px;font-weight:500;letter-spacing:0.5px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;text-transform:uppercase;">Customize</button>
   </div>
   <div style="margin-bottom:36px;"></div>
 
@@ -17,7 +17,7 @@ ${themeScript()}
   <div id="customize-panel" style="display:none;margin-bottom:24px;padding:16px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--warm);">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
       <span style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;">Widget Visibility &amp; Order</span>
-      <button onclick="resetLayout()" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Reset</button>
+      <button id="reset-layout-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Reset</button>
     </div>
     <div id="widget-toggles" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
     <div style="margin-top:10px;font-size:10px;color:var(--text-muted);">Drag widgets below to reorder. Click toggles above to show/hide.</div>
@@ -25,21 +25,21 @@ ${themeScript()}
 
   <div id="dash-widgets">
     <!-- Search widget -->
-    <div class="dash-widget" data-widget="search" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="search" draggable="true">
       <div class="search-bar">
         <span class="search-icon">&#128269;</span>
-        <input type="text" id="global-search" placeholder="Search todos, emails, notes, contacts... (press /)" oninput="doSearch(this.value)">
+        <input type="text" id="global-search" placeholder="Search todos, emails, notes, contacts... (press /)">
       </div>
       <div class="section search-results" id="search-results" style="display:none;margin-bottom:24px;"></div>
     </div>
 
     <!-- Cards widget -->
-    <div class="dash-widget" data-widget="cards" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="cards" draggable="true">
       <div class="top-cards" id="cards"></div>
     </div>
 
     <!-- AI Daily Briefing widget -->
-    <div class="dash-widget" data-widget="briefing" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="briefing" draggable="true">
       <div id="briefing-section" style="display:none;margin-bottom:24px;">
         <div class="section">
           <h2>Today's Briefing</h2>
@@ -49,7 +49,7 @@ ${themeScript()}
     </div>
 
     <!-- AI Smart Suggestions widget -->
-    <div class="dash-widget" data-widget="suggestions" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="suggestions" draggable="true">
       <div id="suggestions-section" style="display:none;margin-bottom:24px;">
         <div class="section">
           <h2>Smart Suggestions</h2>
@@ -59,35 +59,35 @@ ${themeScript()}
     </div>
 
     <!-- AI Natural Language Query widget -->
-    <div class="dash-widget" data-widget="ai_query" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="ai_query" draggable="true">
       <div class="section" style="margin-bottom:24px;">
         <h2>Ask Your Assistant</h2>
         <div style="display:flex;gap:8px;">
-          <input type="text" id="ai-query-input" placeholder="Ask anything... &quot;What did I do last week?&quot; &quot;How many tasks are overdue?&quot;" style="flex:1;padding:10px 14px;font-size:13px;font-family:inherit;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);outline:none;" onkeydown="if(event.key==='Enter')askAI()">
-          <button onclick="askAI()" style="padding:10px 18px;font-size:12px;font-weight:500;letter-spacing:0.5px;border:1px solid var(--teal);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;">Ask</button>
+          <input type="text" id="ai-query-input" placeholder="Ask anything... &quot;What did I do last week?&quot; &quot;How many tasks are overdue?&quot;" style="flex:1;padding:10px 14px;font-size:13px;font-family:inherit;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);outline:none;">
+          <button id="ask-ai-btn" style="padding:10px 18px;font-size:12px;font-weight:500;letter-spacing:0.5px;border:1px solid var(--teal);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;">Ask</button>
         </div>
         <div id="ai-query-answer" style="display:none;margin-top:12px;padding:12px 16px;background:var(--surface-2);border-radius:8px;font-size:13px;font-weight:300;line-height:1.6;white-space:pre-wrap;"></div>
       </div>
     </div>
 
     <!-- Task Overview widget -->
-    <div class="dash-widget" data-widget="tasks" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="tasks" draggable="true">
       <div class="section" style="margin-bottom:24px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
           <h2 style="margin-bottom:0;">Task Overview</h2>
         </div>
         <div class="filters" id="dash-task-filters">
-          <button class="active" onclick="setDashView(this,'all')">All</button>
-          <button onclick="setDashView(this,'category')">By Category</button>
-          <button onclick="setDashView(this,'urgency')">By Urgency</button>
-          <button onclick="setDashView(this,'due')">Due Soon</button>
+          <button class="active" data-view="all">All</button>
+          <button data-view="category">By Category</button>
+          <button data-view="urgency">By Urgency</button>
+          <button data-view="due">Due Soon</button>
         </div>
         <div id="dash-tasks"></div>
       </div>
     </div>
 
     <!-- Upcoming + Emails widget -->
-    <div class="dash-widget" data-widget="upcoming_emails" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="upcoming_emails" draggable="true">
       <div class="dash-two-col" style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
         <div class="section">
           <h2>Upcoming Tasks</h2>
@@ -101,7 +101,7 @@ ${themeScript()}
     </div>
 
     <!-- Perfin widget -->
-    <div class="dash-widget" data-widget="perfin" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="perfin" draggable="true">
       <div id="perfin-section" style="display:none;margin-top:24px;">
         <div class="section">
           <h2>Perfin — Financial Overview</h2>
@@ -111,7 +111,7 @@ ${themeScript()}
     </div>
 
     <!-- Shortcuts widget -->
-    <div class="dash-widget" data-widget="shortcuts" draggable="true" ondragstart="wdragStart(event)" ondragover="wdragOver(event)" ondrop="wdrop(event)" ondragend="wdragEnd(event)">
+    <div class="dash-widget" data-widget="shortcuts" draggable="true">
       <div style="margin-top:24px;text-align:center;">
         <p style="font-size:11px;color:var(--text-muted);">Keyboard shortcuts: <span class="kbd">/</span> Search &middot; <span class="kbd">N</span> New task &middot; <span class="kbd">E</span> New email &middot; <span class="kbd">?</span> Show all</p>
       </div>
@@ -131,11 +131,11 @@ function doSearch(q) {
         var href = r.type==='todo'?'/todos':r.type==='email'?'/emails':r.type==='note'?'/notes':'/contacts';
         var actions = '';
         if (r.type === 'todo' && !r.completed) {
-          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button onclick="event.preventDefault();event.stopPropagation();searchComplete('+r.id+','+!!r.recurring+')" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Complete</button></div>';
+          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button data-action="search-complete" data-id="'+r.id+'" data-recurring="'+!!r.recurring+'" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Complete</button></div>';
         } else if (r.type === 'email' && r.status === 'scheduled') {
-          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button onclick="event.preventDefault();event.stopPropagation();searchSendEmail('+r.id+')" style="background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Send Now</button></div>';
+          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button data-action="search-send" data-id="'+r.id+'" style="background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Send Now</button></div>';
         } else if (r.type === 'note') {
-          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button onclick="event.preventDefault();event.stopPropagation();searchTogglePin('+r.id+','+!r.pinned+')" style="background:var(--yellow-bg);color:var(--yellow);border:1px solid var(--yellow);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(r.pinned?'Unpin':'Pin')+'</button></div>';
+          actions = '<div style="display:flex;gap:6px;margin-top:6px;"><button data-action="search-pin" data-id="'+r.id+'" data-pinned="'+!!r.pinned+'" style="background:var(--yellow-bg);color:var(--yellow);border:1px solid var(--yellow);padding:2px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(r.pinned?'Unpin':'Pin')+'</button></div>';
         }
         return '<a href="'+href+'" class="result-item" style="display:block;text-decoration:none;color:inherit;"><div class="result-type">'+r.type+(r.type==='todo'&&r.completed?' (done)':'')+'</div><div style="font-size:14px;">'+esc(r.title||'')+'</div>'+(r.description?'<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+esc(r.description)+'</div>':'')+actions+'</a>';
       }).join('');
@@ -184,8 +184,8 @@ function renderDashTasks() {
 function renderDashTodo(t) {
   var overdue = t.due_date && new Date(t.due_date) <= new Date() ? ' style="color:var(--red)"' : '';
   var completeBtn = t.recurring
-    ? '<button onclick="event.stopPropagation();dashCompleteRecurring('+t.id+')" title="Complete & create next" style="background:none;border:1px solid var(--green);color:var(--green);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">&#10003;</button>'
-    : '<button onclick="event.stopPropagation();dashComplete('+t.id+')" title="Mark complete" style="background:none;border:1px solid var(--green);color:var(--green);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">&#10003;</button>';
+    ? '<button data-action="dash-complete-recurring" data-id="'+t.id+'" title="Complete & create next" style="background:none;border:1px solid var(--green);color:var(--green);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">&#10003;</button>'
+    : '<button data-action="dash-complete" data-id="'+t.id+'" title="Mark complete" style="background:none;border:1px solid var(--green);color:var(--green);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">&#10003;</button>';
   var streakBadge = t.recurring && t.streak_count > 0 ? '<span class="badge streak">&#x1F525; '+t.streak_count+'</span>' : '';
   return '<div class="todo-item" style="display:flex;align-items:center;gap:10px;">'+completeBtn+'<div class="todo-content" style="flex:1;"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span>'+(t.category?'<span>'+esc(t.category)+'</span>':'')+(t.due_date?'<span'+overdue+'>Due: '+new Date(t.due_date).toLocaleDateString()+'</span>':'')+(t.recurring?'<span class="badge recurring">recurring</span>':'')+streakBadge+'</div></div></div>';
 }
@@ -254,7 +254,7 @@ async function load() {
 
   const emails = await fetch('/api/emails?status=scheduled').then(r=>r.json());
   document.getElementById('scheduled-emails').innerHTML = emails.length
-    ? emails.slice(0,5).map(e => '<div class="todo-item" style="display:flex;align-items:center;gap:10px;"><button onclick="event.stopPropagation();dashSendEmail('+e.id+')" title="Send now" style="background:none;border:1px solid var(--blue);color:var(--blue);padding:2px 8px;border-radius:6px;cursor:pointer;font-size:11px;flex-shrink:0;font-family:inherit;">Send</button><div class="todo-content" style="flex:1;"><div class="todo-title">'+esc(e.subject)+'</div><div class="todo-meta"><span>To: '+esc(e.recipient_name||e.recipient_email)+'</span><span>'+new Date(e.scheduled_at).toLocaleString()+'</span></div></div></div>').join('')
+    ? emails.slice(0,5).map(e => '<div class="todo-item" style="display:flex;align-items:center;gap:10px;"><button data-action="dash-send-email" data-id="'+e.id+'" title="Send now" style="background:none;border:1px solid var(--blue);color:var(--blue);padding:2px 8px;border-radius:6px;cursor:pointer;font-size:11px;flex-shrink:0;font-family:inherit;">Send</button><div class="todo-content" style="flex:1;"><div class="todo-title">'+esc(e.subject)+'</div><div class="todo-meta"><span>To: '+esc(e.recipient_name||e.recipient_email)+'</span><span>'+new Date(e.scheduled_at).toLocaleString()+'</span></div></div></div>').join('')
     : '<div class="empty-msg">No scheduled emails</div>';
 
   // Load Perfin data
@@ -352,7 +352,7 @@ function renderToggles() {
   var html = '';
   dashLayout.widgets.forEach(id => {
     var hidden = dashLayout.hidden.includes(id);
-    html += '<button onclick="toggleWidget(\\''+id+'\\');event.stopPropagation();" style="padding:4px 12px;font-size:10px;font-weight:500;border-radius:20px;cursor:pointer;font-family:inherit;border:1px solid '+(hidden?'var(--border)':'var(--warm)')+';background:'+(hidden?'transparent':'rgba(212,165,116,0.1)')+';color:'+(hidden?'var(--text-muted)':'var(--warm)')+';">'+(widgetNames[id]||id)+'</button>';
+    html += '<button data-toggle-widget="'+id+'" style="padding:4px 12px;font-size:10px;font-weight:500;border-radius:20px;cursor:pointer;font-family:inherit;border:1px solid '+(hidden?'var(--border)':'var(--warm)')+';background:'+(hidden?'transparent':'rgba(212,165,116,0.1)')+';color:'+(hidden?'var(--text-muted)':'var(--warm)')+';">'+(widgetNames[id]||id)+'</button>';
   });
   document.getElementById('widget-toggles').innerHTML = html;
 }
@@ -381,12 +381,12 @@ async function saveLayout() {
   await fetch('/api/settings', {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({dashboard_layout:dashLayout})});
 }
 
-function wdragStart(e) { wdragSrcWidget = e.currentTarget.dataset.widget; e.currentTarget.style.opacity = '0.4'; }
-function wdragOver(e) { e.preventDefault(); e.currentTarget.style.borderTop = '2px solid var(--warm)'; }
+function wdragStart(e,w) { wdragSrcWidget = (w||e.target.closest('.dash-widget')).dataset.widget; (w||e.target.closest('.dash-widget')).style.opacity = '0.4'; }
+function wdragOver(e) { e.preventDefault(); var w=e.target.closest('.dash-widget'); if(w) w.style.borderTop = '2px solid var(--warm)'; }
 function wdragEnd(e) { document.querySelectorAll('.dash-widget').forEach(w => { w.style.opacity = '1'; w.style.borderTop = ''; }); }
 function wdrop(e) {
-  e.preventDefault(); e.currentTarget.style.borderTop = '';
-  var target = e.currentTarget.dataset.widget;
+  e.preventDefault(); var el=e.target.closest('.dash-widget'); if(el) el.style.borderTop = '';
+  var target = (el||e.currentTarget).dataset.widget;
   if (wdragSrcWidget === target) return;
   var srcIdx = dashLayout.widgets.indexOf(wdragSrcWidget);
   var tgtIdx = dashLayout.widgets.indexOf(target);
@@ -406,6 +406,36 @@ document.addEventListener('keydown', function(e) {
   else if (e.key === 'e' || e.key === 'E') { location.href = '/emails'; }
   else if (e.key === 'c' || e.key === 'C') { location.href = '/calendar'; }
   else if (e.key === 'r' || e.key === 'R') { location.href = '/review'; }
+});
+
+// Bind static events
+bindEvents([
+  ['customize-btn','click',toggleCustomize],
+  ['reset-layout-btn','click',resetLayout],
+  ['ask-ai-btn','click',askAI],
+]);
+var searchInput=document.getElementById('global-search');
+if(searchInput)searchInput.addEventListener('input',function(){doSearch(this.value);});
+var aiInput=document.getElementById('ai-query-input');
+if(aiInput)aiInput.addEventListener('keydown',function(e){if(e.key==='Enter')askAI();});
+// Dash view filter tabs
+onDelegate('dash-task-filters','click','button[data-view]',function(){setDashView(this,this.dataset.view);});
+// Widget toggles (dynamic)
+onDelegate('widget-toggles','click','[data-toggle-widget]',function(e){e.stopPropagation();toggleWidget(this.dataset.toggleWidget);});
+// Drag-and-drop for widget reorder
+(function(){var c=document.getElementById('dash-widgets');if(!c)return;c.addEventListener('dragstart',function(e){var w=e.target.closest('.dash-widget');if(w)wdragStart(e,w);});c.addEventListener('dragover',wdragOver);c.addEventListener('dragend',wdragEnd);c.addEventListener('drop',wdrop);})();
+// Dynamic content delegation — dashboard actions
+document.addEventListener('click',function(e){
+  var btn=e.target.closest('[data-action]');
+  if(!btn)return;
+  var id=parseInt(btn.dataset.id),act=btn.dataset.action;
+  e.preventDefault();e.stopPropagation();
+  if(act==='dash-complete')dashComplete(id);
+  else if(act==='dash-complete-recurring')dashCompleteRecurring(id);
+  else if(act==='dash-send-email')dashSendEmail(id);
+  else if(act==='search-complete')searchComplete(id,btn.dataset.recurring==='true');
+  else if(act==='search-send')searchSendEmail(id);
+  else if(act==='search-pin')searchTogglePin(id,btn.dataset.pinned==='true');
 });
 
 loadLayout();

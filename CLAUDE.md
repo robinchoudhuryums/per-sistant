@@ -82,6 +82,9 @@ Companion app to **Perfin** (personal finance tracker) — same design system, c
 - **Webhooks**: Configure external webhook endpoints to receive event notifications (task created/completed, email sent, streak milestones); test webhooks from Settings
 - **Slack Integration**: Add Slack Incoming Webhook URL in Settings for notifications
 - **AI API Optimization**: Singleton client reuse, prompt caching via system prompts with `cache_control`, response caching for briefing (10min) and suggestions (5min)
+- **Helmet CSP**: Content Security Policy via helmet with strict directives; all inline event handlers migrated to CSP-safe event delegation (`bindEvents()`/`onDelegate()` pattern)
+- **Event Delegation**: All pages use `bindEvents()` for static elements and `onDelegate()` for dynamic content — zero inline `onclick`/`onchange` attributes; enables `script-src-attr: 'none'` CSP
+- **Constant-Time Auth**: `crypto.timingSafeEqual` for password/PIN comparison; PIN pad shows fixed 8-dot display regardless of actual PIN length
 
 ## Key Files
 - `.env` — all secrets (never commit)

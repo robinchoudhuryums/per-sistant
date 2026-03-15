@@ -84,13 +84,15 @@ function startVoiceInput(targetId, onDone) {
   recognition.onerror = function(e) { if (e.error !== 'no-speech') console.error('Voice error:', e.error); };
   recognition.start();
 }
+function bindEvents(bindings){bindings.forEach(function(b){var el=document.getElementById(b[0]);if(el)el.addEventListener(b[1],b[2]);});}
+function onDelegate(parentId,event,selector,handler){var p=document.getElementById(parentId);if(!p)return;p.addEventListener(event,function(e){var t=e.target.closest(selector);if(t&&p.contains(t))handler.call(t,e);});}
 var _undoTimer=null;
 function showUndo(msg,type,id,action){
   clearTimeout(_undoTimer);
   var el=document.getElementById('undo-toast');
   if(!el){el=document.createElement('div');el.id='undo-toast';el.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface-2);border:1px solid var(--border);padding:12px 20px;border-radius:12px;display:flex;align-items:center;gap:12px;z-index:9999;backdrop-filter:blur(20px);font-size:14px;color:var(--text);box-shadow:0 8px 32px rgba(0,0,0,0.3);';document.body.appendChild(el);}
   var undoAction = action || 'delete';
-  el.innerHTML=esc(msg)+' <button onclick="undoAction(\\''+type+'\\','+id+',\\''+undoAction+'\\');event.stopPropagation();" style="background:var(--warm);color:#fff;border:none;padding:4px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;">Undo</button>';
+  el.innerHTML=esc(msg)+' <button data-undo-type="'+type+'" data-undo-id="'+id+'" data-undo-action="'+undoAction+'" style="background:var(--warm);color:#fff;border:none;padding:4px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;">Undo</button>';
   el.style.display='flex';
   _undoTimer=setTimeout(function(){el.style.display='none';},6000);
 }
@@ -108,4 +110,11 @@ async function undoAction(type,id,action){
 }
 // Backward compat
 function undoDelete(type,id){undoAction(type,id,'delete');}
+// Global event delegation
+document.addEventListener('click',function(e){
+  var ub=e.target.closest('[data-undo-type]');
+  if(ub){e.stopPropagation();undoAction(ub.dataset.undoType,ub.dataset.undoId,ub.dataset.undoAction);}
+  var nt=e.target.closest('#nav-toggle-btn');
+  if(nt){document.querySelector('.nav-links').classList.toggle('mobile-open');}
+});
 `;

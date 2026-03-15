@@ -11,11 +11,11 @@ ${themeScript()}
   <p class="subtitle">Tasks, emails, and reminders at a glance</p>
 
   <div class="actions">
-    <button onclick="prevMonth()">&larr; Previous</button>
+    <button id="btn-prev-month">&larr; Previous</button>
     <span id="cal-title" style="font-size:18px;font-weight:300;padding:0 16px;"></span>
-    <button onclick="nextMonth()">Next &rarr;</button>
+    <button id="btn-next-month">Next &rarr;</button>
     <a href="/api/calendar.ics" class="btn" style="margin-left:auto;" download>Export iCal</a>
-    <button onclick="goToday()" style="margin-left:auto;">Today</button>
+    <button id="btn-today" style="margin-left:auto;">Today</button>
   </div>
 
   <div class="section">
@@ -72,6 +72,11 @@ async function load() {
 }
 
 load();
+bindEvents([
+  ['btn-prev-month','click',prevMonth],
+  ['btn-next-month','click',nextMonth],
+  ['btn-today','click',goToday]
+]);
 </script>
 </body></html>`);
   };

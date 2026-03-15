@@ -11,23 +11,23 @@ ${themeScript()}
   <p class="subtitle">Draft, schedule, and send emails</p>
 
   <div class="actions">
-    <button class="primary" onclick="openCompose()">+ Compose</button>
-    <button onclick="openQuick()">Quick Send</button>
-    <button onclick="openTemplates()">Templates</button>
-    <button id="email-select-toggle" onclick="toggleEmailSelect()">Select</button>
+    <button class="primary" id="compose-btn">+ Compose</button>
+    <button id="quick-send-btn">Quick Send</button>
+    <button id="templates-btn">Templates</button>
+    <button id="email-select-toggle">Select</button>
   </div>
   <div id="email-bulk-bar" style="display:none;padding:10px 16px;margin-bottom:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);align-items:center;gap:8px;font-size:13px;">
     <span id="email-bulk-count">0 selected</span>
-    <button onclick="emailBulkAction('delete')" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
-    <button onclick="emailSelectAll()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
+    <button id="email-bulk-del-btn" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
+    <button id="email-select-all-btn" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
   </div>
 
   <div class="filters" id="email-filters">
-    <button class="active" onclick="setFilter(this,'')">All</button>
-    <button onclick="setFilter(this,'draft')">Drafts</button>
-    <button onclick="setFilter(this,'scheduled')">Scheduled</button>
-    <button onclick="setFilter(this,'sent')">Sent</button>
-    <button onclick="setFilter(this,'failed')">Failed</button>
+    <button class="active" data-filter="">All</button>
+    <button data-filter="draft">Drafts</button>
+    <button data-filter="scheduled">Scheduled</button>
+    <button data-filter="sent">Sent</button>
+    <button data-filter="failed">Failed</button>
   </div>
 
   <div class="section">
@@ -46,24 +46,24 @@ ${themeScript()}
     <input type="email" id="e-email" placeholder="email@example.com">
     <label>Subject</label>
     <input type="text" id="e-subject" placeholder="Subject line">
-    <label>Body <button onclick="aiDraft()" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Draft</button></label>
+    <label>Body <button id="ai-draft-btn" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Draft</button></label>
     <textarea id="e-body" style="min-height:160px" placeholder="Write your email..."></textarea>
     <div id="tone-buttons" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
       <span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;padding:5px 0;">Adjust tone:</span>
-      <button onclick="adjustTone('more formal')" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Formal</button>
-      <button onclick="adjustTone('more casual')" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Casual</button>
-      <button onclick="adjustTone('shorter')" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Shorter</button>
-      <button onclick="adjustTone('friendlier')" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Friendlier</button>
-      <button onclick="adjustTone('more direct')" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Direct</button>
+      <button data-tone="more formal" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Formal</button>
+      <button data-tone="more casual" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Casual</button>
+      <button data-tone="shorter" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Shorter</button>
+      <button data-tone="friendlier" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Friendlier</button>
+      <button data-tone="more direct" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Direct</button>
     </div>
     <label>Schedule Send (optional)</label>
     <input type="datetime-local" id="e-schedule">
     <div class="modal-actions">
-      <button onclick="closeCompose()">Cancel</button>
-      <button class="primary" onclick="saveEmail()">Save Draft</button>
-      <button class="primary" onclick="saveAndSchedule()" style="border-color:var(--yellow);color:var(--yellow)">Schedule</button>
-      <button id="send-now-btn" style="border-color:var(--green);color:var(--green)" onclick="sendNow()">Send Now</button>
-      <button class="danger" id="e-delete-btn" style="display:none" onclick="deleteEmail()">Delete</button>
+      <button id="close-compose-btn">Cancel</button>
+      <button class="primary" id="save-email-btn">Save Draft</button>
+      <button class="primary" id="schedule-btn" style="border-color:var(--yellow);color:var(--yellow)">Schedule</button>
+      <button id="send-now-btn" style="border-color:var(--green);color:var(--green)">Send Now</button>
+      <button class="danger" id="e-delete-btn" style="display:none">Delete</button>
     </div>
   </div>
 </div>
@@ -84,9 +84,9 @@ ${themeScript()}
       </div>
     </div>
     <div class="modal-actions">
-      <button onclick="closeQuick()">Cancel</button>
-      <button class="primary" onclick="parseQuick()">Parse & Preview</button>
-      <button class="primary" id="q-confirm" style="display:none" onclick="confirmQuick()">Confirm & Schedule</button>
+      <button id="close-quick-btn">Cancel</button>
+      <button class="primary" id="parse-quick-btn">Parse & Preview</button>
+      <button class="primary" id="q-confirm" style="display:none">Confirm & Schedule</button>
     </div>
   </div>
 </div>
@@ -117,7 +117,7 @@ async function load() {
   var emails = await fetch('/api/emails'+q).then(r=>r.json());
   if (!emails.length) { document.getElementById('email-list').innerHTML = '<div class="empty-msg">No emails found</div>'; return; }
   document.getElementById('email-list').innerHTML = '<table><thead><tr><th style="width:30px;"></th><th>Status</th><th>To</th><th>Subject</th><th>Scheduled</th><th>Actions</th></tr></thead><tbody>' +
-    emails.map(e => '<tr><td><input type="checkbox" class="email-bulk-check" data-id="'+e.id+'" style="display:'+(emailSelectMode?'inline-block':'none')+';accent-color:var(--warm);cursor:pointer;" onchange="toggleEmailBulkItem('+e.id+',this.checked)"></td><td><span class="badge '+e.status+'">'+e.status+'</span></td><td>'+esc(e.recipient_name||e.recipient_email)+'</td><td>'+esc(e.subject)+'</td><td>'+(e.scheduled_at?new Date(e.scheduled_at).toLocaleString():'—')+'</td><td><div class="todo-actions"><button onclick="openEditEmail('+e.id+')">&#9998;</button><button class="delete" onclick="deleteEmailDirect('+e.id+')">&#10005;</button></div></td></tr>'
+    emails.map(e => '<tr><td><input type="checkbox" class="email-bulk-check" data-id="'+e.id+'" style="display:'+(emailSelectMode?'inline-block':'none')+';accent-color:var(--warm);cursor:pointer;"></td><td><span class="badge '+e.status+'">'+e.status+'</span></td><td>'+esc(e.recipient_name||e.recipient_email)+'</td><td>'+esc(e.subject)+'</td><td>'+(e.scheduled_at?new Date(e.scheduled_at).toLocaleString():'—')+'</td><td><div class="todo-actions"><button data-action="edit-email" data-id="'+e.id+'">&#9998;</button><button class="delete" data-action="delete-email" data-id="'+e.id+'">&#10005;</button></div></td></tr>'
     ).join('') + '</tbody></table>';
 }
 
@@ -250,11 +250,11 @@ async function openTemplates() {
   var templates = await fetch('/api/email-templates').then(r=>r.json());
   var html = '<h2>Email Templates</h2>';
   if (templates.length) {
-    html += templates.map(t => '<div class="todo-item" style="cursor:pointer" onclick="useTemplate('+t.id+')"><div class="todo-content"><div class="todo-title">'+esc(t.name)+'</div><div class="todo-meta"><span>'+esc(t.subject)+'</span></div></div><div class="todo-actions"><button onclick="event.stopPropagation();deleteTemplate('+t.id+')">&#10005;</button></div></div>').join('');
+    html += templates.map(t => '<div class="todo-item" style="cursor:pointer" data-action="use-tpl" data-id="'+t.id+'"><div class="todo-content"><div class="todo-title">'+esc(t.name)+'</div><div class="todo-meta"><span>'+esc(t.subject)+'</span></div></div><div class="todo-actions"><button data-action="delete-tpl" data-id="'+t.id+'">&#10005;</button></div></div>').join('');
   } else { html += '<div class="empty-msg">No templates yet</div>'; }
-  html += '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);"><h2 style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">Save Current as Template</h2><input type="text" id="tpl-name" placeholder="Template name" style="width:100%;padding:8px 12px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);margin-bottom:8px;"><button onclick="saveAsTemplate()" class="primary" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save Template</button></div>';
+  html += '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);"><h2 style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">Save Current as Template</h2><input type="text" id="tpl-name" placeholder="Template name" style="width:100%;padding:8px 12px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);margin-bottom:8px;"><button data-action="save-tpl" class="primary" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save Template</button></div>';
   var overlay = document.createElement('div'); overlay.className = 'modal-overlay active'; overlay.id = 'tpl-modal';
-  overlay.innerHTML = '<div class="modal">'+html+'<div class="modal-actions"><button onclick="document.getElementById(\\\'tpl-modal\\\').remove()">Close</button></div></div>';
+  overlay.innerHTML = '<div class="modal">'+html+'<div class="modal-actions"><button data-action="close-tpl">Close</button></div></div>';
   document.body.appendChild(overlay);
 }
 async function useTemplate(id) {
@@ -379,6 +379,41 @@ async function confirmQuick() {
   closeQuick(); load();
 }
 
+
+bindEvents([
+  ['compose-btn','click',openCompose],
+  ['quick-send-btn','click',openQuick],
+  ['templates-btn','click',openTemplates],
+  ['email-select-toggle','click',toggleEmailSelect],
+  ['email-bulk-del-btn','click',function(){emailBulkAction('delete');}],
+  ['email-select-all-btn','click',emailSelectAll],
+  ['ai-draft-btn','click',aiDraft],
+  ['close-compose-btn','click',closeCompose],
+  ['save-email-btn','click',saveEmail],
+  ['schedule-btn','click',saveAndSchedule],
+  ['send-now-btn','click',sendNow],
+  ['e-delete-btn','click',deleteEmail],
+  ['close-quick-btn','click',closeQuick],
+  ['parse-quick-btn','click',parseQuick],
+  ['q-confirm','click',confirmQuick],
+]);
+onDelegate('tone-buttons','click','[data-tone]',function(){adjustTone(this.dataset.tone);});
+onDelegate('email-filters','click','button[data-filter]',function(){setFilter(this,this.dataset.filter);});
+document.addEventListener('click',function(e){
+  var btn=e.target.closest('[data-action]');
+  if(!btn)return;
+  var id=parseInt(btn.dataset.id),act=btn.dataset.action;
+  e.stopPropagation();
+  if(act==='edit-email')openEditEmail(id);
+  else if(act==='delete-email')deleteEmailDirect(id);
+  else if(act==='use-tpl')useTemplate(id);
+  else if(act==='delete-tpl')deleteTemplate(id);
+  else if(act==='save-tpl')saveAsTemplate();
+  else if(act==='close-tpl'){var m=document.getElementById('tpl-modal');if(m)m.remove();}
+});
+document.addEventListener('change',function(e){
+  if(e.target.classList.contains('email-bulk-check'))toggleEmailBulkItem(parseInt(e.target.dataset.id),e.target.checked);
+});
 
 load();
 </script>

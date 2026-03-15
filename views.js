@@ -42,7 +42,7 @@ function navBar(activePage) {
   return `<nav class="topnav">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
       <div class="logo">Per-sistant</div>
-      <button class="mobile-toggle" onclick="document.querySelector('.nav-links').classList.toggle('mobile-open')" aria-label="Toggle menu">&#9776;</button>
+      <button class="mobile-toggle" id="nav-toggle-btn" aria-label="Toggle menu">&#9776;</button>
     </div>
     <div class="nav-links">
       ${links.map(l => `<a href="${l.href}" class="${activePage === l.href ? 'active' : ''}">${l.label}</a>`).join("\n      ")}

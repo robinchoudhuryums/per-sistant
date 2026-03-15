@@ -169,7 +169,6 @@ Personal assistant tool for task management, email scheduling, and note-taking. 
 
 ### Health Check & Monitoring
 - **`/api/health`**: Returns server status, uptime, memory usage, DB connectivity (no auth required)
-- **Rate limiting**: General (200/15min), auth (10/15min), AI (20/min)
 
 ### Location-Based Reminders
 - **Geofencing**: Set location (name + coordinates + radius) on tasks
@@ -223,6 +222,15 @@ Installable as a home screen icon:
 - **Mobile-optimized**: Bottom navigation bar, hamburger menu, swipe between pages, floating action button
 - **Offline support**: Service worker caches pages and API responses, queues mutations for sync
 
+### Security
+- **Helmet CSP**: Content Security Policy with strict directives — all inline event handlers eliminated via event delegation pattern (`bindEvents()`/`onDelegate()`), enabling `script-src-attr: 'none'`
+- **CSRF protection**: State-changing requests require `X-Requested-With` header or JSON/multipart content-type; auto-injected by client-side fetch wrapper
+- **Postgres-backed sessions**: `connect-pg-simple` stores sessions in the database (survives restarts/deploys), auto-creates session table, prunes expired sessions every 15 minutes
+- **Constant-time auth**: `crypto.timingSafeEqual` for password and PIN comparison
+- **PIN length obfuscation**: PIN pad displays fixed 8-dot indicator regardless of actual PIN length
+- **Rate limiting**: General (200/15min), auth (10/15min), AI (20/min) rate limiters
+- **Secure cookies**: httpOnly, sameSite=lax, secure in production
+
 ## Setup
 
 ### 1. Environment
@@ -264,7 +272,7 @@ docker compose up --build
 npm test
 ```
 
-181 tests across 52 suites covering: time parsing, input validation, data structures, sorting, security, recurring tasks, custom recurrence intervals, skip/snooze, subtasks, email templates, natural language parsing, global search, calendar, weekly review, drag-and-drop, keyboard shortcuts, AI model selection, AI task breakdown, AI tone adjustment, todo categories, note tags, dashboard views, task dependencies, streaks, bulk actions, trash/undo, automations, attachments, location reminders, cross-entity links, webhooks, Slack integration, notifications, analytics, productivity score, heatmap, todo templates, batch contact import, quick search actions, undo actions, calendar projections, pagination, health check, rate limiting, and AI API optimization.
+181 tests across 52 suites covering: time parsing, input validation, data structures, sorting, security, CSRF protection, recurring tasks, custom recurrence intervals, skip/snooze, subtasks, email templates, natural language parsing, global search, calendar, weekly review, drag-and-drop, keyboard shortcuts, AI model selection, AI task breakdown, AI tone adjustment, todo categories, note tags, dashboard views, task dependencies, streaks, bulk actions, trash/undo, automations, attachments, location reminders, cross-entity links, webhooks, Slack integration, notifications, analytics, productivity score, heatmap, todo templates, batch contact import, quick search actions, undo actions, calendar projections, pagination, health check, rate limiting, and AI API optimization.
 
 ## API Endpoints
 

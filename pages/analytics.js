@@ -11,10 +11,10 @@ ${themeScript()}
   <p class="subtitle">Productivity insights and trends</p>
 
   <div class="filters" id="period-filters">
-    <button onclick="setPeriod(this,'week')" class="active">This Week</button>
-    <button onclick="setPeriod(this,'month')">This Month</button>
-    <button onclick="setPeriod(this,'quarter')">Quarter</button>
-    <button onclick="setPeriod(this,'year')">Year</button>
+    <button data-period="week" class="active">This Week</button>
+    <button data-period="month">This Month</button>
+    <button data-period="quarter">Quarter</button>
+    <button data-period="year">Year</button>
   </div>
 
   <div class="top-cards" id="overview-cards"></div>
@@ -142,6 +142,7 @@ async function load() {
 }
 
 load();
+onDelegate('period-filters','click','[data-period]',function(){setPeriod(this,this.dataset.period);});
 </script>
 </body></html>`);
   };

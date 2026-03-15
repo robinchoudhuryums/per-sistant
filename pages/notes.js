@@ -11,13 +11,13 @@ ${themeScript()}
   <p class="subtitle">Quick notes and reminders</p>
 
   <div class="actions">
-    <button class="primary" onclick="openNote()">+ New Note</button>
-    <button id="note-select-toggle" onclick="toggleNoteSelect()">Select</button>
+    <button class="primary" id="new-note-btn">+ New Note</button>
+    <button id="note-select-toggle">Select</button>
   </div>
   <div id="note-bulk-bar" style="display:none;padding:10px 16px;margin-bottom:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);align-items:center;gap:8px;font-size:13px;">
     <span id="note-bulk-count">0 selected</span>
-    <button onclick="noteBulkAction('delete')" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
-    <button onclick="noteSelectAll()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
+    <button id="note-bulk-del-btn" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
+    <button id="note-select-all-btn" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
   </div>
 
   <div class="notes-grid" id="notes-grid"></div>
@@ -33,13 +33,13 @@ ${themeScript()}
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
       <label style="margin:0;">Content</label>
       <label style="display:inline;cursor:pointer;font-size:11px;margin:0;">
-        <input type="checkbox" id="n-markdown" style="width:auto;margin-right:4px;" onchange="toggleMdPreview()"> Markdown
+        <input type="checkbox" id="n-markdown" style="width:auto;margin-right:4px;"> Markdown
       </label>
-      <button id="n-preview-btn" onclick="toggleMdPreview()" style="display:none;padding:2px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;">Preview</button>
+      <button id="n-preview-btn" style="display:none;padding:2px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;">Preview</button>
     </div>
     <div style="position:relative;">
       <textarea id="n-content" style="min-height:200px" placeholder="Write your note... (supports **bold**, *italic*, - lists, > quotes, [links](url))"></textarea>
-      <button onclick="startVoiceInput('n-content')" title="Voice input" style="position:absolute;top:10px;right:10px;padding:6px 10px;font-size:14px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:var(--surface);color:var(--warm);z-index:1;">&#127908;</button>
+      <button id="note-voice-btn" title="Voice input" style="position:absolute;top:10px;right:10px;padding:6px 10px;font-size:14px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:var(--surface);color:var(--warm);z-index:1;">&#127908;</button>
     </div>
     <div id="n-md-preview" style="display:none;min-height:100px;max-height:300px;overflow-y:auto;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);font-size:13px;line-height:1.6;margin-bottom:12px;"></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
@@ -55,17 +55,17 @@ ${themeScript()}
       </label>
     </div>
     <div style="margin-top:12px;">
-      <label>Tags <button onclick="suggestTags()" id="suggest-tags-btn" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Suggest</button></label>
+      <label>Tags <button id="suggest-tags-btn" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Suggest</button></label>
       <div id="n-tags-list" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;"></div>
       <div style="display:flex;gap:8px;">
-        <input type="text" id="n-tag-input" placeholder="Add tag..." style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();addTag();}">
-        <button onclick="addTag()" style="padding:8px 12px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:6px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
+        <input type="text" id="n-tag-input" placeholder="Add tag..." style="flex:1">
+        <button id="add-tag-btn" style="padding:8px 12px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:6px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
       </div>
     </div>
     <div class="modal-actions">
-      <button onclick="closeNote()">Cancel</button>
-      <button class="primary" onclick="saveNote()">Save</button>
-      <button class="danger" id="n-delete-btn" style="display:none" onclick="deleteNote()">Delete</button>
+      <button id="close-note-btn">Cancel</button>
+      <button class="primary" id="save-note-btn">Save</button>
+      <button class="danger" id="n-delete-btn" style="display:none">Delete</button>
     </div>
   </div>
 </div>
@@ -92,7 +92,7 @@ async function noteBulkAction(action) {
 
 function renderTags() {
   document.getElementById('n-tags-list').innerHTML = currentTags.map((t,i) =>
-    '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:500;background:var(--surface-2);border:1px solid var(--border);color:var(--text-muted);">'+esc(t)+'<span onclick="removeTag('+i+')" style="cursor:pointer;color:var(--red);font-size:12px;">&times;</span></span>'
+    '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:500;background:var(--surface-2);border:1px solid var(--border);color:var(--text-muted);">'+esc(t)+'<span data-action="remove-tag" data-idx="'+i+'" style="cursor:pointer;color:var(--red);font-size:12px;">&times;</span></span>'
   ).join('');
 }
 function addTag() {
@@ -124,8 +124,8 @@ async function load() {
   document.getElementById('notes-grid').innerHTML = notes.map(n => {
     var borderStyle = n.pinned ? 'border-color:'+(colorMap[n.color]||'var(--warm)') : (n.color!=='default'?'border-color:'+colorMap[n.color]:'');
     var tagsHtml = n.tags && n.tags.length ? '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px;">'+n.tags.map(t=>'<span style="padding:2px 8px;border-radius:12px;font-size:9px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-muted);">'+esc(t)+'</span>').join('')+'</div>' : '';
-    return '<div class="note-card'+(n.pinned?' pinned':'')+'" style="position:relative;'+borderStyle+'" onclick="openEditNote('+n.id+')">'+
-      '<input type="checkbox" class="note-bulk-check" data-id="'+n.id+'" style="display:'+(noteSelectMode?'block':'none')+';position:absolute;top:10px;right:10px;accent-color:var(--warm);cursor:pointer;z-index:2;" onclick="event.stopPropagation()" onchange="toggleNoteBulkItem('+n.id+',this.checked,event)">'+
+    return '<div class="note-card'+(n.pinned?' pinned':'')+'" style="position:relative;'+borderStyle+'" data-action="open-note" data-id="'+n.id+'">'+
+      '<input type="checkbox" class="note-bulk-check" data-id="'+n.id+'" style="display:'+(noteSelectMode?'block':'none')+';position:absolute;top:10px;right:10px;accent-color:var(--warm);cursor:pointer;z-index:2;">'+
       (n.pinned?'<div style="font-size:10px;color:var(--warm);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">&#128204; Pinned</div>':'')+
       (n.title?'<div class="note-title">'+esc(n.title)+(n.format==='markdown'?'<span class="md-badge">MD</span>':'')+'</div>':(!n.title && n.format==='markdown'?'<div style="margin-bottom:4px;"><span class="md-badge">MD</span></div>':''))+
       '<div class="note-preview'+(n.format==='markdown'?' md':'')+'">'+(n.format==='markdown'?renderMd(n.content):esc(n.content))+'</div>'+
@@ -220,6 +220,31 @@ async function deleteNote() {
 
 
 load();
+bindEvents([
+  ['new-note-btn','click',openNote],
+  ['note-select-toggle','click',toggleNoteSelect],
+  ['note-bulk-del-btn','click',function(){noteBulkAction('delete');}],
+  ['note-select-all-btn','click',noteSelectAll],
+  ['n-markdown','change',toggleMdPreview],
+  ['n-preview-btn','click',toggleMdPreview],
+  ['note-voice-btn','click',function(){startVoiceInput('n-content');}],
+  ['suggest-tags-btn','click',suggestTags],
+  ['add-tag-btn','click',addTag],
+  ['close-note-btn','click',closeNote],
+  ['save-note-btn','click',saveNote],
+  ['n-delete-btn','click',deleteNote],
+]);
+document.getElementById('n-tag-input').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();addTag();}});
+document.addEventListener('click',function(e){
+  var btn=e.target.closest('[data-action]');
+  if(!btn)return;
+  var act=btn.dataset.action,id=parseInt(btn.dataset.id);
+  if(act==='open-note'){openEditNote(id);}
+  else if(act==='remove-tag'){removeTag(parseInt(btn.dataset.idx));}
+});
+document.addEventListener('change',function(e){
+  if(e.target.classList.contains('note-bulk-check')){e.stopPropagation();toggleNoteBulkItem(parseInt(e.target.dataset.id),e.target.checked,{stopPropagation:function(){}});}
+});
 </script>
 </body></html>`);
   };

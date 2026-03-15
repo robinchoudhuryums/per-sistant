@@ -16,7 +16,7 @@ ${themeScript()}
     <h2>Appearance</h2>
     <div style="display:flex;gap:12px;align-items:center;">
       <label style="margin:0;font-size:13px;color:var(--text);">Theme</label>
-      <select id="s-theme" onchange="saveSettings()" style="width:auto;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
+      <select id="s-theme" style="width:auto;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
         <option value="dark">Night Mode</option>
         <option value="light">Day Mode</option>
         <option value="auto">Auto (System)</option>
@@ -29,13 +29,13 @@ ${themeScript()}
     <div style="display:flex;gap:12px;align-items:center;">
       <label style="margin:0;font-size:13px;color:var(--text);">Timeout (minutes)</label>
       <input type="number" id="s-timeout" min="1" max="1440" style="width:100px;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
-      <button onclick="saveSettings()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save</button>
+      <button id="save-timeout-btn" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save</button>
     </div>
   </div>
 
   <div class="section">
     <h2>Default Task Horizon</h2>
-    <select id="s-horizon" onchange="saveSettings()" style="width:auto;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
+    <select id="s-horizon" style="width:auto;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
       <option value="short">Short-term</option>
       <option value="medium">Medium-term</option>
       <option value="long">Long-term</option>
@@ -47,7 +47,7 @@ ${themeScript()}
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Link to your Perfin (personal finance tracker) instance</p>
     <div style="display:flex;gap:12px;align-items:center;">
       <input type="url" id="s-perfin" placeholder="https://your-perfin-instance.onrender.com" style="flex:1;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
-      <button onclick="saveSettings()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save</button>
+      <button id="save-perfin-btn" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save</button>
     </div>
   </div>
 
@@ -59,31 +59,31 @@ ${themeScript()}
       <div style="display:grid;gap:12px;">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
           <div><div style="font-size:13px;font-weight:400;">Email Drafting</div><div style="font-size:10px;color:var(--text-muted);">AI-compose emails from a prompt</div></div>
-          <select id="aim-email_draft" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+          <select id="aim-email_draft" class="aim-select" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
           <div><div style="font-size:13px;font-weight:400;">Task Breakdown</div><div style="font-size:10px;color:var(--text-muted);">Auto-generate subtasks from task title</div></div>
-          <select id="aim-task_breakdown" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+          <select id="aim-task_breakdown" class="aim-select" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
           <div><div style="font-size:13px;font-weight:400;">Smart Quick Add</div><div style="font-size:10px;color:var(--text-muted);">AI-parse natural language into structured tasks</div></div>
-          <select id="aim-quick_add" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+          <select id="aim-quick_add" class="aim-select" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
           <div><div style="font-size:13px;font-weight:400;">Weekly Review Summary</div><div style="font-size:10px;color:var(--text-muted);">AI-written narrative of your week</div></div>
-          <select id="aim-review_summary" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+          <select id="aim-review_summary" class="aim-select" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
           <div><div style="font-size:13px;font-weight:400;">Email Tone Adjustment</div><div style="font-size:10px;color:var(--text-muted);">Rewrite emails in different tones</div></div>
-          <select id="aim-email_tone" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+          <select id="aim-email_tone" class="aim-select" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
           <div><div style="font-size:13px;font-weight:400;">Daily Briefing</div><div style="font-size:10px;color:var(--text-muted);">AI summary of your day on the dashboard</div></div>
-          <select id="aim-daily_briefing" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+          <select id="aim-daily_briefing" class="aim-select" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;">
           <div><div style="font-size:13px;font-weight:400;">Note Auto-Tagging</div><div style="font-size:10px;color:var(--text-muted);">Suggest tags when creating notes</div></div>
-          <select id="aim-note_tagging" onchange="saveAIModels()" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
+          <select id="aim-note_tagging" class="aim-select" style="width:120px;padding:6px 10px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="off">Off</option></select>
         </div>
       </div>
     </div>
@@ -98,7 +98,7 @@ ${themeScript()}
     <h2>Browser Notifications</h2>
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Get notified about reminders and overdue tasks</p>
     <div class="actions" style="margin-bottom:0;">
-      <button onclick="enableNotifications()" id="notif-btn">Enable Notifications</button>
+      <button id="notif-btn">Enable Notifications</button>
     </div>
   </div>
 
@@ -118,10 +118,10 @@ ${themeScript()}
   <div class="section">
     <h2>Data Export</h2>
     <div class="actions" style="margin-bottom:0;">
-      <button onclick="exportData('todos')">Export Todos</button>
-      <button onclick="exportData('emails')">Export Emails</button>
-      <button onclick="exportData('notes')">Export Notes</button>
-      <button onclick="exportData('contacts')">Export Contacts</button>
+      <button data-export="todos">Export Todos</button>
+      <button data-export="emails">Export Emails</button>
+      <button data-export="notes">Export Notes</button>
+      <button data-export="contacts">Export Contacts</button>
     </div>
   </div>
 
@@ -130,8 +130,8 @@ ${themeScript()}
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Deleted items are kept for 30 days before permanent removal.</p>
     <div id="trash-list" style="margin-bottom:10px;"></div>
     <div class="actions" style="margin-bottom:0;">
-      <button onclick="loadTrash()">View Trash</button>
-      <button class="danger" style="border-color:var(--red);color:var(--red);" onclick="emptyTrash()">Empty Trash</button>
+      <button id="view-trash-btn">View Trash</button>
+      <button class="danger" style="border-color:var(--red);color:var(--red);" id="empty-trash-btn">Empty Trash</button>
     </div>
   </div>
 
@@ -139,14 +139,14 @@ ${themeScript()}
     <h2>Automations</h2>
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Create rules that trigger actions automatically when events occur.</p>
     <div id="automations-list" style="margin-bottom:12px;"></div>
-    <button onclick="openAutoModal()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;text-transform:uppercase;">+ New Rule</button>
+    <button id="new-auto-btn" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;text-transform:uppercase;">+ New Rule</button>
   </div>
 
   <div class="section">
     <h2>Webhooks</h2>
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Configure external webhook endpoints to receive event notifications.</p>
     <div id="webhooks-list" style="margin-bottom:12px;"></div>
-    <button onclick="openWebhookModal()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;text-transform:uppercase;">+ New Webhook</button>
+    <button id="new-webhook-btn" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;text-transform:uppercase;">+ New Webhook</button>
   </div>
 
   <div class="section">
@@ -154,11 +154,11 @@ ${themeScript()}
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Add a Slack Incoming Webhook URL to receive notifications in Slack.</p>
     <div style="display:flex;gap:12px;align-items:center;">
       <input type="url" id="s-slack" placeholder="https://hooks.slack.com/services/..." style="flex:1;padding:8px 14px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
-      <button onclick="saveSlack()" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save</button>
+      <button id="save-slack-btn" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save</button>
     </div>
   </div>
 
-  ${AUTH_SECRET ? '<div class="section"><h2>Session</h2><div class="actions" style="margin-bottom:0;"><button class="danger" style="border-color:var(--red);color:var(--red);" onclick="logout()">Log Out</button></div></div>' : ''}
+  ${AUTH_SECRET ? '<div class="section"><h2>Session</h2><div class="actions" style="margin-bottom:0;"><button class="danger" style="border-color:var(--red);color:var(--red);" id="logout-btn">Log Out</button></div></div>' : ''}
 </div>
 
 <!-- Automation Modal -->
@@ -189,7 +189,7 @@ ${themeScript()}
       <input type="text" id="auto-cond-value" placeholder="Value..." style="padding:8px;font-size:12px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);">
     </div>
     <label>Then (Action)</label>
-    <select id="auto-action" style="width:100%;padding:10px 14px;font-size:14px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);" onchange="updateActionFields()">
+    <select id="auto-action" style="width:100%;padding:10px 14px;font-size:14px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);">
       <option value="set_priority">Set Priority</option>
       <option value="set_category">Set Category</option>
       <option value="set_horizon">Set Horizon</option>
@@ -199,9 +199,9 @@ ${themeScript()}
     <label>Action Value</label>
     <input type="text" id="auto-action-value" placeholder="e.g. urgent, work, short...">
     <div class="modal-actions">
-      <button onclick="closeAutoModal()">Cancel</button>
-      <button class="primary" onclick="saveAutomation()">Save</button>
-      <button class="danger" id="auto-delete-btn" style="display:none" onclick="deleteAutomation()">Delete</button>
+      <button id="auto-cancel-btn">Cancel</button>
+      <button class="primary" id="auto-save-btn">Save</button>
+      <button class="danger" id="auto-delete-btn" style="display:none">Delete</button>
     </div>
   </div>
 </div>
@@ -224,9 +224,9 @@ ${themeScript()}
       <label style="display:inline;font-size:11px;cursor:pointer;"><input type="checkbox" value="streak_milestone" style="width:auto;margin-right:4px;">Streak Milestone</label>
     </div>
     <div class="modal-actions">
-      <button onclick="closeWebhookModal()">Cancel</button>
-      <button class="primary" onclick="saveWebhook()">Save</button>
-      <button class="danger" id="wh-delete-btn" style="display:none" onclick="deleteWebhook()">Delete</button>
+      <button id="wh-cancel-btn">Cancel</button>
+      <button class="primary" id="wh-save-btn">Save</button>
+      <button class="danger" id="wh-delete-btn" style="display:none">Delete</button>
     </div>
   </div>
 </div>
@@ -329,8 +329,8 @@ async function loadTrash() {
     return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;">'
       +'<div><span style="color:var(--text-muted);font-size:11px;margin-right:8px;">'+item.type+'</span>'+esc(item.title||'Untitled')+'<span style="color:var(--text-muted);font-size:11px;margin-left:8px;">deleted '+d+'</span></div>'
       +'<div style="display:flex;gap:6px;">'
-      +'<button onclick="restoreItem(\''+item.type+'\','+item.id+')" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Restore</button>'
-      +'<button onclick="permanentDelete(\''+item.type+'\','+item.id+')" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Delete</button>'
+      +'<button data-action="restore" data-type="'+item.type+'" data-id="'+item.id+'" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Restore</button>'
+      +'<button data-action="perm-delete" data-type="'+item.type+'" data-id="'+item.id+'" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Delete</button>'
       +'</div></div>';
   }).join('');
 }
@@ -373,8 +373,8 @@ async function loadAutomations() {
       +'<div style="flex:1;"><div style="font-weight:400;">'+esc(a.name)+'</div>'
       +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">'+a.trigger_type+condText+' &rarr; '+a.action_type+'</div></div>'
       +'<div style="display:flex;gap:6px;align-items:center;">'
-      +'<button onclick="toggleAutomation('+a.id+','+!a.enabled+')" style="background:'+(a.enabled?'var(--green-bg)':'var(--surface-2)')+';color:'+(a.enabled?'var(--green)':'var(--text-muted)')+';border:1px solid '+(a.enabled?'var(--green)':'var(--border)')+';padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(a.enabled?'On':'Off')+'</button>'
-      +'<button onclick="editAutomation('+a.id+')" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Edit</button>'
+      +'<button data-action="toggle-auto" data-id="'+a.id+'" data-enabled="'+a.enabled+'" style="background:'+(a.enabled?'var(--green-bg)':'var(--surface-2)')+';color:'+(a.enabled?'var(--green)':'var(--text-muted)')+';border:1px solid '+(a.enabled?'var(--green)':'var(--border)')+';padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(a.enabled?'On':'Off')+'</button>'
+      +'<button data-action="edit-auto" data-id="'+a.id+'" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Edit</button>'
       +'</div></div>';
   }).join('');
 }
@@ -451,9 +451,9 @@ async function loadWebhooks() {
     +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">'+esc(w.url.substring(0,50))+(w.url.length>50?'...':'')+'</div>'
     +'<div style="font-size:9px;color:var(--text-muted);margin-top:2px;">Events: '+(w.events||[]).join(', ')+(w.last_status?' &middot; Last: '+w.last_status:'')+'</div></div>'
     +'<div style="display:flex;gap:6px;align-items:center;">'
-    +'<button onclick="testWebhook('+w.id+')" style="background:none;border:1px solid var(--teal);color:var(--teal);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Test</button>'
-    +'<button onclick="toggleWebhook('+w.id+','+!w.enabled+')" style="background:'+(w.enabled?'var(--green-bg)':'var(--surface-2)')+';color:'+(w.enabled?'var(--green)':'var(--text-muted)')+';border:1px solid '+(w.enabled?'var(--green)':'var(--border)')+';padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(w.enabled?'On':'Off')+'</button>'
-    +'<button onclick="editWebhook('+w.id+')" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Edit</button>'
+    +'<button data-action="test-wh" data-id="'+w.id+'" style="background:none;border:1px solid var(--teal);color:var(--teal);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Test</button>'
+    +'<button data-action="toggle-wh" data-id="'+w.id+'" data-enabled="'+w.enabled+'" style="background:'+(w.enabled?'var(--green-bg)':'var(--surface-2)')+';color:'+(w.enabled?'var(--green)':'var(--text-muted)')+';border:1px solid '+(w.enabled?'var(--green)':'var(--border)')+';padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">'+(w.enabled?'On':'Off')+'</button>'
+    +'<button data-action="edit-wh" data-id="'+w.id+'" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-family:inherit;">Edit</button>'
     +'</div></div>'
   ).join('');
 }
@@ -518,6 +518,47 @@ async function logout() {
 load();
 loadAutomations();
 loadWebhooks();
+bindEvents([
+  ['s-theme','change',saveSettings],
+  ['s-horizon','change',saveSettings],
+  ['save-timeout-btn','click',saveSettings],
+  ['save-perfin-btn','click',saveSettings],
+  ['notif-btn','click',enableNotifications],
+  ['view-trash-btn','click',loadTrash],
+  ['empty-trash-btn','click',emptyTrash],
+  ['new-auto-btn','click',openAutoModal],
+  ['new-webhook-btn','click',openWebhookModal],
+  ['save-slack-btn','click',saveSlack],
+  ['logout-btn','click',logout],
+  ['auto-action','change',updateActionFields],
+  ['auto-cancel-btn','click',closeAutoModal],
+  ['auto-save-btn','click',saveAutomation],
+  ['auto-delete-btn','click',deleteAutomation],
+  ['wh-cancel-btn','click',closeWebhookModal],
+  ['wh-save-btn','click',saveWebhook],
+  ['wh-delete-btn','click',deleteWebhook],
+]);
+document.querySelectorAll('.aim-select').forEach(function(el){el.addEventListener('change',saveAIModels);});
+document.addEventListener('click',function(e){
+  var exp=e.target.closest('[data-export]');
+  if(exp)exportData(exp.dataset.export);
+});
+onDelegate('trash-list','click','[data-action]',function(){
+  var id=this.dataset.id,type=this.dataset.type;
+  if(this.dataset.action==='restore')restoreItem(type,id);
+  else if(this.dataset.action==='perm-delete')permanentDelete(type,id);
+});
+onDelegate('automations-list','click','[data-action]',function(){
+  var id=parseInt(this.dataset.id);
+  if(this.dataset.action==='toggle-auto')toggleAutomation(id,this.dataset.enabled==='true');
+  else if(this.dataset.action==='edit-auto')editAutomation(id);
+});
+onDelegate('webhooks-list','click','[data-action]',function(){
+  var id=parseInt(this.dataset.id);
+  if(this.dataset.action==='test-wh')testWebhook(id);
+  else if(this.dataset.action==='toggle-wh')toggleWebhook(id,this.dataset.enabled==='true');
+  else if(this.dataset.action==='edit-wh')editWebhook(id);
+});
 </script>
 </body></html>`);
   };
