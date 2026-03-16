@@ -41,6 +41,12 @@ ${themeScript()}
           <div class="tree-particle"></div>
           <div class="tree-particle"></div>
           <div class="tree-particle"></div>
+          <div class="falling-petal"></div>
+          <div class="falling-petal"></div>
+          <div class="falling-petal"></div>
+          <div class="falling-petal"></div>
+          <div class="falling-petal"></div>
+          <div class="falling-petal"></div>
           <svg class="tree-svg" id="tree-svg" viewBox="0 0 280 280" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <linearGradient id="platform-grad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -56,8 +62,8 @@ ${themeScript()}
                 <stop offset="100%" style="stop-color:rgba(60,140,155,0.25)"/>
               </linearGradient>
               <radialGradient id="leaf-glow" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" style="stop-color:rgba(92,201,138,0.5)"/>
-                <stop offset="100%" style="stop-color:rgba(92,201,138,0)"/>
+                <stop offset="0%" style="stop-color:rgba(255,183,197,0.5)"/>
+                <stop offset="100%" style="stop-color:rgba(255,183,197,0)"/>
               </radialGradient>
               <linearGradient id="energy-grad" x1="0%" y1="100%" x2="0%" y2="0%">
                 <stop offset="0%" style="stop-color:rgba(240,200,80,0.0)"/>
@@ -92,6 +98,15 @@ ${themeScript()}
             <path d="M140,196 C140,185 138,175 130,165 C122,155 118,148 120,138 C122,128 128,122 135,118" stroke="url(#trunk-grad)" stroke-width="8" fill="none" stroke-linecap="round"/>
             <!-- Main trunk highlight -->
             <path d="M140,196 C140,187 138,177 131,167 C124,158 120,150 122,140 C124,130 129,124 136,120" stroke="rgba(255,255,255,0.06)" stroke-width="3" fill="none" stroke-linecap="round"/>
+            <!-- Moss patches on trunk and branches -->
+            <g opacity="0.7">
+              <ellipse cx="137" cy="180" rx="5" ry="3" fill="rgba(82,148,80,0.55)" transform="rotate(-8,137,180)"/>
+              <ellipse cx="128" cy="162" rx="4" ry="2.5" fill="rgba(92,165,85,0.50)" transform="rotate(-15,128,162)"/>
+              <ellipse cx="122" cy="145" rx="5" ry="2" fill="rgba(75,140,72,0.55)" transform="rotate(5,122,145)"/>
+              <ellipse cx="131" cy="128" rx="4" ry="2" fill="rgba(85,155,80,0.45)" transform="rotate(-10,131,128)"/>
+              <ellipse cx="140" cy="190" rx="4" ry="2.5" fill="rgba(70,130,68,0.50)" transform="rotate(12,140,190)"/>
+              <ellipse cx="145" cy="155" rx="3" ry="2" fill="rgba(88,160,82,0.40)" transform="rotate(-5,145,155)"/>
+            </g>
             <!-- Branch right — sweeping up -->
             <path d="M130,160 C140,152 152,148 162,140" stroke="#6b4d35" stroke-width="4" fill="none" stroke-linecap="round"/>
             <!-- Branch right-upper -->
@@ -555,19 +570,22 @@ function updateTree(stats, streakData) {
     });
   }
 
-  // Bonsai leaf clusters on branch tips
-  var baseHue = health > 60 ? 145 : health > 30 ? 80 : 20;
-  var baseSat = health > 50 ? '60%' : '40%';
-  var baseLight = health > 50 ? '55%' : '40%';
-  var leafDensity = Math.max(2, Math.round(health / 12)); // 2-8 leaves per cluster
+  // Cherry blossom clusters on branch tips
+  // Healthy = vibrant pinks/whites, unhealthy = faded/sparse
+  var blossomColors = health > 60
+    ? [{h:340,s:'75%',l:'78%'},{h:350,s:'65%',l:'85%'},{h:0,s:'50%',l:'92%'},{h:330,s:'60%',l:'72%'},{h:345,s:'70%',l:'80%'}]
+    : health > 30
+    ? [{h:340,s:'45%',l:'70%'},{h:350,s:'35%',l:'75%'},{h:0,s:'30%',l:'80%'}]
+    : [{h:340,s:'25%',l:'60%'},{h:20,s:'30%',l:'55%'}];
+  var leafDensity = Math.max(3, Math.round(health / 10)); // 3-10 blossoms per cluster
 
   // Bonsai cluster centers (at branch tips)
   var clusters = [
-    {x:135, y:110, r:22}, // top of trunk
-    {x:112, y:105, r:18}, // top-left branch tip
-    {x:105, y:142, r:16}, // left-down branch tip
-    {x:162, y:135, r:20}, // right branch mid
-    {x:172, y:120, r:18}, // right-upper branch tip
+    {x:135, y:110, r:24}, // top of trunk
+    {x:112, y:105, r:20}, // top-left branch tip
+    {x:105, y:142, r:17}, // left-down branch tip
+    {x:162, y:135, r:22}, // right branch mid
+    {x:172, y:120, r:20}, // right-upper branch tip
   ];
 
   var leaves = '';
@@ -577,13 +595,16 @@ function updateTree(stats, streakData) {
       var dist = Math.random() * c.r;
       var lx = c.x + Math.cos(angle) * dist;
       var ly = c.y + Math.sin(angle) * dist * 0.6;
-      var lr = 6 + Math.random() * 5;
-      var hue = baseHue + Math.random() * 25 - 12;
-      var opacity = 0.4 + (health / 100) * 0.5;
-      leaves += '<ellipse class="tree-leaf" cx="'+lx.toFixed(1)+'" cy="'+ly.toFixed(1)+'" rx="'+lr.toFixed(1)+'" ry="'+(lr*0.65).toFixed(1)+'" fill="hsla('+Math.round(hue)+','+baseSat+','+baseLight+','+opacity.toFixed(2)+')" style="animation-delay:'+(Math.random()*-3).toFixed(1)+'s"/>';
+      var lr = 4 + Math.random() * 5;
+      var bc = blossomColors[Math.floor(Math.random() * blossomColors.length)];
+      var opacity = 0.5 + (health / 100) * 0.4;
+      // Mix of petal shapes — some rounder (blossoms), some elongated (buds)
+      var ry = lr * (0.6 + Math.random() * 0.3);
+      var rot = Math.random() * 360;
+      leaves += '<ellipse class="tree-leaf" cx="'+lx.toFixed(1)+'" cy="'+ly.toFixed(1)+'" rx="'+lr.toFixed(1)+'" ry="'+ry.toFixed(1)+'" fill="hsla('+bc.h+','+bc.s+','+bc.l+','+opacity.toFixed(2)+')" transform="rotate('+Math.round(rot)+','+lx.toFixed(1)+','+ly.toFixed(1)+')" style="animation-delay:'+(Math.random()*-3).toFixed(1)+'s"/>';
     }
-    // Glow center for each cluster
-    leaves += '<ellipse cx="'+c.x+'" cy="'+c.y+'" rx="'+(c.r*0.6)+'" ry="'+(c.r*0.4)+'" fill="url(#leaf-glow)" opacity="'+(health/200).toFixed(2)+'"/>';
+    // Soft pink glow center for each cluster
+    leaves += '<ellipse cx="'+c.x+'" cy="'+c.y+'" rx="'+(c.r*0.6)+'" ry="'+(c.r*0.4)+'" fill="url(#leaf-glow)" opacity="'+(health/180).toFixed(2)+'"/>';
   });
 
   leavesEl.innerHTML = leaves;
@@ -592,12 +613,12 @@ function updateTree(stats, streakData) {
   var streakEl = document.getElementById('tree-streak');
   if (streakEl) streakEl.style.display = currentStreak > 0 ? 'block' : 'none';
 
-  // Update glow color based on health
+  // Update glow color based on health — cherry blossom pinks
   var glowEl = document.getElementById('tree-glow');
   if (glowEl) {
-    if (health > 70) glowEl.style.background = 'radial-gradient(ellipse, rgba(111,207,151,0.35) 0%, rgba(107,159,159,0.2) 40%, transparent 70%)';
-    else if (health > 40) glowEl.style.background = 'radial-gradient(ellipse, rgba(232,200,109,0.25) 0%, rgba(107,159,159,0.12) 40%, transparent 70%)';
-    else glowEl.style.background = 'radial-gradient(ellipse, rgba(235,107,107,0.2) 0%, rgba(160,140,212,0.1) 40%, transparent 70%)';
+    if (health > 70) glowEl.style.background = 'radial-gradient(ellipse, rgba(255,150,180,0.35) 0%, rgba(255,200,210,0.2) 40%, transparent 70%)';
+    else if (health > 40) glowEl.style.background = 'radial-gradient(ellipse, rgba(240,180,190,0.25) 0%, rgba(230,164,74,0.12) 40%, transparent 70%)';
+    else glowEl.style.background = 'radial-gradient(ellipse, rgba(200,140,150,0.2) 0%, rgba(180,120,130,0.1) 40%, transparent 70%)';
   }
 
   // Update stat displays
@@ -607,11 +628,11 @@ function updateTree(stats, streakData) {
 
   // Status message
   var msg = '';
-  if (health >= 80) msg = 'Your tree is thriving! Keep up the amazing work.';
-  else if (health >= 60) msg = 'Looking good! A few more tasks and your tree will flourish.';
-  else if (health >= 40) msg = 'Your tree needs attention. Tackle some pending tasks!';
-  else if (health >= 20) msg = 'Your tree is wilting. Time to catch up on overdue items.';
-  else msg = 'Your tree is struggling. Start small — complete one task to begin recovery.';
+  if (health >= 80) msg = 'Your cherry blossom is in full bloom! Beautiful work.';
+  else if (health >= 60) msg = 'Blossoms are opening nicely. A few more tasks to reach full bloom.';
+  else if (health >= 40) msg = 'Some buds are waiting to open. Tackle pending tasks!';
+  else if (health >= 20) msg = 'Petals are fading. Time to catch up on overdue items.';
+  else msg = 'Your blossom needs care. Complete one task to start the bloom.';
   document.getElementById('tree-msg').textContent = msg;
 }
 

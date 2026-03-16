@@ -459,6 +459,7 @@ module.exports = `
     .tree-container {
       position: relative; width: 280px; height: 280px;
       perspective: 800px; transform-style: preserve-3d;
+      overflow: hidden;
     }
     .tree-svg {
       width: 100%; height: 100%;
@@ -474,7 +475,7 @@ module.exports = `
     .tree-glow {
       position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
       width: 160px; height: 40px; border-radius: 50%;
-      background: radial-gradient(ellipse, rgba(92,201,138,0.25) 0%, rgba(77,184,199,0.15) 40%, transparent 70%);
+      background: radial-gradient(ellipse, rgba(255,150,180,0.25) 0%, rgba(255,200,210,0.15) 40%, transparent 70%);
       filter: blur(10px); animation: glowPulse 4s ease-in-out infinite;
     }
     @keyframes glowPulse {
@@ -505,6 +506,26 @@ module.exports = `
     .tree-particle:nth-child(1) { left: 35%; bottom: 40%; animation-delay: 0s; }
     .tree-particle:nth-child(2) { left: 55%; bottom: 45%; animation-delay: -1.3s; background: var(--teal); }
     .tree-particle:nth-child(3) { left: 45%; bottom: 35%; animation-delay: -2.6s; background: var(--warm); }
+
+    /* Falling cherry blossom petals */
+    @keyframes petalFall {
+      0% { transform: translateY(-20px) translateX(0) rotate(0deg) scale(1); opacity: 0; }
+      10% { opacity: 0.8; }
+      50% { transform: translateY(120px) translateX(30px) rotate(180deg) scale(0.8); opacity: 0.6; }
+      100% { transform: translateY(260px) translateX(-10px) rotate(360deg) scale(0.5); opacity: 0; }
+    }
+    .falling-petal {
+      position: absolute; width: 6px; height: 8px; border-radius: 50% 50% 50% 0;
+      background: rgba(255,180,200,0.7); z-index: 2;
+      animation: petalFall 6s ease-in-out infinite;
+      pointer-events: none;
+    }
+    .falling-petal:nth-child(4) { left: 40%; top: 25%; animation-delay: 0s; background: rgba(255,200,215,0.6); width: 5px; height: 7px; }
+    .falling-petal:nth-child(5) { left: 55%; top: 20%; animation-delay: -1.2s; background: rgba(255,160,185,0.7); width: 7px; height: 9px; }
+    .falling-petal:nth-child(6) { left: 35%; top: 30%; animation-delay: -2.5s; background: rgba(255,220,230,0.5); width: 5px; height: 6px; }
+    .falling-petal:nth-child(7) { left: 60%; top: 22%; animation-delay: -3.8s; background: rgba(255,170,195,0.65); width: 6px; height: 8px; }
+    .falling-petal:nth-child(8) { left: 45%; top: 28%; animation-delay: -4.5s; background: rgba(255,190,210,0.55); width: 4px; height: 6px; }
+    .falling-petal:nth-child(9) { left: 50%; top: 18%; animation-delay: -5.2s; background: rgba(255,210,220,0.6); width: 6px; height: 7px; }
 
     /* Energy pulse traveling up the tree */
     @keyframes energyPulseUp {
@@ -551,7 +572,7 @@ module.exports = `
 
     /* Light theme tree adjustments */
     [data-theme="light"] .tree-glow {
-      background: radial-gradient(ellipse, rgba(42,152,96,0.2) 0%, rgba(42,138,152,0.12) 40%, transparent 70%);
+      background: radial-gradient(ellipse, rgba(220,100,140,0.2) 0%, rgba(200,120,150,0.12) 40%, transparent 70%);
     }
     [data-theme="light"] .tree-particle { opacity: 0.6; }
 
