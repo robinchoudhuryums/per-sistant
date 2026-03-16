@@ -32,3 +32,5 @@ services:
         sync: false
       - key: PERFIN_URL
         sync: false
+      - key: PORT
+        value: "3001"

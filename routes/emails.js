@@ -9,7 +9,7 @@ try {
 
 module.exports = function createEmailRoutes({ pool, config, helpers }) {
   const router = express.Router();
-  const { VALID_EMAIL_STATUSES, EMAIL_REGEX } = config;
+  const { VALID_EMAIL_STATUSES, EMAIL_REGEX, MAX_PAGINATION_LIMIT, MAX_BODY_LENGTH } = config;
   const { fireWebhooks, sendSlackNotification, runAutomations } = helpers;
 
   // ============================================================================
@@ -24,8 +24,8 @@ module.exports = function createEmailRoutes({ pool, config, helpers }) {
       let idx = 1;
       if (status) { where.push(`status = $${idx++}`); params.push(status); }
       let pagination = "";
-      if (limit) { pagination += ` LIMIT $${idx++}`; params.push(parseInt(limit, 10)); }
-      if (offset) { pagination += ` OFFSET $${idx++}`; params.push(parseInt(offset, 10)); }
+      if (limit) { pagination += ` LIMIT $${idx++}`; params.push(Math.min(Math.max(1, parseInt(limit, 10) || 20), MAX_PAGINATION_LIMIT)); }
+      if (offset) { pagination += ` OFFSET $${idx++}`; params.push(Math.max(0, parseInt(offset, 10) || 0)); }
       const r = await pool.query(`SELECT * FROM emails WHERE ${where.join(" AND ")} ORDER BY CASE status WHEN 'scheduled' THEN 0 WHEN 'draft' THEN 1 WHEN 'sent' THEN 2 ELSE 3 END, created_at DESC${pagination}`, params);
       res.json(r.rows);
     } catch (err) {
@@ -39,6 +39,7 @@ module.exports = function createEmailRoutes({ pool, config, helpers }) {
       if (!recipient_email || !subject || !body) {
         return res.status(400).json({ error: "Recipient email, subject, and body are required." });
       }
+      if (body.length > MAX_BODY_LENGTH) return res.status(400).json({ error: `Body too long. Maximum ${MAX_BODY_LENGTH} characters.` });
       if (!EMAIL_REGEX.test(recipient_email)) {
         return res.status(400).json({ error: "Invalid email address format." });
       }

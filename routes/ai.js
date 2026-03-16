@@ -24,8 +24,8 @@ module.exports = function ({ pool }) {
         `You are a professional email drafting assistant. Return ONLY a JSON object with these fields:\n- "subject": the email subject line\n- "body": the email body text (plain text, no HTML)\n\nKeep the tone professional but warm. Do not include any other text outside the JSON.`);
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
-      const draft = JSON.parse(jsonMatch[0]);
-      res.json(draft);
+      try { const draft = JSON.parse(jsonMatch[0]); res.json(draft); }
+      catch { return res.status(500).json({ error: "Invalid AI response format." }); }
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -46,8 +46,8 @@ module.exports = function ({ pool }) {
         `You are a task breakdown assistant. Break down the given task into 3-8 actionable subtasks. Return ONLY a JSON array of strings, where each string is a subtask. Keep them specific and actionable.\nExample: ["Research options", "Compare prices", "Make decision"]`);
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
-      const subtasks = JSON.parse(jsonMatch[0]);
-      res.json({ subtasks });
+      try { const subtasks = JSON.parse(jsonMatch[0]); res.json({ subtasks }); }
+      catch { return res.status(500).json({ error: "Invalid AI response format." }); }
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -69,8 +69,8 @@ module.exports = function ({ pool }) {
         `You are a task parser. Parse natural language task descriptions into structured data.\n\nReturn ONLY a JSON object with:\n- "title": clean task title (remove time/priority words)\n- "priority": one of "low", "medium", "high", "urgent"\n- "horizon": one of "short", "medium", "long"\n- "category": inferred category (e.g. "work", "personal", "health", "finance", "errands", "home") or null\n- "due_date": ISO date string (YYYY-MM-DD) if a date/time is mentioned, or null\n\nBe smart about inferring: "ASAP" = urgent, "someday" = low priority long-term, "this week" = short-term, etc.`);
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
-      const parsed = JSON.parse(jsonMatch[0]);
-      res.json(parsed);
+      try { const parsed = JSON.parse(jsonMatch[0]); res.json(parsed); }
+      catch { return res.status(500).json({ error: "Invalid AI response format." }); }
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -159,8 +159,8 @@ module.exports = function ({ pool }) {
         `You are a note tagging assistant. Suggest 1-4 short tags for the given note. Tags should be lowercase single words or hyphenated phrases.\n\nReturn ONLY a JSON array of tag strings.\nExample: ["meeting-notes", "project-alpha", "action-items"]`);
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       if (!jsonMatch) return res.status(500).json({ error: "Failed to parse AI response." });
-      const tags = JSON.parse(jsonMatch[0]);
-      res.json({ tags });
+      try { const tags = JSON.parse(jsonMatch[0]); res.json({ tags }); }
+      catch { return res.status(500).json({ error: "Invalid AI response format." }); }
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -188,7 +188,9 @@ module.exports = function ({ pool }) {
         512,
         `You are a productivity coach. Provide exactly 3 smart suggestions as a JSON array of objects with "suggestion" (short actionable advice) and "task_ids" (array of relevant task IDs). Consider: urgency, due dates, streaks at risk, workload balance, and day of week. Focus on what to tackle NOW.\nRespond with ONLY a JSON array, no other text.`);
       const cleaned = result.replace(/```json?\s*|\s*```/g, "").trim();
-      const suggestions = JSON.parse(cleaned);
+      let suggestions;
+      try { suggestions = JSON.parse(cleaned); }
+      catch { return res.json({ suggestions: null, error: "Invalid AI response format." }); }
       setCache(suggestCacheKey, suggestions);
       res.json({ suggestions });
     } catch (err) { res.json({ suggestions: null, error: err.message }); }

@@ -7,7 +7,7 @@ const { advanceRecurrence, fireWebhooks, sendSlackNotification, runAutomations }
 
 module.exports = function ({ pool, config }) {
   const router = express.Router();
-  const { VALID_PRIORITIES, VALID_HORIZONS, VALID_RECURRENCE_RULES } = config;
+  const { VALID_PRIORITIES, VALID_HORIZONS, VALID_RECURRENCE_RULES, MAX_PAGINATION_LIMIT, MAX_TITLE_LENGTH, MAX_BODY_LENGTH } = config;
 
   // ============================================================================
   // API — Todos CRUD
@@ -25,8 +25,8 @@ module.exports = function ({ pool, config }) {
       if (category) { where.push(`category = $${idx++}`); params.push(category); }
       const clause = "WHERE " + where.join(" AND ");
       let pagination = "";
-      if (limit) { pagination += ` LIMIT $${idx++}`; params.push(parseInt(limit, 10)); }
-      if (offset) { pagination += ` OFFSET $${idx++}`; params.push(parseInt(offset, 10)); }
+      if (limit) { pagination += ` LIMIT $${idx++}`; params.push(Math.min(Math.max(1, parseInt(limit, 10) || 20), MAX_PAGINATION_LIMIT)); }
+      if (offset) { pagination += ` OFFSET $${idx++}`; params.push(Math.max(0, parseInt(offset, 10) || 0)); }
       const r = await pool.query(`SELECT * FROM todos ${clause} ORDER BY completed ASC, sort_order ASC, CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at DESC${pagination}`, params);
       res.json(r.rows);
     } catch (err) {
@@ -38,6 +38,8 @@ module.exports = function ({ pool, config }) {
     try {
       const { title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_interval } = req.body;
       if (!title) return res.status(400).json({ error: "Title is required." });
+      if (title.length > MAX_TITLE_LENGTH) return res.status(400).json({ error: `Title too long. Maximum ${MAX_TITLE_LENGTH} characters.` });
+      if (description && description.length > MAX_BODY_LENGTH) return res.status(400).json({ error: `Description too long. Maximum ${MAX_BODY_LENGTH} characters.` });
       if (priority && !VALID_PRIORITIES.includes(priority)) return res.status(400).json({ error: "Invalid priority. Must be: " + VALID_PRIORITIES.join(", ") });
       if (horizon && !VALID_HORIZONS.includes(horizon)) return res.status(400).json({ error: "Invalid horizon. Must be: " + VALID_HORIZONS.join(", ") });
       if (recurrence_rule && !VALID_RECURRENCE_RULES.includes(recurrence_rule)) return res.status(400).json({ error: "Invalid recurrence rule. Must be: " + VALID_RECURRENCE_RULES.join(", ") });
@@ -153,20 +155,24 @@ module.exports = function ({ pool, config }) {
   // ============================================================================
 
   router.post("/api/todos/:id/complete-recurring", async (req, res) => {
+    const client = await pool.connect();
     try {
-      const r = await pool.query("SELECT * FROM todos WHERE id = $1", [req.params.id]);
-      if (!r.rows.length) return res.status(404).json({ error: "Not found." });
+      await client.query("BEGIN");
+      const r = await client.query("SELECT * FROM todos WHERE id = $1 FOR UPDATE", [req.params.id]);
+      if (!r.rows.length) { await client.query("ROLLBACK"); return res.status(404).json({ error: "Not found." }); }
       const todo = r.rows[0];
       if (!todo.recurring || !todo.recurrence_rule) {
+        await client.query("ROLLBACK");
         return res.status(400).json({ error: "Not a recurring task." });
       }
+      if (todo.completed) { await client.query("ROLLBACK"); return res.status(400).json({ error: "Task already completed." }); }
       // Calculate streak: check if completed on time (before or on due date)
       const today = new Date().toISOString().split("T")[0];
       const isOnTime = !todo.due_date || today <= todo.due_date.toISOString().split("T")[0];
       let newStreak = isOnTime ? (todo.streak_count || 0) + 1 : 1;
       let newBest = Math.max(newStreak, todo.best_streak || 0);
       // Mark current as completed with streak info
-      await pool.query("UPDATE todos SET completed = true, completed_at = now(), streak_count = $2, best_streak = $3, last_streak_date = $4 WHERE id = $1",
+      await client.query("UPDATE todos SET completed = true, completed_at = now(), streak_count = $2, best_streak = $3, last_streak_date = $4 WHERE id = $1",
         [todo.id, newStreak, newBest, today]);
       // Calculate next due date using interval
       const rule = todo.recurrence_rule;
@@ -174,16 +180,18 @@ module.exports = function ({ pool, config }) {
       let nextDue = todo.due_date ? new Date(todo.due_date) : new Date();
       nextDue = advanceRecurrence(nextDue, rule, interval);
       // Create next instance with streak carried forward
-      const n = await pool.query(
+      const n = await client.query(
         `INSERT INTO todos (title, description, priority, horizon, category, due_date, recurring, recurrence_rule, recurrence_interval, recurrence_parent_id, streak_count, best_streak, last_streak_date)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
         [todo.title, todo.description, todo.priority, todo.horizon, todo.category,
          nextDue.toISOString().split("T")[0], true, rule, interval, todo.recurrence_parent_id || todo.id,
          newStreak, newBest, today]
       );
+      await client.query("COMMIT");
       fireWebhooks('todo_completed', todo).catch(() => {});
       res.json({ completed: todo, next: n.rows[0], streak: newStreak, best_streak: newBest });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) { await client.query("ROLLBACK").catch(() => {}); res.status(500).json({ error: err.message }); }
+    finally { client.release(); }
   });
 
   // Skip recurring task (mark skipped, create next without breaking streak)

@@ -78,6 +78,20 @@ app.get("/settings", require("./pages/settings")(config.AUTH_SECRET));
 // ---------------------------------------------------------------------------
 // Email Scheduler
 // ---------------------------------------------------------------------------
+// Reusable SMTP transporter (created once, not per-email)
+let smtpTransporter = null;
+function getSmtpTransporter() {
+  if (!smtpTransporter && nodemailer && process.env.SMTP_HOST) {
+    smtpTransporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || "587", 10),
+      secure: process.env.SMTP_PORT === "465",
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    });
+  }
+  return smtpTransporter;
+}
+
 async function processScheduledEmails() {
   if (!nodemailer || !process.env.SMTP_HOST) return;
   try {
@@ -86,12 +100,7 @@ async function processScheduledEmails() {
     );
     for (const email of r.rows) {
       try {
-        const transporter = nodemailer.createTransport({
-          host: process.env.SMTP_HOST,
-          port: parseInt(process.env.SMTP_PORT || "587", 10),
-          secure: process.env.SMTP_PORT === "465",
-          auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-        });
+        const transporter = getSmtpTransporter();
         await transporter.sendMail({
           from: process.env.SMTP_FROM || process.env.SMTP_USER,
           to: email.recipient_email,

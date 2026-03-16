@@ -82,8 +82,9 @@ module.exports = function ({ pool, config }) {
       for (const c of contacts) {
         try {
           if (!c.name || !c.email) { errors.push({ contact: c, error: "name and email required" }); continue; }
-          if (!EMAIL_REGEX.test(c.email)) { errors.push({ contact: c, error: "invalid email" }); continue; }
-          const r = await pool.query("INSERT INTO contacts (name, email) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING *", [c.name.trim(), c.email.trim().toLowerCase()]);
+          const trimmedEmail = c.email.trim().toLowerCase();
+          if (!EMAIL_REGEX.test(trimmedEmail)) { errors.push({ contact: c, error: "invalid email" }); continue; }
+          const r = await pool.query("INSERT INTO contacts (name, email) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING *", [c.name.trim(), trimmedEmail]);
           if (r.rows[0]) imported.push(r.rows[0]);
         } catch (err) { errors.push({ contact: c, error: err.message }); }
       }

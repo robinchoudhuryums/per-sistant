@@ -325,7 +325,7 @@ async function parseQuick() {
   };
 
   document.getElementById('q-preview-content').innerHTML =
-    '<div style="font-size:13px;"><strong>To:</strong> '+(name||'?')+' &lt;'+(email||'enter email')+'&gt;<br>'+
+    '<div style="font-size:13px;"><strong>To:</strong> '+esc(name||'?')+' &lt;'+esc(email||'enter email')+'&gt;<br>'+
     '<strong>Subject:</strong> '+esc(parsedQuick.subject)+'<br>'+
     '<strong>Scheduled:</strong> '+(schedDate?schedDate.toLocaleString():'Not scheduled')+'<br><br>'+
     '<div style="white-space:pre-wrap;color:var(--text-muted)">'+esc(parsedQuick.body)+'</div></div>';

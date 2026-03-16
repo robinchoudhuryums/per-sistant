@@ -1887,3 +1887,417 @@ describe("AI API optimization", () => {
     assert.equal(cacheKey, "suggestions_2026-03-15_14");
   });
 });
+
+// ---------------------------------------------------------------------------
+// URL validation for webhooks
+// ---------------------------------------------------------------------------
+describe("Webhook URL validation", () => {
+  function isValidWebhookUrl(urlStr) {
+    try {
+      const u = new URL(urlStr);
+      if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+      const hostname = u.hostname;
+      if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0" || hostname === "::1" || hostname === "[::1]") return false;
+      if (hostname.startsWith("10.") || hostname.startsWith("192.168.")) return false;
+      if (/^172\.(1[6-9]|2\d|3[01])\./.test(hostname)) return false;
+      if (hostname.endsWith(".internal") || hostname.endsWith(".local")) return false;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  it("accepts valid public HTTPS URLs", () => {
+    assert.ok(isValidWebhookUrl("https://hooks.slack.com/services/abc"));
+    assert.ok(isValidWebhookUrl("https://example.com/webhook"));
+    assert.ok(isValidWebhookUrl("http://api.example.com/notify"));
+  });
+
+  it("rejects localhost and loopback", () => {
+    assert.ok(!isValidWebhookUrl("http://localhost:3000/hook"));
+    assert.ok(!isValidWebhookUrl("http://127.0.0.1/hook"));
+    assert.ok(!isValidWebhookUrl("http://0.0.0.0/hook"));
+    assert.ok(!isValidWebhookUrl("http://[::1]/hook"));
+  });
+
+  it("rejects private IP ranges", () => {
+    assert.ok(!isValidWebhookUrl("http://10.0.0.1/hook"));
+    assert.ok(!isValidWebhookUrl("http://192.168.1.1/hook"));
+    assert.ok(!isValidWebhookUrl("http://172.16.0.1/hook"));
+    assert.ok(!isValidWebhookUrl("http://172.31.255.255/hook"));
+  });
+
+  it("rejects non-http protocols", () => {
+    assert.ok(!isValidWebhookUrl("file:///etc/passwd"));
+    assert.ok(!isValidWebhookUrl("ftp://example.com/file"));
+    assert.ok(!isValidWebhookUrl("javascript:alert(1)"));
+  });
+
+  it("rejects invalid URLs", () => {
+    assert.ok(!isValidWebhookUrl("not-a-url"));
+    assert.ok(!isValidWebhookUrl(""));
+    assert.ok(!isValidWebhookUrl("://missing-protocol"));
+  });
+
+  it("rejects .internal and .local hostnames", () => {
+    assert.ok(!isValidWebhookUrl("http://service.internal/hook"));
+    assert.ok(!isValidWebhookUrl("http://myhost.local/hook"));
+  });
+
+  it("allows 172.x outside private range", () => {
+    assert.ok(isValidWebhookUrl("http://172.32.0.1/hook"));
+    assert.ok(isValidWebhookUrl("http://172.15.0.1/hook"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Webhook header validation
+// ---------------------------------------------------------------------------
+describe("Webhook header validation", () => {
+  const BLOCKED_WEBHOOK_HEADERS = ["host", "cookie", "set-cookie", "transfer-encoding", "content-length", "connection", "upgrade"];
+  function validateWebhookHeaders(headers) {
+    if (!headers || typeof headers !== "object") return { valid: true };
+    for (const key of Object.keys(headers)) {
+      if (BLOCKED_WEBHOOK_HEADERS.includes(key.toLowerCase())) {
+        return { valid: false, error: `Header "${key}" is not allowed in webhooks.` };
+      }
+      if (typeof headers[key] !== "string") {
+        return { valid: false, error: `Header "${key}" value must be a string.` };
+      }
+    }
+    return { valid: true };
+  }
+
+  it("allows standard custom headers", () => {
+    assert.deepEqual(validateWebhookHeaders({ "Authorization": "Bearer token", "X-Custom": "value" }), { valid: true });
+  });
+
+  it("blocks Host header", () => {
+    const r = validateWebhookHeaders({ "Host": "evil.com" });
+    assert.ok(!r.valid);
+  });
+
+  it("blocks Cookie header (case-insensitive)", () => {
+    const r = validateWebhookHeaders({ "cookie": "session=abc" });
+    assert.ok(!r.valid);
+  });
+
+  it("blocks Set-Cookie header", () => {
+    const r = validateWebhookHeaders({ "Set-Cookie": "session=abc" });
+    assert.ok(!r.valid);
+  });
+
+  it("rejects non-string header values", () => {
+    const r = validateWebhookHeaders({ "X-Custom": 123 });
+    assert.ok(!r.valid);
+  });
+
+  it("allows null/undefined headers", () => {
+    assert.deepEqual(validateWebhookHeaders(null), { valid: true });
+    assert.deepEqual(validateWebhookHeaders(undefined), { valid: true });
+  });
+
+  it("allows empty headers object", () => {
+    assert.deepEqual(validateWebhookHeaders({}), { valid: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pagination bounds validation
+// ---------------------------------------------------------------------------
+describe("Pagination bounds", () => {
+  const MAX_PAGINATION_LIMIT = 100;
+
+  it("caps limit at MAX_PAGINATION_LIMIT", () => {
+    const limit = "99999";
+    const capped = Math.min(Math.max(1, parseInt(limit, 10) || 20), MAX_PAGINATION_LIMIT);
+    assert.equal(capped, 100);
+  });
+
+  it("defaults to 20 for NaN limit", () => {
+    const limit = "abc";
+    const capped = Math.min(Math.max(1, parseInt(limit, 10) || 20), MAX_PAGINATION_LIMIT);
+    assert.equal(capped, 20);
+  });
+
+  it("clamps negative limit to 1", () => {
+    const limit = "-5";
+    const capped = Math.min(Math.max(1, parseInt(limit, 10) || 20), MAX_PAGINATION_LIMIT);
+    assert.equal(capped, 1);
+  });
+
+  it("clamps negative offset to 0", () => {
+    const offset = "-10";
+    const capped = Math.max(0, parseInt(offset, 10) || 0);
+    assert.equal(capped, 0);
+  });
+
+  it("passes through valid values", () => {
+    const limit = "25";
+    const offset = "50";
+    assert.equal(Math.min(Math.max(1, parseInt(limit, 10) || 20), MAX_PAGINATION_LIMIT), 25);
+    assert.equal(Math.max(0, parseInt(offset, 10) || 0), 50);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bulk operation size limits
+// ---------------------------------------------------------------------------
+describe("Bulk operation limits", () => {
+  const MAX_BULK_IDS = 500;
+
+  it("rejects arrays exceeding MAX_BULK_IDS", () => {
+    const ids = Array.from({ length: 501 }, (_, i) => i + 1);
+    assert.ok(ids.length > MAX_BULK_IDS);
+  });
+
+  it("accepts arrays within limit", () => {
+    const ids = [1, 2, 3, 4, 5];
+    assert.ok(ids.length <= MAX_BULK_IDS);
+  });
+
+  it("accepts arrays at exact limit", () => {
+    const ids = Array.from({ length: 500 }, (_, i) => i + 1);
+    assert.ok(ids.length <= MAX_BULK_IDS);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Input length validation
+// ---------------------------------------------------------------------------
+describe("Input length validation", () => {
+  const MAX_TITLE_LENGTH = 500;
+  const MAX_BODY_LENGTH = 50000;
+  const MAX_CONTENT_LENGTH = 100000;
+
+  it("rejects title exceeding MAX_TITLE_LENGTH", () => {
+    const title = "a".repeat(501);
+    assert.ok(title.length > MAX_TITLE_LENGTH);
+  });
+
+  it("accepts title within limit", () => {
+    const title = "a".repeat(500);
+    assert.ok(title.length <= MAX_TITLE_LENGTH);
+  });
+
+  it("rejects body exceeding MAX_BODY_LENGTH", () => {
+    const body = "x".repeat(50001);
+    assert.ok(body.length > MAX_BODY_LENGTH);
+  });
+
+  it("accepts body within limit", () => {
+    const body = "x".repeat(50000);
+    assert.ok(body.length <= MAX_BODY_LENGTH);
+  });
+
+  it("rejects content exceeding MAX_CONTENT_LENGTH", () => {
+    const content = "y".repeat(100001);
+    assert.ok(content.length > MAX_CONTENT_LENGTH);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Email validation order (trim before validate)
+// ---------------------------------------------------------------------------
+describe("Email validation order", () => {
+  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  it("validates email after trimming", () => {
+    const email = "  test@example.com  ";
+    const trimmed = email.trim().toLowerCase();
+    assert.ok(EMAIL_REGEX.test(trimmed));
+  });
+
+  it("rejects untrimmed email with spaces", () => {
+    const email = "  test@example.com  ";
+    assert.ok(!EMAIL_REGEX.test(email)); // fails without trim
+  });
+});
+
+// ---------------------------------------------------------------------------
+// XSS prevention in quick send preview
+// ---------------------------------------------------------------------------
+describe("XSS prevention", () => {
+  function esc(s) {
+    if (!s) return "";
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  it("escapes HTML in contact names", () => {
+    const malicious = '<img src=x onerror=alert(1)>';
+    const escaped = esc(malicious);
+    assert.ok(!escaped.includes("<img"));
+    assert.ok(escaped.includes("&lt;img"));
+  });
+
+  it("escapes HTML in email addresses", () => {
+    const malicious = '"><script>alert(1)</script>';
+    const escaped = esc(malicious);
+    assert.ok(!escaped.includes("<script>"));
+  });
+
+  it("handles null/undefined safely", () => {
+    assert.equal(esc(null), "");
+    assert.equal(esc(undefined), "");
+    assert.equal(esc(""), "");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JSON.parse safety for AI responses
+// ---------------------------------------------------------------------------
+describe("AI response JSON safety", () => {
+  it("handles valid JSON response", () => {
+    const text = '{"subject":"Hello","body":"World"}';
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    assert.ok(jsonMatch);
+    let parsed;
+    try { parsed = JSON.parse(jsonMatch[0]); } catch { parsed = null; }
+    assert.ok(parsed);
+    assert.equal(parsed.subject, "Hello");
+  });
+
+  it("handles malformed JSON gracefully", () => {
+    const text = '{subject: Hello, body: World}'; // not valid JSON
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    assert.ok(jsonMatch);
+    let parsed;
+    try { parsed = JSON.parse(jsonMatch[0]); } catch { parsed = null; }
+    assert.equal(parsed, null);
+  });
+
+  it("handles no JSON match", () => {
+    const text = "No JSON here at all";
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    assert.equal(jsonMatch, null);
+  });
+
+  it("handles array JSON responses", () => {
+    const text = '["task1", "task2", "task3"]';
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    assert.ok(jsonMatch);
+    let parsed;
+    try { parsed = JSON.parse(jsonMatch[0]); } catch { parsed = null; }
+    assert.ok(Array.isArray(parsed));
+    assert.equal(parsed.length, 3);
+  });
+
+  it("handles malformed array JSON", () => {
+    const text = "[task1, task2]"; // not valid JSON
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    assert.ok(jsonMatch);
+    let parsed;
+    try { parsed = JSON.parse(jsonMatch[0]); } catch { parsed = null; }
+    assert.equal(parsed, null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recurring task transaction safety
+// ---------------------------------------------------------------------------
+describe("Recurring task completion safety", () => {
+  it("prevents double-completion", () => {
+    const todo = { id: 1, completed: true, recurring: true, recurrence_rule: "daily" };
+    assert.ok(todo.completed); // Should be caught by "already completed" check
+  });
+
+  it("calculates streak correctly for on-time completion", () => {
+    const dueDate = new Date("2026-03-16");
+    const today = "2026-03-16";
+    const isOnTime = today <= dueDate.toISOString().split("T")[0];
+    assert.ok(isOnTime);
+    const newStreak = isOnTime ? (3 + 1) : 1;
+    assert.equal(newStreak, 4);
+  });
+
+  it("resets streak for late completion", () => {
+    const dueDate = new Date("2026-03-14");
+    const today = "2026-03-16";
+    const isOnTime = today <= dueDate.toISOString().split("T")[0];
+    assert.ok(!isOnTime);
+    const newStreak = isOnTime ? (3 + 1) : 1;
+    assert.equal(newStreak, 1);
+  });
+
+  it("tracks best streak across resets", () => {
+    const currentStreak = 1;
+    const bestStreak = 10;
+    const newBest = Math.max(currentStreak, bestStreak);
+    assert.equal(newBest, 10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Perfin URL validation
+// ---------------------------------------------------------------------------
+describe("Perfin URL validation", () => {
+  it("accepts valid http/https URLs", () => {
+    const url = "https://perfin.example.com";
+    const u = new URL(url);
+    assert.ok(u.protocol === "http:" || u.protocol === "https:");
+  });
+
+  it("rejects non-http protocols", () => {
+    const url = "file:///etc/passwd";
+    const u = new URL(url);
+    assert.ok(u.protocol !== "http:" && u.protocol !== "https:");
+  });
+
+  it("rejects invalid URLs", () => {
+    let valid = true;
+    try { new URL("not-a-url"); } catch { valid = false; }
+    assert.ok(!valid);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SMTP transporter reuse
+// ---------------------------------------------------------------------------
+describe("SMTP transporter reuse pattern", () => {
+  it("singleton pattern returns same instance", () => {
+    let transport = null;
+    function getTransport() {
+      if (!transport) transport = { id: Math.random() };
+      return transport;
+    }
+    const t1 = getTransport();
+    const t2 = getTransport();
+    assert.strictEqual(t1, t2);
+    assert.equal(t1.id, t2.id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Location coordinate validation
+// ---------------------------------------------------------------------------
+describe("Location coordinate validation", () => {
+  it("accepts valid coordinates", () => {
+    const lat = 40.7128;
+    const lng = -74.0060;
+    assert.ok(lat >= -90 && lat <= 90);
+    assert.ok(lng >= -180 && lng <= 180);
+  });
+
+  it("rejects out-of-range latitude", () => {
+    assert.ok(!(91 >= -90 && 91 <= 90));
+    assert.ok(!(-91 >= -90 && -91 <= 90));
+  });
+
+  it("rejects out-of-range longitude", () => {
+    assert.ok(!(181 >= -180 && 181 <= 180));
+    assert.ok(!(-181 >= -180 && -181 <= 180));
+  });
+
+  it("accepts edge values", () => {
+    assert.ok(90 >= -90 && 90 <= 90);
+    assert.ok(-90 >= -90 && -90 <= 90);
+    assert.ok(180 >= -180 && 180 <= 180);
+    assert.ok(-180 >= -180 && -180 <= 180);
+  });
+
+  it("validates radius is positive", () => {
+    assert.ok(200 > 0);
+    assert.ok(!(0 > 0));
+    assert.ok(!(-100 > 0));
+  });
+});

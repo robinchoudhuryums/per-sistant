@@ -31,6 +31,46 @@ const VALID_WEBHOOK_EVENTS = ["todo_created", "todo_completed", "email_sent", "n
 const VALID_TRIGGERS = ["todo_created", "todo_completed", "email_created", "note_created", "schedule"];
 const VALID_ACTIONS = ["set_priority", "set_category", "set_horizon", "add_tag", "send_notification", "create_todo"];
 
+// Input length limits
+const MAX_TITLE_LENGTH = 500;
+const MAX_BODY_LENGTH = 50000;
+const MAX_CONTENT_LENGTH = 100000;
+const MAX_BULK_IDS = 500;
+const MAX_PAGINATION_LIMIT = 100;
+
+// URL validation for webhooks/external requests
+function isValidWebhookUrl(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    // Block private/internal IPs
+    const hostname = u.hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0" || hostname === "::1" || hostname === "[::1]") return false;
+    if (hostname.startsWith("10.") || hostname.startsWith("192.168.")) return false;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(hostname)) return false;
+    if (hostname.endsWith(".internal") || hostname.endsWith(".local")) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Webhook header allowlist
+const BLOCKED_WEBHOOK_HEADERS = ["host", "cookie", "set-cookie", "transfer-encoding", "content-length", "connection", "upgrade"];
+
+function validateWebhookHeaders(headers) {
+  if (!headers || typeof headers !== "object") return { valid: true };
+  for (const key of Object.keys(headers)) {
+    if (BLOCKED_WEBHOOK_HEADERS.includes(key.toLowerCase())) {
+      return { valid: false, error: `Header "${key}" is not allowed in webhooks.` };
+    }
+    if (typeof headers[key] !== "string") {
+      return { valid: false, error: `Header "${key}" value must be a string.` };
+    }
+  }
+  return { valid: true };
+}
+
 module.exports = {
   SESSION_PASSWORD, SESSION_PIN, AUTH_SECRET, AUTH_MODE, SESSION_SECRET, PERFIN_URL,
   envContacts,
@@ -38,4 +78,7 @@ module.exports = {
   VALID_NOTE_COLORS, VALID_EMAIL_STATUSES, EMAIL_REGEX,
   VALID_AI_FEATURES, VALID_WEBHOOK_EVENTS,
   VALID_TRIGGERS, VALID_ACTIONS,
+  MAX_TITLE_LENGTH, MAX_BODY_LENGTH, MAX_CONTENT_LENGTH,
+  MAX_BULK_IDS, MAX_PAGINATION_LIMIT,
+  isValidWebhookUrl, validateWebhookHeaders, BLOCKED_WEBHOOK_HEADERS,
 };
