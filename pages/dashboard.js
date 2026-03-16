@@ -44,33 +44,48 @@ ${themeScript()}
           <svg class="tree-svg" id="tree-svg" viewBox="0 0 280 280" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <linearGradient id="platform-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" style="stop-color:rgba(107,159,159,0.3)"/>
-                <stop offset="100%" style="stop-color:rgba(160,140,212,0.2)"/>
+                <stop offset="0%" style="stop-color:rgba(77,184,199,0.3)"/>
+                <stop offset="100%" style="stop-color:rgba(230,164,74,0.2)"/>
               </linearGradient>
               <linearGradient id="trunk-grad" x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" style="stop-color:#8b6b4a"/>
                 <stop offset="100%" style="stop-color:#5c4632"/>
               </linearGradient>
               <linearGradient id="pot-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" style="stop-color:rgba(107,159,159,0.35)"/>
-                <stop offset="100%" style="stop-color:rgba(80,120,120,0.25)"/>
+                <stop offset="0%" style="stop-color:rgba(77,184,199,0.35)"/>
+                <stop offset="100%" style="stop-color:rgba(60,140,155,0.25)"/>
               </linearGradient>
               <radialGradient id="leaf-glow" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" style="stop-color:rgba(111,207,151,0.5)"/>
-                <stop offset="100%" style="stop-color:rgba(111,207,151,0)"/>
+                <stop offset="0%" style="stop-color:rgba(92,201,138,0.5)"/>
+                <stop offset="100%" style="stop-color:rgba(92,201,138,0)"/>
               </radialGradient>
+              <linearGradient id="energy-grad" x1="0%" y1="100%" x2="0%" y2="0%">
+                <stop offset="0%" style="stop-color:rgba(240,200,80,0.0)"/>
+                <stop offset="40%" style="stop-color:rgba(240,200,80,0.9)"/>
+                <stop offset="70%" style="stop-color:rgba(91,168,230,0.8)"/>
+                <stop offset="100%" style="stop-color:rgba(92,201,138,0.0)"/>
+              </linearGradient>
+              <linearGradient id="energy-branch-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" style="stop-color:rgba(240,200,80,0.0)"/>
+                <stop offset="50%" style="stop-color:rgba(77,184,199,0.8)"/>
+                <stop offset="100%" style="stop-color:rgba(92,201,138,0.0)"/>
+              </linearGradient>
               <filter id="glow-filter">
                 <feGaussianBlur stdDeviation="2.5" result="blur"/>
                 <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
               </filter>
+              <filter id="energy-glow">
+                <feGaussianBlur stdDeviation="3" result="blur"/>
+                <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+              </filter>
             </defs>
             <!-- Isometric platform -->
-            <polygon points="140,252 50,218 140,184 230,218" fill="url(#platform-grad)" stroke="rgba(107,159,159,0.4)" stroke-width="0.5"/>
-            <polygon points="140,252 50,218 50,225 140,259" fill="rgba(107,159,159,0.12)"/>
-            <polygon points="140,252 230,218 230,225 140,259" fill="rgba(160,140,212,0.10)"/>
+            <polygon points="140,252 50,218 140,184 230,218" fill="url(#platform-grad)" stroke="rgba(77,184,199,0.4)" stroke-width="0.5"/>
+            <polygon points="140,252 50,218 50,225 140,259" fill="rgba(77,184,199,0.12)"/>
+            <polygon points="140,252 230,218 230,225 140,259" fill="rgba(230,164,74,0.10)"/>
             <!-- Bonsai pot (isometric) -->
-            <polygon points="140,230 108,218 112,200 168,200 172,218" fill="url(#pot-grad)" stroke="rgba(107,159,159,0.5)" stroke-width="0.8"/>
-            <polygon points="112,200 168,200 165,196 115,196" fill="rgba(107,159,159,0.2)" stroke="rgba(107,159,159,0.3)" stroke-width="0.5"/>
+            <polygon points="140,230 108,218 112,200 168,200 172,218" fill="url(#pot-grad)" stroke="rgba(77,184,199,0.5)" stroke-width="0.8"/>
+            <polygon points="112,200 168,200 165,196 115,196" fill="rgba(77,184,199,0.2)" stroke="rgba(77,184,199,0.3)" stroke-width="0.5"/>
             <!-- Pot soil -->
             <ellipse cx="140" cy="199" rx="25" ry="4" fill="rgba(92,70,50,0.6)"/>
             <!-- Bonsai trunk — elegant curved shape -->
@@ -85,14 +100,28 @@ ${themeScript()}
             <path d="M125,150 C118,152 110,148 105,144" stroke="#6b4d35" stroke-width="3" fill="none" stroke-linecap="round"/>
             <!-- Branch top-left -->
             <path d="M133,125 C125,118 118,112 112,108" stroke="#6b4d35" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+            <!-- Energy pulse — animated light traveling up trunk and branches -->
+            <g id="tree-energy" opacity="0.7">
+              <!-- Main trunk pulse -->
+              <path d="M140,196 C140,185 138,175 130,165 C122,155 118,148 120,138 C122,128 128,122 135,118" stroke="url(#energy-grad)" stroke-width="3" fill="none" stroke-linecap="round" class="energy-pulse"/>
+              <path d="M140,196 C140,185 138,175 130,165 C122,155 118,148 120,138 C122,128 128,122 135,118" stroke="url(#energy-grad)" stroke-width="3" fill="none" stroke-linecap="round" class="energy-pulse" style="animation-delay:-1.5s;"/>
+              <!-- Right branch pulse -->
+              <path d="M130,160 C140,152 152,148 162,140" stroke="url(#energy-branch-grad)" stroke-width="2" fill="none" stroke-linecap="round" class="energy-branch-pulse" style="animation-delay:-0.5s;"/>
+              <!-- Right-upper branch pulse -->
+              <path d="M155,145 C160,138 168,132 172,125" stroke="url(#energy-branch-grad)" stroke-width="2" fill="none" stroke-linecap="round" class="energy-branch-pulse" style="animation-delay:-1.2s;"/>
+              <!-- Left branch pulse -->
+              <path d="M125,150 C118,152 110,148 105,144" stroke="url(#energy-branch-grad)" stroke-width="2" fill="none" stroke-linecap="round" class="energy-branch-pulse" style="animation-delay:-0.8s;"/>
+              <!-- Top-left branch pulse -->
+              <path d="M133,125 C125,118 118,112 112,108" stroke="url(#energy-branch-grad)" stroke-width="2" fill="none" stroke-linecap="round" class="energy-branch-pulse" style="animation-delay:-1.8s;"/>
+            </g>
             <!-- Leaf cluster group (populated by JS) -->
             <g id="tree-leaves" filter="url(#glow-filter)"></g>
             <!-- Streak fire at top -->
             <g id="tree-streak" style="display:none">
-              <circle cx="135" cy="85" r="10" fill="rgba(232,200,109,0.3)">
+              <circle cx="135" cy="85" r="10" fill="rgba(240,200,80,0.3)">
                 <animate attributeName="r" values="8;12;8" dur="2s" repeatCount="indefinite"/>
               </circle>
-              <text x="135" y="89" text-anchor="middle" font-size="14" fill="#e8c86d">&#x1F525;</text>
+              <text x="135" y="89" text-anchor="middle" font-size="14" fill="#f0c850">&#x1F525;</text>
             </g>
           </svg>
         </div>
