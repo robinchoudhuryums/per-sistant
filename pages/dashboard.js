@@ -1,4 +1,5 @@
 const { pageHead, navBar, themeScript } = require("../views");
+const { getDragonSVG } = require("../dragon-svg");
 
 module.exports = function() {
   return (req, res) => {
@@ -88,19 +89,6 @@ ${themeScript()}
                 <stop offset="0%" style="stop-color:rgba(77,200,210,0.5)"/>
                 <stop offset="100%" style="stop-color:rgba(77,200,210,0)"/>
               </radialGradient>
-              <linearGradient id="dragon-back" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" style="stop-color:#1a6068"/>
-                <stop offset="100%" style="stop-color:#2a8a8a"/>
-              </linearGradient>
-              <linearGradient id="dragon-belly-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" style="stop-color:#d8e8ec"/>
-                <stop offset="100%" style="stop-color:#e8f0f2"/>
-              </linearGradient>
-              <linearGradient id="dragon-mane-grad" x1="0%" y1="100%" x2="0%" y2="0%">
-                <stop offset="0%" style="stop-color:#40c8c8"/>
-                <stop offset="60%" style="stop-color:#60e0d8"/>
-                <stop offset="100%" style="stop-color:#80f0e8"/>
-              </linearGradient>
               <filter id="dragon-shadow">
                 <feGaussianBlur stdDeviation="1.2" result="blur"/>
                 <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
@@ -110,119 +98,22 @@ ${themeScript()}
             <polygon points="140,252 50,218 140,184 230,218" fill="url(#platform-grad)" stroke="rgba(77,184,199,0.4)" stroke-width="0.5"/>
             <polygon points="140,252 50,218 50,225 140,259" fill="rgba(77,184,199,0.12)"/>
             <polygon points="140,252 230,218 230,225 140,259" fill="rgba(230,164,74,0.10)"/>
-            <!-- Sleeping Eastern Dragon (Haku-style) coiled around pot base -->
+            <!-- Haku dragon (converted from reference image) curled near pot base -->
             <g id="dragon-group" filter="url(#dragon-shadow)">
               <!-- Dragon glow aura -->
               <ellipse id="dragon-aura" cx="140" cy="242" rx="70" ry="16" fill="url(#dragon-glow)" opacity="0.4">
                 <animate attributeName="opacity" values="0.25;0.55;0.25" dur="4s" repeatCount="indefinite"/>
               </ellipse>
-
-              <!-- === SERPENTINE BODY — long smooth coil around pot === -->
-              <!-- Tail end — tapers to a fine point curling up on the right -->
-              <path d="M218,222 C226,216 232,208 230,200 C228,192 220,190 212,196 C206,200 200,208 196,214"
-                stroke="url(#dragon-back)" stroke-width="4" fill="none" stroke-linecap="round"/>
-              <!-- Tail tuft — flowing wispy end like Haku -->
-              <g opacity="0.6">
-                <path d="M230,200 C234,194 236,188 233,184" stroke="#50c8c0" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-                <path d="M230,200 C236,196 240,192 238,186" stroke="#60d8d0" stroke-width="1" fill="none" stroke-linecap="round"/>
-                <path d="M228,198 C232,192 232,186 230,182" stroke="#70e0d8" stroke-width="0.8" fill="none" stroke-linecap="round"/>
+              <!-- Haku SVG scaled and positioned near pot -->
+              <g transform="translate(62,168) scale(0.088)">
+                ${getDragonSVG()}
               </g>
-
-              <!-- Main body — coiling around pot front, right to left -->
-              <!-- Back (teal/green side) -->
-              <path d="M196,214 C184,218 168,226 152,232 C136,238 118,240 104,238 C88,234 76,226 72,216 C70,210 72,204 76,200"
-                stroke="url(#dragon-back)" stroke-width="8" fill="none" stroke-linecap="round"/>
-              <!-- Belly (white/light underside) — offset slightly -->
-              <path d="M194,216 C182,220 166,228 150,234 C134,240 116,241 102,238 C88,234 78,228 74,220"
-                stroke="url(#dragon-belly-grad)" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.7"/>
-
-              <!-- Teal mane flowing along the spine -->
-              <g opacity="0.7">
-                <path d="M194,212 C192,206 194,202 196,200" stroke="url(#dragon-mane-grad)" stroke-width="2" fill="none" stroke-linecap="round"/>
-                <path d="M182,216 C180,210 181,206 183,203" stroke="url(#dragon-mane-grad)" stroke-width="2.2" fill="none" stroke-linecap="round"/>
-                <path d="M168,222 C165,216 166,210 168,207" stroke="url(#dragon-mane-grad)" stroke-width="2.4" fill="none" stroke-linecap="round"/>
-                <path d="M154,228 C151,222 152,216 154,213" stroke="url(#dragon-mane-grad)" stroke-width="2.2" fill="none" stroke-linecap="round"/>
-                <path d="M140,234 C137,228 138,223 140,220" stroke="url(#dragon-mane-grad)" stroke-width="2" fill="none" stroke-linecap="round"/>
-                <path d="M126,237 C123,232 124,227 126,224" stroke="url(#dragon-mane-grad)" stroke-width="1.8" fill="none" stroke-linecap="round"/>
-                <path d="M112,238 C110,233 110,228 112,226" stroke="url(#dragon-mane-grad)" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-                <path d="M98,234 C96,230 97,226 98,224" stroke="url(#dragon-mane-grad)" stroke-width="1.2" fill="none" stroke-linecap="round"/>
-              </g>
-
-              <!-- Body coil continues — loops up behind the pot -->
-              <path d="M76,200 C80,192 90,186 102,186 C114,186 124,192 128,200"
-                stroke="url(#dragon-back)" stroke-width="6" fill="none" stroke-linecap="round" opacity="0.5"/>
-              <path d="M78,198 C82,190 92,185 104,185 C116,185 125,190 129,198"
-                stroke="url(#dragon-belly-grad)" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.3"/>
-
-              <!-- Small paw/claw resting on platform (just visible) -->
-              <g opacity="0.7">
-                <path d="M80,218 C78,222 80,226 84,226" stroke="#1a6068" stroke-width="2" fill="none" stroke-linecap="round"/>
-                <path d="M84,226 L82,229" stroke="#2a8a8a" stroke-width="0.8" stroke-linecap="round"/>
-                <path d="M86,226 L85,229" stroke="#2a8a8a" stroke-width="0.8" stroke-linecap="round"/>
-                <path d="M88,225 L88,228" stroke="#2a8a8a" stroke-width="0.8" stroke-linecap="round"/>
-              </g>
-
-              <!-- === HEAD — elongated, elegant, resting near pot === -->
-              <!-- Neck leading to head -->
-              <path d="M76,200 C68,198 60,198 56,204 C54,208 56,212 60,214"
-                stroke="url(#dragon-back)" stroke-width="6" fill="none" stroke-linecap="round"/>
-              <path d="M74,202 C66,200 58,200 55,206 C53,210 55,213 58,214"
-                stroke="url(#dragon-belly-grad)" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.6"/>
-
-              <!-- Head shape — elongated fox-like snout like Haku -->
-              <ellipse cx="52" cy="208" rx="10" ry="6.5" fill="#1a6068" transform="rotate(-8,52,208)"/>
-              <!-- White/light face underside -->
-              <path d="M44,210 C46,212 50,213 56,212 C60,211 62,209 60,208"
-                fill="#d8e8ec" opacity="0.5"/>
-              <!-- Snout — long and narrow -->
-              <path d="M42,206 C38,205 36,207 36,209 C36,211 38,212 42,211"
-                fill="#1a6068" stroke="#155058" stroke-width="0.3"/>
-              <!-- White snout underside -->
-              <path d="M38,209 C39,211 41,212 44,211" fill="#d8e8ec" opacity="0.4"/>
-              <!-- Nostril -->
-              <circle cx="37" cy="208" r="0.8" fill="#0d3038"/>
-              <!-- Nose tip highlight -->
-              <ellipse cx="36.5" cy="208" rx="1" ry="0.6" fill="#2a7878" opacity="0.3"/>
-
-              <!-- Mane tuft on head — flowing teal hair -->
-              <g opacity="0.8">
-                <path d="M56,202 C54,196 56,190 60,186" stroke="#50c8c0" stroke-width="1.8" fill="none" stroke-linecap="round"/>
-                <path d="M58,202 C57,196 60,190 64,187" stroke="#60d8d0" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-                <path d="M60,203 C60,198 63,192 66,189" stroke="#70e8e0" stroke-width="1.2" fill="none" stroke-linecap="round"/>
-                <path d="M54,203 C52,198 52,192 55,188" stroke="#40b8b0" stroke-width="1.3" fill="none" stroke-linecap="round"/>
-              </g>
-
-              <!-- Antler-style horns — elegant, branching -->
-              <g opacity="0.85">
-                <path d="M54,202 C52,196 50,190 52,186" stroke="#e0dcd0" stroke-width="1.4" fill="none" stroke-linecap="round"/>
-                <path d="M50,190 C48,187 46,186 44,185" stroke="#e0dcd0" stroke-width="0.9" fill="none" stroke-linecap="round"/>
-                <path d="M51,192 C53,190 55,188 56,186" stroke="#e0dcd0" stroke-width="0.8" fill="none" stroke-linecap="round"/>
-                <path d="M48,204 C46,198 44,192 46,188" stroke="#e0dcd0" stroke-width="1.3" fill="none" stroke-linecap="round"/>
-                <path d="M45,192 C43,190 41,189 40,188" stroke="#e0dcd0" stroke-width="0.8" fill="none" stroke-linecap="round"/>
-              </g>
-
-              <!-- Long whiskers — flowing, elegant -->
-              <g opacity="0.45">
-                <path d="M38,208 C30,204 22,202 16,204" stroke="#d8e8ec" stroke-width="0.7" fill="none" stroke-linecap="round">
-                  <animate attributeName="d" values="M38,208 C30,204 22,202 16,204;M38,208 C30,205 22,204 16,206;M38,208 C30,204 22,202 16,204" dur="6s" repeatCount="indefinite"/>
-                </path>
-                <path d="M38,210 C30,212 22,216 16,218" stroke="#d8e8ec" stroke-width="0.6" fill="none" stroke-linecap="round">
-                  <animate attributeName="d" values="M38,210 C30,212 22,216 16,218;M38,210 C30,214 22,218 16,220;M38,210 C30,212 22,216 16,218" dur="7s" repeatCount="indefinite"/>
-                </path>
-              </g>
-
-              <!-- Eye — closed peacefully while sleeping -->
-              <path id="dragon-eye" d="M47,206 C49,205 51,205 53,206" stroke="#0d3038" stroke-width="1.2" fill="none" stroke-linecap="round"/>
-              <!-- Eye glint area (hidden when asleep) -->
-              <circle id="dragon-eye-bg" cx="50" cy="205.5" r="2" fill="#0d3038" opacity="0"/>
-
               <!-- Zzz sleep indicators -->
               <g id="dragon-zzz" opacity="0.5">
-                <text x="32" y="200" font-size="6" fill="#60d8d0" font-style="italic" opacity="0.7">z</text>
-                <text x="26" y="193" font-size="8" fill="#60d8d0" font-style="italic" opacity="0.5">z</text>
-                <text x="22" y="184" font-size="10" fill="#60d8d0" font-style="italic" opacity="0.3">z</text>
+                <text x="60" y="172" font-size="6" fill="#60d8d0" font-style="italic" opacity="0.7">z</text>
+                <text x="54" y="165" font-size="8" fill="#60d8d0" font-style="italic" opacity="0.5">z</text>
+                <text x="50" y="156" font-size="10" fill="#60d8d0" font-style="italic" opacity="0.3">z</text>
               </g>
-
               <!-- Gentle breathing animation -->
               <animateTransform attributeName="transform" type="translate" values="0,0;0,-0.4;0,0" dur="4s" repeatCount="indefinite"/>
             </g>
@@ -775,11 +666,9 @@ function updateTree(stats, streakData) {
   // Dragon state — reacts to health and streak
   var dragonGroup = document.getElementById('dragon-group');
   var dragonAura = document.getElementById('dragon-aura');
-  var dragonEye = document.getElementById('dragon-eye');
-  var dragonEyeBg = document.getElementById('dragon-eye-bg');
   var dragonZzz = document.getElementById('dragon-zzz');
   if (dragonGroup) {
-    // Aura intensity based on health
+    // Aura intensity and glow based on health
     if (health > 70) {
       dragonAura.setAttribute('opacity', '0.55');
       dragonGroup.style.filter = 'url(#dragon-shadow) drop-shadow(0 0 10px rgba(80,200,200,0.35))';
@@ -790,22 +679,16 @@ function updateTree(stats, streakData) {
       dragonAura.setAttribute('opacity', '0.12');
       dragonGroup.style.filter = 'url(#dragon-shadow)';
     }
-    // Eye state: sleeping peacefully (high health) vs restless (low health)
+    // Zzz visibility: sleeping when healthy, awake when tasks need attention
     if (health > 50) {
-      dragonEye.setAttribute('d', 'M47,206 C49,205 51,205 53,206'); // closed, peaceful
-      dragonEye.setAttribute('fill', 'none');
-      if (dragonEyeBg) dragonEyeBg.setAttribute('opacity', '0');
       dragonZzz.style.display = 'block';
+      dragonGroup.style.opacity = '1';
     } else if (health > 20) {
-      dragonEye.setAttribute('d', 'M47,206 C49,204.5 51,204.5 53,206'); // half open
-      dragonEye.setAttribute('fill', 'none');
-      if (dragonEyeBg) dragonEyeBg.setAttribute('opacity', '0.5');
       dragonZzz.style.display = 'none';
+      dragonGroup.style.opacity = '0.85';
     } else {
-      dragonEye.setAttribute('d', 'M47,205.5 C49,203.5 51,203.5 53,205.5 C51,207.5 49,207.5 47,205.5'); // fully open, alert
-      dragonEye.setAttribute('fill', '#d4a574');
-      if (dragonEyeBg) { dragonEyeBg.setAttribute('opacity', '0.8'); dragonEyeBg.setAttribute('fill', '#0d3038'); }
       dragonZzz.style.display = 'none';
+      dragonGroup.style.opacity = '0.7';
     }
     // Streak glow — dragon glows golden when streak is active
     if (currentStreak >= 5) {
