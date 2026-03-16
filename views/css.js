@@ -426,10 +426,10 @@ module.exports = `
     .tree-container {
       position: relative; width: 280px; height: 280px;
       perspective: 800px; transform-style: preserve-3d;
-      overflow: hidden;
+      overflow: visible;
     }
     .tree-svg {
-      width: 100%; height: 100%;
+      width: 100%; height: 100%; overflow: visible;
       filter: drop-shadow(0 20px 40px rgba(77,184,199,0.2)) drop-shadow(0 8px 16px rgba(230,164,74,0.15));
       animation: treeFloat 6s ease-in-out infinite;
     }
