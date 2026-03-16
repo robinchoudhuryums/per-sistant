@@ -47,8 +47,8 @@ function startKeepAlive(port) {
     }
     try {
       await fetch(pingUrl);
-    } catch {
-      // Silently ignore
+    } catch (err) {
+      console.warn("Keep-alive ping failed:", err.message);
     }
   }, INTERVAL);
   keepAliveInterval.unref(); // Don't prevent process exit

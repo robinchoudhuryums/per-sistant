@@ -6,7 +6,7 @@ const express = require("express");
 
 module.exports = function ({ pool, config, helpers }) {
   const router = express.Router();
-  const { VALID_WEBHOOK_EVENTS } = config;
+  const { VALID_WEBHOOK_EVENTS, isValidWebhookUrl, validateWebhookHeaders } = config;
   const { sendWebhook } = helpers;
 
   router.get("/api/webhooks", async (req, res) => {
@@ -20,8 +20,13 @@ module.exports = function ({ pool, config, helpers }) {
     try {
       const { name, url, events, headers } = req.body;
       if (!name || !url) return res.status(400).json({ error: "Name and URL are required." });
+      if (!isValidWebhookUrl(url)) return res.status(400).json({ error: "Invalid webhook URL. Must be a public http/https URL." });
       if (events && !events.every(e => VALID_WEBHOOK_EVENTS.includes(e))) {
         return res.status(400).json({ error: "Invalid events. Must be: " + VALID_WEBHOOK_EVENTS.join(", ") });
+      }
+      if (headers) {
+        const hv = validateWebhookHeaders(headers);
+        if (!hv.valid) return res.status(400).json({ error: hv.error });
       }
       const r = await pool.query(
         "INSERT INTO webhooks (name, url, events, headers) VALUES ($1,$2,$3,$4) RETURNING *",
@@ -34,6 +39,11 @@ module.exports = function ({ pool, config, helpers }) {
   router.patch("/api/webhooks/:id", async (req, res) => {
     try {
       const { name, url, events, headers, enabled } = req.body;
+      if (url !== undefined && !isValidWebhookUrl(url)) return res.status(400).json({ error: "Invalid webhook URL. Must be a public http/https URL." });
+      if (headers !== undefined) {
+        const hv = validateWebhookHeaders(headers);
+        if (!hv.valid) return res.status(400).json({ error: hv.error });
+      }
       const fields = []; const params = []; let idx = 1;
       if (name !== undefined) { fields.push(`name = $${idx++}`); params.push(name); }
       if (url !== undefined) { fields.push(`url = $${idx++}`); params.push(url); }

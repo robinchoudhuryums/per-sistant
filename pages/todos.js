@@ -277,17 +277,18 @@ async function load() {
       recurInfo = '<span class="badge recurring">'+ruleLabel+'</span>';
     }
     var skipSnoozeButtons = t.recurring && !t.completed ? '<button data-action="skip" data-id="'+t.id+'" title="Skip this occurrence" style="font-size:10px;padding:2px 6px;">Skip</button><button data-action="snooze" data-id="'+t.id+'" title="Snooze" style="font-size:10px;padding:2px 6px;">&#128164;</button>' : '';
-    return '<div class="todo-item'+(isBlocked?' todo-blocked':'')+'" draggable="true" data-id="'+t.id+'" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)" ondragend="dragEnd(event)"><input type="checkbox" class="bulk-check" data-id="'+t.id+'" style="display:'+(selectMode?'inline-block':'none')+';accent-color:var(--warm);margin-right:4px;cursor:pointer;"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" data-action="toggle" data-id="'+t.id+'" data-completed="'+(!t.completed)+'" data-recurring="'+!!t.recurring+'"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+recurInfo+depBadges+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions">'+skipSnoozeButtons+'<button data-action="edit" data-id="'+t.id+'">&#9998;</button></div></div>';
+    return '<div class="todo-item'+(isBlocked?' todo-blocked':'')+'" draggable="true" data-id="'+t.id+'"><input type="checkbox" class="bulk-check" data-id="'+t.id+'" style="display:'+(selectMode?'inline-block':'none')+';accent-color:var(--warm);margin-right:4px;cursor:pointer;"><span class="drag-handle">&#9776;</span><div class="todo-check'+(t.completed?' done':'')+'" data-action="toggle" data-id="'+t.id+'" data-completed="'+(!t.completed)+'" data-recurring="'+!!t.recurring+'"></div><div class="todo-content"><div class="todo-title'+(t.completed?' done':'')+'">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span class="badge '+t.horizon+'">'+t.horizon+'</span>'+recurInfo+depBadges+(t.category?'<span>'+esc(t.category)+'</span>':'')+(dueTxt?'<span'+overdue+'>'+dueTxt+'</span>':'')+(subs.length?'<span>'+subDone+'/'+subs.length+' subtasks</span>':'')+'</div>'+(t.description?'<div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:300">'+esc(t.description)+'</div>':'')+subHtml+'</div><div class="todo-actions">'+skipSnoozeButtons+'<button data-action="edit" data-id="'+t.id+'">&#9998;</button></div></div>';
   }).join('');
 }
 
-// Drag and drop
-function dragStart(e) { dragSrcId = e.currentTarget.dataset.id; e.currentTarget.classList.add('dragging'); }
-function dragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+// Drag and drop (event delegation — no inline handlers)
+function dragStart(e) { var item = e.target.closest('.todo-item[data-id]'); if (!item) return; dragSrcId = item.dataset.id; item.classList.add('dragging'); }
+function dragOver(e) { var item = e.target.closest('.todo-item[data-id]'); if (!item) return; e.preventDefault(); item.classList.add('drag-over'); }
 function dragEnd(e) { document.querySelectorAll('.todo-item').forEach(el => { el.classList.remove('dragging','drag-over'); }); }
 async function drop(e) {
-  e.preventDefault(); e.currentTarget.classList.remove('drag-over');
-  var targetId = e.currentTarget.dataset.id;
+  var item = e.target.closest('.todo-item[data-id]'); if (!item) return;
+  e.preventDefault(); item.classList.remove('drag-over');
+  var targetId = item.dataset.id;
   if (dragSrcId === targetId) return;
   var items = document.querySelectorAll('.todo-item[data-id]');
   var order = [];
@@ -791,6 +792,12 @@ document.addEventListener('click',function(e){
 document.addEventListener('change',function(e){
   if(e.target.classList.contains('bulk-check'))toggleBulkItem(parseInt(e.target.dataset.id),e.target.checked);
 });
+// Drag-and-drop via event delegation (CSP-safe — no inline handlers)
+document.addEventListener('dragstart',function(e){var item=e.target.closest('.todo-item[data-id]');if(item)dragStart(e);});
+document.addEventListener('dragover',function(e){var item=e.target.closest('.todo-item[data-id]');if(item)dragOver(e);});
+document.addEventListener('drop',function(e){var item=e.target.closest('.todo-item[data-id]');if(item)drop(e);});
+document.addEventListener('dragend',function(e){dragEnd(e);});
+document.addEventListener('dragleave',function(e){var item=e.target.closest('.todo-item[data-id]');if(item)item.classList.remove('drag-over');});
 
 load();
 </script>

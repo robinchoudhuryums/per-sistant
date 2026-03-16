@@ -2,7 +2,7 @@ const express = require("express");
 
 module.exports = function ({ pool, config, helpers }) {
   const router = express.Router();
-  const { VALID_NOTE_COLORS } = config;
+  const { VALID_NOTE_COLORS, MAX_PAGINATION_LIMIT, MAX_CONTENT_LENGTH } = config;
   const { fireWebhooks, sendSlackNotification, runAutomations } = helpers;
 
   router.get("/api/notes", async (req, res) => {
@@ -11,8 +11,8 @@ module.exports = function ({ pool, config, helpers }) {
       let params = [];
       let idx = 1;
       let pagination = "";
-      if (limit) { pagination += ` LIMIT $${idx++}`; params.push(parseInt(limit, 10)); }
-      if (offset) { pagination += ` OFFSET $${idx++}`; params.push(parseInt(offset, 10)); }
+      if (limit) { pagination += ` LIMIT $${idx++}`; params.push(Math.min(Math.max(1, parseInt(limit, 10) || 20), MAX_PAGINATION_LIMIT)); }
+      if (offset) { pagination += ` OFFSET $${idx++}`; params.push(Math.max(0, parseInt(offset, 10) || 0)); }
       const r = await pool.query(`SELECT * FROM notes WHERE deleted_at IS NULL ORDER BY pinned DESC, updated_at DESC${pagination}`, params);
       res.json(r.rows);
     } catch (err) {
@@ -24,6 +24,7 @@ module.exports = function ({ pool, config, helpers }) {
     try {
       const { title, content, pinned, color, reminder_at, tags, format } = req.body;
       if (!content) return res.status(400).json({ error: "Content is required." });
+      if (content.length > MAX_CONTENT_LENGTH) return res.status(400).json({ error: `Content too long. Maximum ${MAX_CONTENT_LENGTH} characters.` });
       if (color && !VALID_NOTE_COLORS.includes(color)) return res.status(400).json({ error: "Invalid color. Must be: " + VALID_NOTE_COLORS.join(", ") });
       if (tags && !Array.isArray(tags)) return res.status(400).json({ error: "Tags must be an array." });
       if (format && !["plain", "markdown"].includes(format)) return res.status(400).json({ error: "Invalid format. Must be: plain, markdown" });

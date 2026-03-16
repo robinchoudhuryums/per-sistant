@@ -6,12 +6,13 @@ const express = require("express");
 
 module.exports = function ({ pool, config }) {
   const router = express.Router();
-  const { VALID_PRIORITIES, VALID_HORIZONS } = config;
+  const { VALID_PRIORITIES, VALID_HORIZONS, MAX_BULK_IDS } = config;
 
   router.post("/api/bulk/todos", async (req, res) => {
     try {
       const { ids, action, data } = req.body;
       if (!ids || !Array.isArray(ids) || !ids.length) return res.status(400).json({ error: "ids array is required." });
+      if (ids.length > MAX_BULK_IDS) return res.status(400).json({ error: `Too many IDs. Maximum ${MAX_BULK_IDS} allowed.` });
       if (!action) return res.status(400).json({ error: "action is required." });
       if (action === "complete") {
         await pool.query("UPDATE todos SET completed = true, completed_at = now() WHERE id = ANY($1) AND deleted_at IS NULL", [ids]);
@@ -32,6 +33,7 @@ module.exports = function ({ pool, config }) {
     try {
       const { ids, action } = req.body;
       if (!ids || !Array.isArray(ids) || !ids.length) return res.status(400).json({ error: "ids array is required." });
+      if (ids.length > MAX_BULK_IDS) return res.status(400).json({ error: `Too many IDs. Maximum ${MAX_BULK_IDS} allowed.` });
       if (action === "delete") {
         await pool.query("UPDATE emails SET deleted_at = now() WHERE id = ANY($1) AND deleted_at IS NULL", [ids]);
       } else {
@@ -45,6 +47,7 @@ module.exports = function ({ pool, config }) {
     try {
       const { ids, action } = req.body;
       if (!ids || !Array.isArray(ids) || !ids.length) return res.status(400).json({ error: "ids array is required." });
+      if (ids.length > MAX_BULK_IDS) return res.status(400).json({ error: `Too many IDs. Maximum ${MAX_BULK_IDS} allowed.` });
       if (action === "delete") {
         await pool.query("UPDATE notes SET deleted_at = now() WHERE id = ANY($1) AND deleted_at IS NULL", [ids]);
       } else {

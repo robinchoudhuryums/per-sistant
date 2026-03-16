@@ -7,6 +7,9 @@ module.exports = function ({ pool, config }) {
   router.get("/api/perfin/stats", async (req, res) => {
     const perfinUrl = PERFIN_URL || (await pool.query("SELECT perfin_url FROM user_settings WHERE id = 1").catch(() => ({rows:[]}))).rows[0]?.perfin_url;
     if (!perfinUrl) return res.json({ connected: false });
+    // Validate URL to prevent SSRF
+    try { const u = new URL(perfinUrl); if (u.protocol !== "http:" && u.protocol !== "https:") return res.json({ connected: false }); }
+    catch { return res.json({ connected: false }); }
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
