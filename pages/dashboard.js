@@ -105,20 +105,20 @@ ${themeScript()}
             <!-- Haku dragon (converted from reference image) beside the tree -->
             <g id="dragon-group" filter="url(#dragon-shadow)">
               <!-- Dragon glow aura -->
-              <ellipse id="dragon-aura" cx="225" cy="205" rx="50" ry="16" fill="url(#dragon-glow)" opacity="0.4">
+              <ellipse id="dragon-aura" cx="260" cy="175" rx="65" ry="20" fill="url(#dragon-glow)" opacity="0.4">
                 <animate attributeName="opacity" values="0.25;0.55;0.25" dur="4s" repeatCount="indefinite"/>
               </ellipse>
               <!-- Haku SVG scaled, masked to cut out bg between limbs -->
-              <g transform="translate(178,118) scale(0.115)">
+              <g transform="translate(188,68) scale(0.17)">
                 <g mask="url(#dragon-mask)">
                   ${getDragonSVG()}
                 </g>
               </g>
               <!-- Zzz sleep indicators -->
               <g id="dragon-zzz" opacity="0.5">
-                <text x="258" y="128" font-size="6" fill="#60d8d0" font-style="italic" opacity="0.7">z</text>
-                <text x="264" y="121" font-size="8" fill="#60d8d0" font-style="italic" opacity="0.5">z</text>
-                <text x="268" y="112" font-size="10" fill="#60d8d0" font-style="italic" opacity="0.3">z</text>
+                <text x="290" y="78" font-size="7" fill="#60d8d0" font-style="italic" opacity="0.7">z</text>
+                <text x="298" y="69" font-size="9" fill="#60d8d0" font-style="italic" opacity="0.5">z</text>
+                <text x="304" y="58" font-size="11" fill="#60d8d0" font-style="italic" opacity="0.3">z</text>
               </g>
               <!-- Gentle breathing animation -->
               <animateTransform attributeName="transform" type="translate" values="0,0;0,-0.4;0,0" dur="4s" repeatCount="indefinite"/>
