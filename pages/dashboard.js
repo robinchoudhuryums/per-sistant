@@ -48,7 +48,7 @@ ${themeScript()}
           <div class="falling-petal"></div>
           <div class="falling-petal"></div>
           <div class="falling-petal"></div>
-          <svg class="tree-svg" id="tree-svg" viewBox="0 0 280 280" xmlns="http://www.w3.org/2000/svg">
+          <svg class="tree-svg" id="tree-svg" viewBox="0 0 280 280" style="overflow:visible" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <linearGradient id="platform-grad" x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" style="stop-color:rgba(77,184,199,0.3)"/>
