@@ -84,11 +84,73 @@ ${themeScript()}
                 <feGaussianBlur stdDeviation="3" result="blur"/>
                 <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
               </filter>
+              <radialGradient id="dragon-glow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" style="stop-color:rgba(77,184,199,0.4)"/>
+                <stop offset="100%" style="stop-color:rgba(77,184,199,0)"/>
+              </radialGradient>
+              <linearGradient id="dragon-body" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#3a6878"/>
+                <stop offset="50%" style="stop-color:#2d5565"/>
+                <stop offset="100%" style="stop-color:#1f4050"/>
+              </linearGradient>
+              <linearGradient id="dragon-belly" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" style="stop-color:#5a9aaa"/>
+                <stop offset="100%" style="stop-color:#3a7888"/>
+              </linearGradient>
             </defs>
             <!-- Isometric platform -->
             <polygon points="140,252 50,218 140,184 230,218" fill="url(#platform-grad)" stroke="rgba(77,184,199,0.4)" stroke-width="0.5"/>
             <polygon points="140,252 50,218 50,225 140,259" fill="rgba(77,184,199,0.12)"/>
             <polygon points="140,252 230,218 230,225 140,259" fill="rgba(230,164,74,0.10)"/>
+            <!-- Sleeping Dragon curled around pot base -->
+            <g id="dragon-group">
+              <!-- Dragon glow aura -->
+              <ellipse id="dragon-aura" cx="140" cy="228" rx="55" ry="20" fill="url(#dragon-glow)" opacity="0.4">
+                <animate attributeName="opacity" values="0.3;0.6;0.3" dur="4s" repeatCount="indefinite"/>
+              </ellipse>
+              <!-- Tail — curling from right, under pot, around to left -->
+              <path d="M200,232 C210,230 218,225 220,218 C222,210 215,206 205,208 C195,210 185,214 178,218" stroke="url(#dragon-body)" stroke-width="5" fill="none" stroke-linecap="round"/>
+              <path d="M220,218 C225,212 230,210 232,214" stroke="url(#dragon-body)" stroke-width="3" fill="none" stroke-linecap="round"/>
+              <!-- Tail tip (spade shape) -->
+              <path d="M232,214 L238,210 L235,216 L240,218 L232,214" fill="#3a6878" opacity="0.8"/>
+              <!-- Body — coiled around the front of pot -->
+              <path d="M178,218 C165,222 150,228 138,232 C125,236 110,236 98,230 C86,224 80,216 82,208" stroke="url(#dragon-body)" stroke-width="7" fill="none" stroke-linecap="round"/>
+              <!-- Belly ridge (lighter) -->
+              <path d="M175,220 C162,224 148,230 136,234 C124,237 112,237 102,232" stroke="url(#dragon-belly)" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.5"/>
+              <!-- Back spines -->
+              <g opacity="0.6">
+                <line x1="190" y1="215" x2="188" y2="208" stroke="#4a8898" stroke-width="1.2" stroke-linecap="round"/>
+                <line x1="175" y1="219" x2="173" y2="212" stroke="#4a8898" stroke-width="1.2" stroke-linecap="round"/>
+                <line x1="158" y1="225" x2="155" y2="218" stroke="#4a8898" stroke-width="1.2" stroke-linecap="round"/>
+                <line x1="140" y1="231" x2="137" y2="224" stroke="#4a8898" stroke-width="1.2" stroke-linecap="round"/>
+                <line x1="122" y1="234" x2="119" y2="228" stroke="#4a8898" stroke-width="1.2" stroke-linecap="round"/>
+                <line x1="108" y1="232" x2="106" y2="226" stroke="#4a8898" stroke-width="1.2" stroke-linecap="round"/>
+              </g>
+              <!-- Foreleg tucked under chin -->
+              <path d="M86,212 C84,218 86,222 90,224" stroke="url(#dragon-body)" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+              <ellipse cx="90" cy="225" rx="3" ry="2" fill="#2d5565" opacity="0.7"/>
+              <!-- Head resting on foreleg -->
+              <ellipse cx="80" cy="208" rx="12" ry="8" fill="url(#dragon-body)" transform="rotate(-15,80,208)"/>
+              <!-- Snout -->
+              <ellipse cx="70" cy="206" rx="7" ry="5" fill="#2d5565" transform="rotate(-10,70,206)"/>
+              <!-- Nostril with sleep puff -->
+              <circle cx="65" cy="205" r="1" fill="#1f4050"/>
+              <g id="dragon-zzz" opacity="0.5">
+                <text x="58" y="198" font-size="7" fill="#4db8c7" font-style="italic" opacity="0.7">z</text>
+                <text x="52" y="191" font-size="9" fill="#4db8c7" font-style="italic" opacity="0.5">z</text>
+                <text x="48" y="182" font-size="11" fill="#4db8c7" font-style="italic" opacity="0.3">z</text>
+              </g>
+              <!-- Eye (closed — sleeping) -->
+              <path id="dragon-eye" d="M76,204 C78,203 80,203 82,204" stroke="#1f4050" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+              <!-- Ear/horn nubs -->
+              <line x1="82" y1="201" x2="85" y2="196" stroke="#3a6878" stroke-width="1.5" stroke-linecap="round"/>
+              <line x1="78" y1="200" x2="80" y2="195" stroke="#3a6878" stroke-width="1.5" stroke-linecap="round"/>
+              <!-- Hind leg tucked -->
+              <path d="M160,230 C162,236 158,240 154,238" stroke="url(#dragon-body)" stroke-width="3" fill="none" stroke-linecap="round"/>
+              <!-- Wing folded on back -->
+              <path d="M110,222 C105,210 112,200 125,202 C132,203 136,208 134,214" stroke="#4a8898" stroke-width="1" fill="rgba(74,136,152,0.15)" stroke-linecap="round"/>
+              <path d="M125,202 C120,206 116,212 115,218" stroke="#4a8898" stroke-width="0.8" fill="none" opacity="0.5"/>
+            </g>
             <!-- Bonsai pot (isometric) -->
             <polygon points="140,230 108,218 112,200 168,200 172,218" fill="url(#pot-grad)" stroke="rgba(77,184,199,0.5)" stroke-width="0.8"/>
             <polygon points="112,200 168,200 165,196 115,196" fill="rgba(77,184,199,0.2)" stroke="rgba(77,184,199,0.3)" stroke-width="0.5"/>
@@ -634,6 +696,42 @@ function updateTree(stats, streakData) {
   else if (health >= 20) msg = 'Petals are fading. Time to catch up on overdue items.';
   else msg = 'Your blossom needs care. Complete one task to start the bloom.';
   document.getElementById('tree-msg').textContent = msg;
+
+  // Dragon state — reacts to health and streak
+  var dragonGroup = document.getElementById('dragon-group');
+  var dragonAura = document.getElementById('dragon-aura');
+  var dragonEye = document.getElementById('dragon-eye');
+  var dragonZzz = document.getElementById('dragon-zzz');
+  if (dragonGroup) {
+    // Aura intensity based on health
+    if (health > 70) {
+      dragonAura.setAttribute('opacity', '0.6');
+      dragonAura.setAttribute('fill', 'url(#dragon-glow)');
+      dragonGroup.style.filter = 'drop-shadow(0 0 8px rgba(77,184,199,0.3))';
+    } else if (health > 40) {
+      dragonAura.setAttribute('opacity', '0.3');
+      dragonGroup.style.filter = 'drop-shadow(0 0 4px rgba(77,184,199,0.15))';
+    } else {
+      dragonAura.setAttribute('opacity', '0.15');
+      dragonGroup.style.filter = 'none';
+    }
+    // Eye state: sleeping peacefully (high health) vs restless (low health)
+    if (health > 50) {
+      dragonEye.setAttribute('d', 'M76,204 C78,203 80,203 82,204'); // closed, peaceful
+      dragonZzz.style.display = 'block';
+    } else if (health > 20) {
+      dragonEye.setAttribute('d', 'M76,204 C78,202.5 80,202.5 82,204'); // half open
+      dragonZzz.style.display = 'none';
+    } else {
+      dragonEye.setAttribute('d', 'M76,203 C78,201 80,201 82,203 C80,205 78,205 76,203'); // fully open, alert
+      dragonEye.setAttribute('fill', '#e6a44a');
+      dragonZzz.style.display = 'none';
+    }
+    // Streak glow — dragon glows golden when streak is active
+    if (currentStreak >= 5) {
+      dragonGroup.style.filter = 'drop-shadow(0 0 12px rgba(240,200,80,0.4))';
+    }
+  }
 }
 
 // Mini Calendar
