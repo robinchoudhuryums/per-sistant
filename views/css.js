@@ -27,17 +27,18 @@ module.exports = `
       font-family: 'Inter', system-ui, sans-serif; background: var(--bg);
       color: var(--text); min-height: 100vh; position: relative; overflow-x: hidden;
     }
-    /* Sunrise aurora + mountain range background */
+    /* Sunrise glow — radial aurora at top-left */
     body::before {
       content: ''; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
       background:
-        /* Sunrise glow — golden center, sky blue edges */
-        radial-gradient(ellipse at 50% 25%, rgba(240,200,80,0.22) 0%, transparent 45%),
-        radial-gradient(ellipse at 25% 10%, rgba(91,168,230,0.20) 0%, transparent 50%),
-        radial-gradient(ellipse at 75% 8%, rgba(77,184,199,0.18) 0%, transparent 45%),
-        /* Coral/amber horizon band */
-        radial-gradient(ellipse at 50% 40%, rgba(232,120,96,0.14) 0%, transparent 40%),
-        radial-gradient(ellipse at 35% 30%, rgba(230,164,74,0.12) 0%, transparent 35%);
+        /* Sun glow — top-left radiance */
+        radial-gradient(ellipse at 15% 12%, rgba(240,200,80,0.30) 0%, rgba(240,180,60,0.15) 20%, transparent 50%),
+        radial-gradient(ellipse at 20% 18%, rgba(232,120,96,0.18) 0%, transparent 35%),
+        /* Sky blue wash — right side */
+        radial-gradient(ellipse at 80% 10%, rgba(91,168,230,0.16) 0%, transparent 45%),
+        radial-gradient(ellipse at 60% 6%, rgba(77,184,199,0.14) 0%, transparent 40%),
+        /* Warm horizon band across middle */
+        radial-gradient(ellipse at 40% 35%, rgba(230,164,74,0.10) 0%, transparent 35%);
       pointer-events: none; z-index: 0; filter: blur(40px);
       animation: auroraShift 18s ease-in-out infinite alternate;
     }
@@ -47,60 +48,24 @@ module.exports = `
       66% { opacity: 0.9; transform: translateY(4px) scaleX(0.98); }
       100% { opacity: 0.95; transform: translateY(-4px); }
     }
+    /* SVG mountain landscape with peaks, valley, river, trees */
     body::after {
-      content: ''; position: fixed; bottom: 0; left: 0; right: 0; height: 50vh;
-      background:
-        /* Far range — tall distant peaks */
-        linear-gradient(168deg, transparent 12%,
-          rgba(30,45,70,0.18) 26%, rgba(30,45,70,0.18) 27%, transparent 27.5%,
-          transparent 30%,
-          rgba(25,40,65,0.20) 36%, rgba(25,40,65,0.20) 37%, transparent 37.5%,
-          transparent 40%,
-          rgba(30,45,70,0.16) 44%, rgba(30,45,70,0.16) 45%, transparent 45.5%),
-        /* Mid range — rocky ridges */
-        linear-gradient(175deg, transparent 30%,
-          rgba(35,50,75,0.25) 45%, rgba(35,50,75,0.25) 46%, transparent 46.5%,
-          transparent 50%,
-          rgba(30,45,68,0.28) 56%, rgba(30,45,68,0.28) 57%, transparent 57.5%,
-          transparent 60%,
-          rgba(35,50,75,0.22) 65%, rgba(35,50,75,0.22) 66%, transparent 66.5%),
-        /* Near range — prominent foreground peaks */
-        linear-gradient(185deg, transparent 40%,
-          rgba(20,35,58,0.32) 55%, rgba(20,35,58,0.32) 56%, transparent 56.5%,
-          transparent 62%,
-          rgba(15,30,52,0.36) 72%, rgba(15,30,52,0.36) 73%, transparent 73.5%),
-        /* Opposing slope (right-leaning peaks for variety) */
-        linear-gradient(195deg, transparent 35%,
-          rgba(25,42,62,0.20) 50%, rgba(25,42,62,0.20) 51%, transparent 51.5%,
-          transparent 58%,
-          rgba(20,38,58,0.26) 68%, rgba(20,38,58,0.26) 69%, transparent 69.5%),
-        /* Base haze — warm sunrise glow behind mountains */
-        linear-gradient(to top, rgba(15,25,45,0.45) 0%, rgba(50,40,60,0.20) 30%, rgba(230,160,70,0.06) 50%, transparent 70%);
+      content: ''; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
       pointer-events: none; z-index: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1600 900' preserveAspectRatio='xMidYMax slice'%3E%3Cdefs%3E%3ClinearGradient id='sky' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0%25' stop-color='%230b0e18' stop-opacity='0'/%3E%3Cstop offset='50%25' stop-color='%230b0e18' stop-opacity='0'/%3E%3Cstop offset='100%25' stop-color='%230f1525' stop-opacity='0.3'/%3E%3C/linearGradient%3E%3ClinearGradient id='river' x1='0' y1='0' x2='1' y2='0'%3E%3Cstop offset='0%25' stop-color='%234db8c7' stop-opacity='0.08'/%3E%3Cstop offset='50%25' stop-color='%235ba8e6' stop-opacity='0.15'/%3E%3Cstop offset='100%25' stop-color='%234db8c7' stop-opacity='0.06'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect fill='url(%23sky)' width='1600' height='900'/%3E%3Cg opacity='0.18'%3E%3Cpath d='M0,520 L80,440 L140,470 L220,380 L280,420 L340,350 L400,390 L440,360 L500,410 L540,380 L600,430 L700,480 L800,450 L900,420 L1000,460 L1100,430 L1200,470 L1300,440 L1400,480 L1500,450 L1600,490 L1600,900 L0,900 Z' fill='%231a2540'/%3E%3C/g%3E%3Cg opacity='0.25'%3E%3Cpath d='M0,560 L60,520 L120,540 L200,470 L260,500 L320,450 L380,480 L420,440 L480,470 L560,500 L620,520 L700,490 L760,510 L820,530 L900,500 L960,480 L1040,510 L1120,490 L1200,520 L1280,500 L1360,530 L1440,510 L1520,540 L1600,520 L1600,900 L0,900 Z' fill='%23162035'/%3E%3C/g%3E%3Cg opacity='0.12'%3E%3Cpath d='M500,560 C580,555 660,550 740,548 C820,546 880,548 940,552 C980,554 1020,558 1060,560' stroke='url(%23river)' stroke-width='18' fill='none' stroke-linecap='round'/%3E%3Cpath d='M400,570 C440,565 470,562 500,560' stroke='url(%23river)' stroke-width='12' fill='none' stroke-linecap='round'/%3E%3Cpath d='M1060,560 C1120,564 1180,570 1250,578' stroke='url(%23river)' stroke-width='14' fill='none' stroke-linecap='round'/%3E%3C/g%3E%3Cg opacity='0.30'%3E%3Cpath d='M0,620 L50,580 L100,600 L160,560 L200,580 L260,550 L310,570 L360,540 L400,560 L460,580 L500,560 L560,575 L620,555 L680,570 L720,580 L780,560 L820,575 L880,555 L940,570 L1000,550 L1060,565 L1120,555 L1180,570 L1240,560 L1300,575 L1360,555 L1420,570 L1480,560 L1540,575 L1600,560 L1600,900 L0,900 Z' fill='%23121d30'/%3E%3C/g%3E%3Cg opacity='0.22'%3E%3Cpolygon points='1200,570 1208,545 1216,570' fill='%23142030'/%3E%3Cpolygon points='1230,568 1240,538 1250,568' fill='%23152234'/%3E%3Cpolygon points='1260,572 1268,548 1276,572' fill='%23142030'/%3E%3Cpolygon points='1285,570 1296,540 1307,570' fill='%23162436'/%3E%3Cpolygon points='1315,572 1323,550 1331,572' fill='%23142030'/%3E%3Cpolygon points='1340,570 1352,535 1364,570' fill='%23152234'/%3E%3Cpolygon points='1375,572 1383,548 1391,572' fill='%23142030'/%3E%3Cpolygon points='1400,570 1410,542 1420,570' fill='%23162436'/%3E%3Cpolygon points='1435,572 1443,550 1451,572' fill='%23142030'/%3E%3Cpolygon points='1460,570 1470,545 1480,570' fill='%23152234'/%3E%3C/g%3E%3Cg opacity='0.35'%3E%3Cpath d='M0,700 L80,660 L160,680 L240,650 L320,670 L400,640 L480,660 L560,650 L640,665 L720,645 L800,660 L880,650 L960,665 L1040,640 L1120,660 L1200,650 L1280,665 L1360,645 L1440,660 L1520,650 L1600,670 L1600,900 L0,900 Z' fill='%230e1828'/%3E%3C/g%3E%3C/svg%3E");
+      background-size: cover; background-position: center bottom;
     }
     [data-theme="light"] body::before {
       background:
-        radial-gradient(ellipse at 50% 25%, rgba(240,200,80,0.10) 0%, transparent 45%),
-        radial-gradient(ellipse at 25% 10%, rgba(91,168,230,0.08) 0%, transparent 50%),
-        radial-gradient(ellipse at 75% 8%, rgba(77,184,199,0.08) 0%, transparent 45%),
-        radial-gradient(ellipse at 50% 40%, rgba(232,120,96,0.06) 0%, transparent 40%);
+        radial-gradient(ellipse at 15% 12%, rgba(240,200,80,0.12) 0%, rgba(240,180,60,0.06) 20%, transparent 50%),
+        radial-gradient(ellipse at 20% 18%, rgba(232,120,96,0.06) 0%, transparent 35%),
+        radial-gradient(ellipse at 80% 10%, rgba(91,168,230,0.06) 0%, transparent 45%),
+        radial-gradient(ellipse at 40% 35%, rgba(230,164,74,0.04) 0%, transparent 35%);
       filter: blur(40px);
     }
     [data-theme="light"] body::after {
-      background:
-        linear-gradient(168deg, transparent 12%,
-          rgba(80,95,130,0.08) 26%, rgba(80,95,130,0.08) 27%, transparent 27.5%,
-          transparent 36%,
-          rgba(75,90,125,0.10) 44%, rgba(75,90,125,0.10) 45%, transparent 45.5%),
-        linear-gradient(175deg, transparent 30%,
-          rgba(85,100,135,0.10) 45%, rgba(85,100,135,0.10) 46%, transparent 46.5%,
-          transparent 56%,
-          rgba(80,95,128,0.12) 65%, rgba(80,95,128,0.12) 66%, transparent 66.5%),
-        linear-gradient(185deg, transparent 40%,
-          rgba(70,85,118,0.14) 55%, rgba(70,85,118,0.14) 56%, transparent 56.5%,
-          transparent 72%,
-          rgba(65,80,112,0.16) 80%, rgba(65,80,112,0.16) 81%, transparent 81.5%),
-        linear-gradient(to top, rgba(80,90,120,0.10) 0%, rgba(90,85,100,0.05) 30%, transparent 60%);
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1600 900' preserveAspectRatio='xMidYMax slice'%3E%3Cdefs%3E%3ClinearGradient id='river' x1='0' y1='0' x2='1' y2='0'%3E%3Cstop offset='0%25' stop-color='%232a8a98' stop-opacity='0.05'/%3E%3Cstop offset='50%25' stop-color='%233a7ec0' stop-opacity='0.08'/%3E%3Cstop offset='100%25' stop-color='%232a8a98' stop-opacity='0.04'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg opacity='0.07'%3E%3Cpath d='M0,520 L80,440 L140,470 L220,380 L280,420 L340,350 L400,390 L440,360 L500,410 L540,380 L600,430 L700,480 L800,450 L900,420 L1000,460 L1100,430 L1200,470 L1300,440 L1400,480 L1500,450 L1600,490 L1600,900 L0,900 Z' fill='%23606880'/%3E%3C/g%3E%3Cg opacity='0.09'%3E%3Cpath d='M0,560 L60,520 L120,540 L200,470 L260,500 L320,450 L380,480 L420,440 L480,470 L560,500 L620,520 L700,490 L760,510 L820,530 L900,500 L960,480 L1040,510 L1120,490 L1200,520 L1280,500 L1360,530 L1440,510 L1520,540 L1600,520 L1600,900 L0,900 Z' fill='%23505870'/%3E%3C/g%3E%3Cg opacity='0.06'%3E%3Cpath d='M500,560 C580,555 660,550 740,548 C820,546 880,548 940,552 C980,554 1020,558 1060,560' stroke='url(%23river)' stroke-width='18' fill='none' stroke-linecap='round'/%3E%3C/g%3E%3Cg opacity='0.10'%3E%3Cpath d='M0,620 L50,580 L100,600 L160,560 L200,580 L260,550 L310,570 L360,540 L400,560 L460,580 L500,560 L560,575 L620,555 L680,570 L720,580 L780,560 L820,575 L880,555 L940,570 L1000,550 L1060,565 L1120,555 L1180,570 L1240,560 L1300,575 L1360,555 L1420,570 L1480,560 L1540,575 L1600,560 L1600,900 L0,900 Z' fill='%23707890'/%3E%3C/g%3E%3Cg opacity='0.08'%3E%3Cpolygon points='1200,570 1208,545 1216,570' fill='%23606878'/%3E%3Cpolygon points='1230,568 1240,538 1250,568' fill='%23586070'/%3E%3Cpolygon points='1260,572 1268,548 1276,572' fill='%23606878'/%3E%3Cpolygon points='1285,570 1296,540 1307,570' fill='%23586070'/%3E%3Cpolygon points='1315,572 1323,550 1331,572' fill='%23606878'/%3E%3Cpolygon points='1340,570 1352,535 1364,570' fill='%23586070'/%3E%3Cpolygon points='1375,572 1383,548 1391,572' fill='%23606878'/%3E%3Cpolygon points='1400,570 1410,542 1420,570' fill='%23586070'/%3E%3C/g%3E%3Cg opacity='0.12'%3E%3Cpath d='M0,700 L80,660 L160,680 L240,650 L320,670 L400,640 L480,660 L560,650 L640,665 L720,645 L800,660 L880,650 L960,665 L1040,640 L1120,660 L1200,650 L1280,665 L1360,645 L1440,660 L1520,650 L1600,670 L1600,900 L0,900 Z' fill='%23808898'/%3E%3C/g%3E%3C/svg%3E");
+      background-size: cover; background-position: center bottom;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .btn-loading { position: relative; color: transparent !important; pointer-events: none; }
