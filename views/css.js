@@ -1,87 +1,106 @@
 module.exports = `
     :root {
-      --bg: #0a0b14; --surface: rgba(255,255,255,0.04); --surface-2: rgba(255,255,255,0.07);
+      --bg: #0b0e18; --surface: rgba(255,255,255,0.04); --surface-2: rgba(255,255,255,0.07);
       --border: rgba(255,255,255,0.08); --border-hover: rgba(255,255,255,0.18);
-      --text: #e8e6f0; --text-muted: rgba(232,230,240,0.5);
-      --warm: #a08cd4; --warm-glow: #8b7bc8; --teal: #6b9f9f;
-      --green: #6fcf97; --green-bg: rgba(111,207,151,0.1);
-      --red: #eb6b6b; --red-bg: rgba(235,107,107,0.1);
-      --yellow: #e8c86d; --yellow-bg: rgba(232,200,109,0.1);
-      --blue: #7fa8e6; --blue-bg: rgba(127,168,230,0.1);
+      --text: #f0ece4; --text-muted: rgba(240,236,228,0.5);
+      --warm: #e6a44a; --warm-glow: #d4943e; --teal: #4db8c7;
+      --green: #5cc98a; --green-bg: rgba(92,201,138,0.1);
+      --red: #e85c5c; --red-bg: rgba(232,92,92,0.1);
+      --yellow: #f0c850; --yellow-bg: rgba(240,200,80,0.12);
+      --blue: #5ba8e6; --blue-bg: rgba(91,168,230,0.1);
+      --coral: #e87860; --coral-bg: rgba(232,120,96,0.1);
       --radius: 12px;
     }
     [data-theme="light"] {
-      --bg: #f0eef5; --surface: rgba(0,0,0,0.03); --surface-2: rgba(0,0,0,0.06);
+      --bg: #f5f1eb; --surface: rgba(0,0,0,0.03); --surface-2: rgba(0,0,0,0.06);
       --border: rgba(0,0,0,0.10); --border-hover: rgba(0,0,0,0.20);
       --text: #1a1a2e; --text-muted: rgba(26,26,46,0.5);
-      --warm: #6b5ba0; --warm-glow: #5c4d90; --teal: #4a7a7a;
-      --green: #2d9f5f; --green-bg: rgba(45,159,95,0.1);
-      --red: #c94444; --red-bg: rgba(201,68,68,0.1);
+      --warm: #c47e20; --warm-glow: #b06e18; --teal: #2a8a98;
+      --green: #2a9860; --green-bg: rgba(42,152,96,0.1);
+      --red: #c24444; --red-bg: rgba(194,68,68,0.1);
       --yellow: #b89820; --yellow-bg: rgba(184,152,32,0.1);
-      --blue: #4a78bf; --blue-bg: rgba(74,120,191,0.1);
+      --blue: #3a7ec0; --blue-bg: rgba(58,126,192,0.1);
+      --coral: #c25840; --coral-bg: rgba(194,88,64,0.1);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Inter', system-ui, sans-serif; background: var(--bg);
       color: var(--text); min-height: 100vh; position: relative; overflow-x: hidden;
     }
-    /* Mountain + Aurora blended background */
+    /* Sunrise aurora + mountain range background */
     body::before {
       content: ''; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
       background:
-        /* Aurora flow — vibrant gradient waves at top */
-        radial-gradient(ellipse at 30% 10%, rgba(80,200,200,0.18) 0%, transparent 50%),
-        radial-gradient(ellipse at 70% 5%, rgba(200,160,80,0.15) 0%, transparent 40%),
-        radial-gradient(ellipse at 50% 20%, rgba(120,100,200,0.20) 0%, transparent 45%),
-        /* Sunset glow */
-        radial-gradient(ellipse at 50% 35%, rgba(200,140,100,0.10) 0%, transparent 50%);
+        /* Sunrise glow — golden center, sky blue edges */
+        radial-gradient(ellipse at 50% 25%, rgba(240,200,80,0.22) 0%, transparent 45%),
+        radial-gradient(ellipse at 25% 10%, rgba(91,168,230,0.20) 0%, transparent 50%),
+        radial-gradient(ellipse at 75% 8%, rgba(77,184,199,0.18) 0%, transparent 45%),
+        /* Coral/amber horizon band */
+        radial-gradient(ellipse at 50% 40%, rgba(232,120,96,0.14) 0%, transparent 40%),
+        radial-gradient(ellipse at 35% 30%, rgba(230,164,74,0.12) 0%, transparent 35%);
       pointer-events: none; z-index: 0; filter: blur(40px);
-      animation: auroraShift 20s ease-in-out infinite alternate;
+      animation: auroraShift 18s ease-in-out infinite alternate;
     }
     @keyframes auroraShift {
-      0% { opacity: 0.8; transform: translateY(0); }
-      50% { opacity: 1; transform: translateY(-10px); }
-      100% { opacity: 0.85; transform: translateY(5px); }
+      0% { opacity: 0.85; transform: translateY(0); }
+      33% { opacity: 1; transform: translateY(-8px) scaleX(1.02); }
+      66% { opacity: 0.9; transform: translateY(4px) scaleX(0.98); }
+      100% { opacity: 0.95; transform: translateY(-4px); }
     }
     body::after {
-      content: ''; position: fixed; bottom: 0; left: 0; right: 0; height: 45vh;
+      content: ''; position: fixed; bottom: 0; left: 0; right: 0; height: 50vh;
       background:
-        /* Mountain silhouette layers */
-        linear-gradient(170deg, transparent 20%,
-          rgba(60,50,80,0.25) 35%, rgba(60,50,80,0.25) 36%, transparent 36.5%,
+        /* Far range — tall distant peaks */
+        linear-gradient(168deg, transparent 12%,
+          rgba(30,45,70,0.18) 26%, rgba(30,45,70,0.18) 27%, transparent 27.5%,
+          transparent 30%,
+          rgba(25,40,65,0.20) 36%, rgba(25,40,65,0.20) 37%, transparent 37.5%,
           transparent 40%,
-          rgba(50,40,70,0.30) 48%, rgba(50,40,70,0.30) 49%, transparent 49.5%,
-          transparent 55%,
-          rgba(40,35,60,0.35) 62%, rgba(40,35,60,0.35) 63%, transparent 63.5%),
-        linear-gradient(190deg, transparent 25%,
-          rgba(55,45,75,0.22) 40%, rgba(55,45,75,0.22) 41%, transparent 41.5%,
+          rgba(30,45,70,0.16) 44%, rgba(30,45,70,0.16) 45%, transparent 45.5%),
+        /* Mid range — rocky ridges */
+        linear-gradient(175deg, transparent 30%,
+          rgba(35,50,75,0.25) 45%, rgba(35,50,75,0.25) 46%, transparent 46.5%,
           transparent 50%,
-          rgba(45,38,65,0.28) 58%, rgba(45,38,65,0.28) 59%, transparent 59.5%),
-        /* Base mountain gradient */
-        linear-gradient(to top, rgba(30,25,50,0.40) 0%, rgba(50,40,70,0.15) 40%, transparent 70%);
+          rgba(30,45,68,0.28) 56%, rgba(30,45,68,0.28) 57%, transparent 57.5%,
+          transparent 60%,
+          rgba(35,50,75,0.22) 65%, rgba(35,50,75,0.22) 66%, transparent 66.5%),
+        /* Near range — prominent foreground peaks */
+        linear-gradient(185deg, transparent 40%,
+          rgba(20,35,58,0.32) 55%, rgba(20,35,58,0.32) 56%, transparent 56.5%,
+          transparent 62%,
+          rgba(15,30,52,0.36) 72%, rgba(15,30,52,0.36) 73%, transparent 73.5%),
+        /* Opposing slope (right-leaning peaks for variety) */
+        linear-gradient(195deg, transparent 35%,
+          rgba(25,42,62,0.20) 50%, rgba(25,42,62,0.20) 51%, transparent 51.5%,
+          transparent 58%,
+          rgba(20,38,58,0.26) 68%, rgba(20,38,58,0.26) 69%, transparent 69.5%),
+        /* Base haze — warm sunrise glow behind mountains */
+        linear-gradient(to top, rgba(15,25,45,0.45) 0%, rgba(50,40,60,0.20) 30%, rgba(230,160,70,0.06) 50%, transparent 70%);
       pointer-events: none; z-index: 0;
     }
     [data-theme="light"] body::before {
       background:
-        radial-gradient(ellipse at 30% 10%, rgba(60,180,180,0.10) 0%, transparent 50%),
-        radial-gradient(ellipse at 70% 5%, rgba(200,160,80,0.08) 0%, transparent 40%),
-        radial-gradient(ellipse at 50% 20%, rgba(100,80,180,0.10) 0%, transparent 45%),
-        radial-gradient(ellipse at 50% 35%, rgba(200,140,100,0.06) 0%, transparent 50%);
+        radial-gradient(ellipse at 50% 25%, rgba(240,200,80,0.10) 0%, transparent 45%),
+        radial-gradient(ellipse at 25% 10%, rgba(91,168,230,0.08) 0%, transparent 50%),
+        radial-gradient(ellipse at 75% 8%, rgba(77,184,199,0.08) 0%, transparent 45%),
+        radial-gradient(ellipse at 50% 40%, rgba(232,120,96,0.06) 0%, transparent 40%);
       filter: blur(40px);
     }
     [data-theme="light"] body::after {
       background:
-        linear-gradient(170deg, transparent 20%,
-          rgba(100,90,130,0.10) 35%, rgba(100,90,130,0.10) 36%, transparent 36.5%,
-          transparent 40%,
-          rgba(90,80,120,0.12) 48%, rgba(90,80,120,0.12) 49%, transparent 49.5%,
-          transparent 55%,
-          rgba(80,70,110,0.15) 62%, rgba(80,70,110,0.15) 63%, transparent 63.5%),
-        linear-gradient(190deg, transparent 25%,
-          rgba(95,85,125,0.08) 40%, rgba(95,85,125,0.08) 41%, transparent 41.5%,
-          transparent 50%,
-          rgba(85,75,115,0.12) 58%, rgba(85,75,115,0.12) 59%, transparent 59.5%),
-        linear-gradient(to top, rgba(80,70,110,0.12) 0%, rgba(90,80,120,0.06) 40%, transparent 70%);
+        linear-gradient(168deg, transparent 12%,
+          rgba(80,95,130,0.08) 26%, rgba(80,95,130,0.08) 27%, transparent 27.5%,
+          transparent 36%,
+          rgba(75,90,125,0.10) 44%, rgba(75,90,125,0.10) 45%, transparent 45.5%),
+        linear-gradient(175deg, transparent 30%,
+          rgba(85,100,135,0.10) 45%, rgba(85,100,135,0.10) 46%, transparent 46.5%,
+          transparent 56%,
+          rgba(80,95,128,0.12) 65%, rgba(80,95,128,0.12) 66%, transparent 66.5%),
+        linear-gradient(185deg, transparent 40%,
+          rgba(70,85,118,0.14) 55%, rgba(70,85,118,0.14) 56%, transparent 56.5%,
+          transparent 72%,
+          rgba(65,80,112,0.16) 80%, rgba(65,80,112,0.16) 81%, transparent 81.5%),
+        linear-gradient(to top, rgba(80,90,120,0.10) 0%, rgba(90,85,100,0.05) 30%, transparent 60%);
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .btn-loading { position: relative; color: transparent !important; pointer-events: none; }
@@ -131,7 +150,7 @@ module.exports = `
     }
     .actions button:hover:not(:disabled), .actions .btn:hover { border-color: var(--warm); color: var(--text); }
     .actions button.primary, .actions .btn.primary { border-color: var(--warm); color: var(--warm); }
-    .actions button.primary:hover:not(:disabled), .actions .btn.primary:hover { background: rgba(212,165,116,0.1); color: var(--text); }
+    .actions button.primary:hover:not(:disabled), .actions .btn.primary:hover { background: rgba(230,164,74,0.1); color: var(--text); }
     .actions button:disabled { opacity: 0.3; cursor: not-allowed; }
 
     .status-msg { padding: 14px 18px; border-radius: 8px; margin-bottom: 20px; display: none;
@@ -192,7 +211,7 @@ module.exports = `
       border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
       background: transparent; color: var(--text-muted); font-family: inherit; transition: all 0.2s; }
     .modal .modal-actions button.primary { border-color: var(--warm); color: var(--warm); }
-    .modal .modal-actions button.primary:hover { background: rgba(212,165,116,0.1); }
+    .modal .modal-actions button.primary:hover { background: rgba(230,164,74,0.1); }
     .modal .modal-actions button.danger { border-color: var(--red); color: var(--red); }
     .modal .modal-actions button.danger:hover { background: var(--red-bg); }
 
@@ -243,7 +262,7 @@ module.exports = `
       border: 1px solid var(--border); border-radius: 20px; cursor: pointer;
       background: transparent; color: var(--text-muted); font-family: inherit; transition: all 0.2s; }
     .filters button:hover { border-color: var(--warm); color: var(--text); }
-    .filters button.active { border-color: var(--warm); color: var(--warm); background: rgba(212,165,116,0.08); }
+    .filters button.active { border-color: var(--warm); color: var(--warm); background: rgba(230,164,74,0.08); }
 
     /* Subtasks */
     .subtask-list { margin-top: 8px; padding-left: 32px; }
@@ -401,7 +420,7 @@ module.exports = `
     .card::before {
       content: ''; position: absolute; top: -1px; left: -1px; right: -1px; bottom: -1px;
       border-radius: var(--radius); opacity: 0; transition: opacity 0.4s ease;
-      background: linear-gradient(135deg, rgba(160,140,212,0.3), rgba(107,159,159,0.3), rgba(111,207,151,0.2));
+      background: linear-gradient(135deg, rgba(230,164,74,0.3), rgba(77,184,199,0.3), rgba(92,201,138,0.2));
       z-index: -1; filter: blur(8px);
     }
     .card:hover::before { opacity: 1; }
@@ -410,24 +429,24 @@ module.exports = `
     .section::before {
       content: ''; position: absolute; top: -1px; left: -1px; right: -1px; bottom: -1px;
       border-radius: var(--radius); opacity: 0; transition: opacity 0.4s ease;
-      background: linear-gradient(135deg, rgba(160,140,212,0.15), rgba(107,159,159,0.15));
+      background: linear-gradient(135deg, rgba(230,164,74,0.15), rgba(77,184,199,0.15));
       z-index: -1; filter: blur(12px);
     }
     .section:hover::before { opacity: 1; }
 
     /* Enhanced modal glassmorphism */
-    .modal { backdrop-filter: blur(24px); background: rgba(10,11,20,0.85); }
-    [data-theme="light"] .modal { background: rgba(240,238,245,0.9); }
+    .modal { backdrop-filter: blur(24px); background: rgba(11,14,24,0.85); }
+    [data-theme="light"] .modal { background: rgba(245,241,235,0.9); }
 
     /* Glowing focus states */
     input:focus, select:focus, textarea:focus {
-      box-shadow: 0 0 0 3px rgba(160,140,212,0.15), 0 0 20px rgba(160,140,212,0.1);
+      box-shadow: 0 0 0 3px rgba(230,164,74,0.15), 0 0 20px rgba(91,168,230,0.1);
     }
-    .search-bar input:focus { box-shadow: 0 0 0 3px rgba(160,140,212,0.15), 0 0 30px rgba(160,140,212,0.08); }
+    .search-bar input:focus { box-shadow: 0 0 0 3px rgba(230,164,74,0.15), 0 0 30px rgba(91,168,230,0.08); }
 
     /* Subtle glow on primary buttons */
-    .actions button.primary { box-shadow: 0 0 12px rgba(160,140,212,0.15); }
-    .actions button.primary:hover:not(:disabled) { box-shadow: 0 0 20px rgba(160,140,212,0.25); }
+    .actions button.primary { box-shadow: 0 0 12px rgba(230,164,74,0.15); }
+    .actions button.primary:hover:not(:disabled) { box-shadow: 0 0 20px rgba(230,164,74,0.25); }
 
     /* ============================================================ */
     /* Productivity Tree — Isometric 3D animated SVG                */
@@ -440,10 +459,11 @@ module.exports = `
     .tree-container {
       position: relative; width: 280px; height: 280px;
       perspective: 800px; transform-style: preserve-3d;
+      overflow: hidden;
     }
     .tree-svg {
       width: 100%; height: 100%;
-      filter: drop-shadow(0 20px 40px rgba(107,159,159,0.2)) drop-shadow(0 8px 16px rgba(160,140,212,0.15));
+      filter: drop-shadow(0 20px 40px rgba(77,184,199,0.2)) drop-shadow(0 8px 16px rgba(230,164,74,0.15));
       animation: treeFloat 6s ease-in-out infinite;
     }
     @keyframes treeFloat {
@@ -455,7 +475,7 @@ module.exports = `
     .tree-glow {
       position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
       width: 160px; height: 40px; border-radius: 50%;
-      background: radial-gradient(ellipse, rgba(111,207,151,0.25) 0%, rgba(107,159,159,0.15) 40%, transparent 70%);
+      background: radial-gradient(ellipse, rgba(255,150,180,0.25) 0%, rgba(255,200,210,0.15) 40%, transparent 70%);
       filter: blur(10px); animation: glowPulse 4s ease-in-out infinite;
     }
     @keyframes glowPulse {
@@ -487,6 +507,53 @@ module.exports = `
     .tree-particle:nth-child(2) { left: 55%; bottom: 45%; animation-delay: -1.3s; background: var(--teal); }
     .tree-particle:nth-child(3) { left: 45%; bottom: 35%; animation-delay: -2.6s; background: var(--warm); }
 
+    /* Falling cherry blossom petals */
+    @keyframes petalFall {
+      0% { transform: translateY(-20px) translateX(0) rotate(0deg) scale(1); opacity: 0; }
+      10% { opacity: 0.8; }
+      50% { transform: translateY(120px) translateX(30px) rotate(180deg) scale(0.8); opacity: 0.6; }
+      100% { transform: translateY(260px) translateX(-10px) rotate(360deg) scale(0.5); opacity: 0; }
+    }
+    .falling-petal {
+      position: absolute; width: 6px; height: 8px; border-radius: 50% 50% 50% 0;
+      background: rgba(255,180,200,0.7); z-index: 2;
+      animation: petalFall 6s ease-in-out infinite;
+      pointer-events: none;
+    }
+    .falling-petal:nth-child(4) { left: 40%; top: 25%; animation-delay: 0s; background: rgba(255,200,215,0.6); width: 5px; height: 7px; }
+    .falling-petal:nth-child(5) { left: 55%; top: 20%; animation-delay: -1.2s; background: rgba(255,160,185,0.7); width: 7px; height: 9px; }
+    .falling-petal:nth-child(6) { left: 35%; top: 30%; animation-delay: -2.5s; background: rgba(255,220,230,0.5); width: 5px; height: 6px; }
+    .falling-petal:nth-child(7) { left: 60%; top: 22%; animation-delay: -3.8s; background: rgba(255,170,195,0.65); width: 6px; height: 8px; }
+    .falling-petal:nth-child(8) { left: 45%; top: 28%; animation-delay: -4.5s; background: rgba(255,190,210,0.55); width: 4px; height: 6px; }
+    .falling-petal:nth-child(9) { left: 50%; top: 18%; animation-delay: -5.2s; background: rgba(255,210,220,0.6); width: 6px; height: 7px; }
+
+    /* Energy pulse traveling up the tree */
+    @keyframes energyPulseUp {
+      0% { stroke-dashoffset: 120; opacity: 0; }
+      10% { opacity: 1; }
+      80% { opacity: 0.8; }
+      100% { stroke-dashoffset: 0; opacity: 0; }
+    }
+    .energy-pulse {
+      stroke-dasharray: 15 105;
+      animation: energyPulseUp 3s ease-in-out infinite;
+      filter: url(#energy-glow);
+    }
+    .energy-pulse:nth-child(2) { animation-delay: -1s; }
+    .energy-pulse:nth-child(3) { animation-delay: -2s; }
+
+    @keyframes energyBranchPulse {
+      0% { stroke-dashoffset: 60; opacity: 0; }
+      15% { opacity: 0.9; }
+      85% { opacity: 0.6; }
+      100% { stroke-dashoffset: 0; opacity: 0; }
+    }
+    .energy-branch-pulse {
+      stroke-dasharray: 10 50;
+      animation: energyBranchPulse 2.5s ease-in-out infinite;
+      filter: url(#energy-glow);
+    }
+
     /* Stats beneath tree */
     .tree-stats {
       display: flex; gap: 24px; justify-content: center; margin-top: 16px;
@@ -494,9 +561,9 @@ module.exports = `
     }
     .tree-stat-value { font-size: 20px; font-weight: 300; color: var(--text); display: block;
                        margin-top: 4px; font-variant-numeric: tabular-nums; }
-    .tree-stat-value.glow-green { color: var(--green); text-shadow: 0 0 12px rgba(111,207,151,0.4); }
-    .tree-stat-value.glow-warm { color: var(--warm); text-shadow: 0 0 12px rgba(160,140,212,0.4); }
-    .tree-stat-value.glow-teal { color: var(--teal); text-shadow: 0 0 12px rgba(107,159,159,0.4); }
+    .tree-stat-value.glow-green { color: var(--green); text-shadow: 0 0 12px rgba(92,201,138,0.4); }
+    .tree-stat-value.glow-warm { color: var(--warm); text-shadow: 0 0 12px rgba(230,164,74,0.4); }
+    .tree-stat-value.glow-teal { color: var(--teal); text-shadow: 0 0 12px rgba(77,184,199,0.4); }
 
     .tree-status-msg {
       text-align: center; margin-top: 12px; font-size: 12px; font-weight: 300;
@@ -505,7 +572,7 @@ module.exports = `
 
     /* Light theme tree adjustments */
     [data-theme="light"] .tree-glow {
-      background: radial-gradient(ellipse, rgba(45,159,95,0.2) 0%, rgba(74,122,122,0.12) 40%, transparent 70%);
+      background: radial-gradient(ellipse, rgba(220,100,140,0.2) 0%, rgba(200,120,150,0.12) 40%, transparent 70%);
     }
     [data-theme="light"] .tree-particle { opacity: 0.6; }
 
