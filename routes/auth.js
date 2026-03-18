@@ -1,9 +1,17 @@
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 
 module.exports = function ({ pool, views, config }) {
   const router = require("express").Router();
   const { pageHead, themeScript } = views;
   const { AUTH_SECRET, AUTH_MODE, SESSION_PASSWORD, SESSION_PIN } = config;
+
+  // Load vision icon for login animation
+  let visionIconSvg = '';
+  try {
+    visionIconSvg = fs.readFileSync(path.join(__dirname, '..', 'vision icon.svg'), 'utf8');
+  } catch (e) { /* no icon available */ }
 
   router.get("/login", (req, res) => {
     if (!AUTH_SECRET) return res.redirect("/");
@@ -71,7 +79,37 @@ ${themeScript()}
   .pin-key.fn { font-size: 12px; font-weight: 400; letter-spacing: 0.5px; text-transform: uppercase;
     color: var(--text-muted); border-color: transparent; }
   .pin-key.fn:hover { color: var(--text); }
+  @keyframes loginIconPulse {
+    0% { transform: scale(0.3); opacity: 0; }
+    40% { transform: scale(1.05); opacity: 1; }
+    60% { transform: scale(0.98); opacity: 1; }
+    80% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(1); opacity: 0; }
+  }
+  @keyframes loginGlow {
+    0% { box-shadow: 0 0 0 0 rgba(212,165,116,0); }
+    50% { box-shadow: 0 0 60px 20px rgba(212,165,116,0.3); }
+    100% { box-shadow: 0 0 80px 30px rgba(212,165,116,0); }
+  }
+  @keyframes loginFadeOut {
+    0% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  .login-success-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--bg); z-index: 1000; align-items: center; justify-content: center;
+    flex-direction: column; gap: 24px; }
+  .login-success-overlay.active { display: flex; animation: loginFadeOut 0.5s ease 1.6s forwards; }
+  .login-success-overlay .icon-container { width: 120px; height: 120px; border-radius: 24px;
+    overflow: hidden; animation: loginIconPulse 2s ease forwards, loginGlow 2s ease forwards; }
+  .login-success-overlay .icon-container svg { width: 100%; height: 100%; }
+  .login-success-overlay .welcome-text { font-size: 16px; font-weight: 300; color: var(--text-muted);
+    letter-spacing: 2px; text-transform: uppercase; opacity: 0;
+    animation: fadeInUp 0.4s ease 0.4s forwards; }
 </style>
+  <div class="login-success-overlay" id="login-success">
+    <div class="icon-container">${visionIconSvg}</div>
+    <div class="welcome-text">Welcome back</div>
+  </div>
   <div class="login-card">
     <div class="logo">Per-sistant</div>
     <h1>Welcome back</h1>
@@ -98,7 +136,16 @@ ${themeScript()}
           body: JSON.stringify({ password: value }),
         });
         var data = await res.json();
-        if (res.ok) { window.location.href = '/'; return null; }
+        if (res.ok) {
+          var overlay = document.getElementById('login-success');
+          if (overlay.querySelector('svg')) {
+            overlay.classList.add('active');
+            setTimeout(function() { window.location.href = '/'; }, 2000);
+          } else {
+            window.location.href = '/';
+          }
+          return null;
+        }
         else return data.error || 'Invalid credentials';
       } catch(e) { return 'Connection error'; }
     }

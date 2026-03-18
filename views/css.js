@@ -414,7 +414,15 @@ module.exports = `
       .topnav .nav-links a { padding: 6px 0; }
       h1 { font-size: 22px; }
       .top-cards { grid-template-columns: 1fr; }
-      .modal { width: 98%; padding: 16px; }
+      .modal { width: 100%; max-width: 100%; max-height: 100vh; height: 100vh;
+               border-radius: 0; padding: 16px; padding-bottom: 80px; }
+      .modal-overlay.active { align-items: stretch; }
+      .modal h2 { font-size: 18px; margin-bottom: 12px; }
+      .modal label { margin-top: 10px; margin-bottom: 4px; }
+      .modal textarea { min-height: 60px; }
+      .modal .modal-actions { position: sticky; bottom: 0; padding: 12px 0;
+                              background: var(--bg); margin-top: 16px; z-index: 5; }
+      .modal .mobile-form-grid { grid-template-columns: 1fr !important; gap: 0 !important; }
       .section { padding: 16px; }
       .todo-meta { gap: 8px; }
       .badge { font-size: 9px; padding: 2px 6px; }
@@ -430,7 +438,7 @@ module.exports = `
       .container { padding: 12px 8px; }
       h1 { font-size: 20px; }
       .topnav .nav-links { gap: 10px; font-size: 11px; }
-      .modal { padding: 12px; }
+      .modal { padding: 12px; padding-bottom: 80px; }
     }
 
     /* Mobile bottom navigation */
