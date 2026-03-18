@@ -10,7 +10,10 @@ ${themeScript()}
   ${navBar("/")}
   <div style="display:flex;align-items:center;justify-content:space-between;">
     <div><h1>Dashboard</h1><p class="subtitle" style="margin-bottom:0;">Your personal command center</p></div>
-    <button id="customize-btn" style="padding:6px 14px;font-size:10px;font-weight:500;letter-spacing:0.5px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;text-transform:uppercase;">Customize</button>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button id="work-mode-btn" class="work-mode-toggle"><span class="toggle-dot"></span>Work</button>
+      <button id="customize-btn" style="padding:6px 14px;font-size:10px;font-weight:500;letter-spacing:0.5px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;text-transform:uppercase;">Customize</button>
+    </div>
   </div>
   <div style="margin-bottom:36px;"></div>
 
@@ -281,6 +284,25 @@ ${themeScript()}
     <div class="dash-widget" data-widget="shortcuts" draggable="true">
       <div style="margin-top:24px;text-align:center;">
         <p style="font-size:11px;color:var(--text-muted);">Keyboard shortcuts: <span class="kbd">/</span> Search &middot; <span class="kbd">N</span> New task &middot; <span class="kbd">E</span> New email &middot; <span class="kbd">?</span> Show all</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Work Mode Focus Panel (shown when work mode active) -->
+  <div id="work-focus" style="display:none;">
+    <div class="section" style="margin-bottom:24px;border-color:rgba(90,154,90,0.3);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <h2 style="margin-bottom:0;color:var(--green);">Work Focus</h2>
+        <span id="work-clock" style="font-size:13px;font-weight:300;color:var(--text-muted);font-variant-numeric:tabular-nums;"></span>
+      </div>
+      <div id="work-stats" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;"></div>
+      <div style="margin-bottom:16px;">
+        <div style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">Priority Tasks</div>
+        <div id="work-tasks"></div>
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">Scheduled Emails</div>
+        <div id="work-emails"></div>
       </div>
     </div>
   </div>
@@ -847,6 +869,94 @@ document.addEventListener('click',function(e){
   else if(act==='search-pin')searchTogglePin(id,btn.dataset.pinned==='true');
 });
 
+// Work Mode
+var workMode = localStorage.getItem('workMode') === 'true';
+function initWorkMode() {
+  if (workMode) {
+    document.documentElement.setAttribute('data-mode', 'work');
+    document.getElementById('work-mode-btn').classList.add('active');
+  }
+  updateWorkModeUI();
+}
+function toggleWorkMode() {
+  workMode = !workMode;
+  localStorage.setItem('workMode', workMode);
+  if (workMode) {
+    document.documentElement.setAttribute('data-mode', 'work');
+    document.getElementById('work-mode-btn').classList.add('active');
+  } else {
+    document.documentElement.removeAttribute('data-mode');
+    document.getElementById('work-mode-btn').classList.remove('active');
+  }
+  updateWorkModeUI();
+}
+function updateWorkModeUI() {
+  var dashWidgets = document.getElementById('dash-widgets');
+  var workFocus = document.getElementById('work-focus');
+  if (workMode) {
+    dashWidgets.style.display = 'none';
+    workFocus.style.display = 'block';
+    loadWorkData();
+    startWorkClock();
+  } else {
+    dashWidgets.style.display = 'block';
+    workFocus.style.display = 'none';
+    if (workClockInterval) clearInterval(workClockInterval);
+  }
+}
+var workClockInterval = null;
+function startWorkClock() {
+  function tick() {
+    var now = new Date();
+    var h = now.getHours(), m = now.getMinutes();
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    var el = document.getElementById('work-clock');
+    if (el) el.textContent = h + ':' + String(m).padStart(2,'0') + ' ' + ampm;
+  }
+  tick();
+  if (workClockInterval) clearInterval(workClockInterval);
+  workClockInterval = setInterval(tick, 30000);
+}
+async function loadWorkData() {
+  try {
+    var stats = await fetch('/api/stats').then(function(r){return r.json();});
+    var statsEl = document.getElementById('work-stats');
+    if (statsEl) {
+      statsEl.innerHTML = [
+        {label:'Pending',value:stats.todos.pending,cls:'warm'},
+        {label:'Urgent',value:stats.todos.urgent,cls:'red'},
+        {label:'Overdue',value:stats.todos.overdue,cls:stats.todos.overdue>0?'red':'green'},
+      ].map(function(c){return '<div class="card"><div class="label">'+c.label+'</div><div class="value '+c.cls+'">'+c.value+'</div></div>';}).join('');
+    }
+    // Load work tasks (prioritize work category, urgent, overdue)
+    var todos = await fetch('/api/todos?completed=false&limit=50').then(function(r){return r.json();});
+    var workTasks = todos.filter(function(t){return t.category==='work';});
+    var otherUrgent = todos.filter(function(t){return t.category!=='work'&&(t.priority==='urgent'||t.priority==='high');});
+    var combined = workTasks.concat(otherUrgent);
+    combined.sort(function(a,b){
+      var pOrder = {urgent:0,high:1,medium:2,low:3};
+      return (pOrder[a.priority]||3) - (pOrder[b.priority]||3);
+    });
+    var tasksEl = document.getElementById('work-tasks');
+    if (tasksEl) {
+      if (!combined.length) { tasksEl.innerHTML = '<div class="empty-msg">No work tasks. Add tasks with category &quot;work&quot; to see them here.</div>'; }
+      else { tasksEl.innerHTML = combined.slice(0,15).map(function(t){return renderDashTodo(t);}).join(''); }
+    }
+    // Load scheduled emails
+    var emails = await fetch('/api/emails?status=scheduled').then(function(r){return r.json();});
+    var emailsEl = document.getElementById('work-emails');
+    if (emailsEl) {
+      if (!emails.length) { emailsEl.innerHTML = '<div class="empty-msg">No scheduled emails</div>'; }
+      else { emailsEl.innerHTML = emails.slice(0,5).map(function(e){return '<div class="todo-item" style="display:flex;align-items:center;gap:10px;"><button data-action="dash-send-email" data-id="'+e.id+'" title="Send now" style="background:none;border:1px solid var(--blue);color:var(--blue);padding:2px 8px;border-radius:6px;cursor:pointer;font-size:11px;flex-shrink:0;font-family:inherit;">Send</button><div class="todo-content" style="flex:1;"><div class="todo-title">'+esc(e.subject)+'</div><div class="todo-meta"><span>To: '+esc(e.recipient_name||e.recipient_email)+'</span></div></div></div>';}).join(''); }
+    }
+  } catch(e) { console.error('Work mode load error:', e); }
+}
+
+bindEvents([
+  ['work-mode-btn','click',toggleWorkMode],
+]);
+initWorkMode();
 loadLayout().then(load);
 </script>
 </body></html>`);
