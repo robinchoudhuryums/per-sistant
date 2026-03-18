@@ -94,7 +94,7 @@ ${themeScript()}
                 <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
               </filter>
               <mask id="dragon-mask">
-                <rect width="900" height="835" fill="white"/>
+                <rect width="706" height="1158" fill="white"/>
                 ${getDragonMask()}
               </mask>
             </defs>
@@ -105,20 +105,20 @@ ${themeScript()}
             <!-- Haku dragon (converted from reference image) beside the tree -->
             <g id="dragon-group" filter="url(#dragon-shadow)">
               <!-- Dragon glow aura -->
-              <ellipse id="dragon-aura" cx="260" cy="175" rx="65" ry="20" fill="url(#dragon-glow)" opacity="0.4">
+              <ellipse id="dragon-aura" cx="245" cy="170" rx="55" ry="18" fill="url(#dragon-glow)" opacity="0.4">
                 <animate attributeName="opacity" values="0.25;0.55;0.25" dur="4s" repeatCount="indefinite"/>
               </ellipse>
-              <!-- Haku SVG scaled, masked to cut out bg between limbs -->
-              <g transform="translate(188,68) scale(0.17)">
+              <!-- Haku SVG scaled (pixel art style, 706x1158 original) -->
+              <g transform="translate(195,30) scale(0.14)">
                 <g mask="url(#dragon-mask)">
                   ${getDragonSVG()}
                 </g>
               </g>
               <!-- Zzz sleep indicators -->
               <g id="dragon-zzz" opacity="0.5">
-                <text x="290" y="78" font-size="7" fill="#60d8d0" font-style="italic" opacity="0.7">z</text>
-                <text x="298" y="69" font-size="9" fill="#60d8d0" font-style="italic" opacity="0.5">z</text>
-                <text x="304" y="58" font-size="11" fill="#60d8d0" font-style="italic" opacity="0.3">z</text>
+                <text x="275" y="38" font-size="7" fill="#60d8d0" font-style="italic" opacity="0.7">z</text>
+                <text x="283" y="29" font-size="9" fill="#60d8d0" font-style="italic" opacity="0.5">z</text>
+                <text x="289" y="18" font-size="11" fill="#60d8d0" font-style="italic" opacity="0.3">z</text>
               </g>
               <!-- Gentle breathing animation -->
               <animateTransform attributeName="transform" type="translate" values="0,0;0,-0.4;0,0" dur="4s" repeatCount="indefinite"/>
