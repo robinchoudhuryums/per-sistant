@@ -14,23 +14,25 @@ try {
   const svgContent = fs.readFileSync(path.join(__dirname, 'haku-dragon.svg'), 'utf8');
   // Extract path elements, filtering out background rect and checkerboard tiles
   const pathRegex = /<path\s+d="([^"]+)"\s+fill="([^"]+)"\s*\/>/g;
-  const greyFills = new Set([
-    '#F2F2F2', '#EEE', '#FFF', '#FEFEFE', '#EDEDED', '#ECECEC', '#FCFCFC',
-    '#FDFDFD', '#FBFBFB', '#F9F9F9', '#ECEDEC', '#EDECEC', '#EDECEB',
-    '#EBECEC', '#EBEBEB', '#EBECED', '#ECEBEB', '#EAEBEB', '#E9EBEB',
-    '#EBEDEC', '#F7F9F9', '#FEFDFD', '#FDFEFE', '#FCFDFD', '#FBFDFC',
-    '#F0EFEF', '#EEEDED', '#EEECEC', '#EBECEB', '#EBEAEA', '#EAEBEA',
-    '#FDFCFC', '#FDFDFC', '#FCFCFB', '#FEFEFE', '#EDEDED'
-  ]);
-  
+
+  function parseHex(hex) {
+    hex = hex.replace('#', '');
+    if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+    return [parseInt(hex.slice(0,2),16), parseInt(hex.slice(2,4),16), parseInt(hex.slice(4,6),16)];
+  }
+
   let match;
   const paths = [];
   while ((match = pathRegex.exec(svgContent)) !== null) {
     const [, d, fill] = match;
     // Skip background rectangle
     if (d.trim() === 'M0 0h706v1158H0V0Z') continue;
-    // Skip checkerboard tiles (short simple rect paths with grey fills)
-    if (d.length < 35 && greyFills.has(fill) && /^M\d+ \d+h\d+v\d+/.test(d.trim())) continue;
+    const [r, g, b] = parseHex(fill);
+    const minCh = Math.min(r, g, b);
+    // Skip near-white fills (background/checker) — dragon body is #E3E3E3 (min 227)
+    if (minCh >= 228) continue;
+    // Skip checkerboard grid tiles (20px stepping pattern) with light fills
+    if (minCh >= 220 && /[hv]-?20/.test(d)) continue;
     paths.push(`<path d="${d}" fill="${fill}"/>`);
   }
   _dragonSVG = paths.join('\n');
