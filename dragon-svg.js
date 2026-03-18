@@ -31,13 +31,18 @@ try {
     const minCh = Math.min(r, g, b);
     const spread = Math.max(r, g, b) - minCh;
     // Skip near-white fills (background/checker) — dragon body is #E3E3E3 (min 227)
-    if (minCh >= 225) continue;
+    if (minCh >= 220) continue;
     // Skip checkerboard grid tiles (20px stepping pattern) with light fills
-    if (minCh >= 215 && /[hv]-?20/.test(d)) continue;
+    if (minCh >= 210 && /[hv]-?20/.test(d)) continue;
     // Skip anti-aliasing transition colors (high spread = blending between bg and dragon)
-    if (minCh >= 215 && spread > 12) continue;
+    if (minCh >= 210 && spread > 12) continue;
     // Skip small edge fringe fragments
-    if (minCh >= 215 && d.length < 40) continue;
+    if (minCh >= 210 && d.length < 40) continue;
+    // Skip desaturated gray gap fills between body segments (e.g. between arm and body)
+    if (minCh >= 200 && spread <= 12 && d.length < 120) continue;
+    // Skip warm beige whisker/antler background bleeds (head region, y < 400)
+    const coordMatch = d.match(/^[Mm]\s*(\d+)\s+(\d+)/);
+    if (coordMatch && parseInt(coordMatch[2]) < 400 && minCh >= 190 && spread >= 25 && d.length > 200) continue;
     paths.push(`<path d="${d}" fill="${fill}"/>`);
   }
   _dragonSVG = paths.join('\n');
