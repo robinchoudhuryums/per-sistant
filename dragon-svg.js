@@ -29,10 +29,15 @@ try {
     if (d.trim() === 'M0 0h706v1158H0V0Z') continue;
     const [r, g, b] = parseHex(fill);
     const minCh = Math.min(r, g, b);
+    const spread = Math.max(r, g, b) - minCh;
     // Skip near-white fills (background/checker) — dragon body is #E3E3E3 (min 227)
-    if (minCh >= 228) continue;
+    if (minCh >= 225) continue;
     // Skip checkerboard grid tiles (20px stepping pattern) with light fills
-    if (minCh >= 220 && /[hv]-?20/.test(d)) continue;
+    if (minCh >= 215 && /[hv]-?20/.test(d)) continue;
+    // Skip anti-aliasing transition colors (high spread = blending between bg and dragon)
+    if (minCh >= 215 && spread > 12) continue;
+    // Skip small edge fringe fragments
+    if (minCh >= 215 && d.length < 40) continue;
     paths.push(`<path d="${d}" fill="${fill}"/>`);
   }
   _dragonSVG = paths.join('\n');
