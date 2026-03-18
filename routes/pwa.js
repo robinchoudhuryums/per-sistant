@@ -3,9 +3,17 @@
 // ============================================================================
 
 const express = require("express");
+const fs = require("fs");
+const path = require("path");
 
 module.exports = function ({}) {
   const router = express.Router();
+
+  // Load custom icon SVG at startup
+  let customIcon = '';
+  try {
+    customIcon = fs.readFileSync(path.join(__dirname, '..', 'vision icon.svg'), 'utf8');
+  } catch (e) { /* fallback to default below */ }
 
   router.get("/manifest.json", (req, res) => {
     res.json({
@@ -101,8 +109,9 @@ module.exports = function ({}) {
   <text x="256" y="340" font-family="Inter,sans-serif" font-size="280" font-weight="300" fill="#a08cd4" text-anchor="middle">P</text>
 </svg>`;
 
-  router.get("/icon-192.svg", (req, res) => res.type("image/svg+xml").send(SVG_ICON));
-  router.get("/icon-512.svg", (req, res) => res.type("image/svg+xml").send(SVG_ICON));
+  const icon = customIcon || SVG_ICON;
+  router.get("/icon-192.svg", (req, res) => res.type("image/svg+xml").send(icon));
+  router.get("/icon-512.svg", (req, res) => res.type("image/svg+xml").send(icon));
 
   return router;
 };

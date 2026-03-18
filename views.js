@@ -16,6 +16,7 @@ function pageHead(title) {
   <title>${title} — Per-sistant</title>
   <link rel="manifest" href="/manifest.json">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="apple-touch-icon" href="/icon-192.svg">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#0a0b14">
   <link rel="preconnect" href="https://fonts.googleapis.com">
