@@ -58,13 +58,16 @@ ${themeScript()}
 <!-- Add/Edit Modal -->
 <div class="modal-overlay" id="modal">
   <div class="modal">
-    <h2 id="modal-title">New Task</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <h2 id="modal-title" style="margin-bottom:0;">New Task</h2>
+      <button id="modal-close-x" style="background:none;border:none;color:var(--text-muted);font-size:24px;cursor:pointer;padding:4px 8px;line-height:1;font-family:inherit;" aria-label="Close">&times;</button>
+    </div>
     <input type="hidden" id="edit-id">
     <label>Title</label>
     <input type="text" id="f-title" placeholder="What needs to be done?">
     <label>Description</label>
     <textarea id="f-desc" placeholder="Optional details..."></textarea>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+    <div class="mobile-form-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div><label>Priority</label>
         <select id="f-priority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select>
       </div>
@@ -72,7 +75,7 @@ ${themeScript()}
         <select id="f-horizon"><option value="short">Short-term</option><option value="medium">Medium-term</option><option value="long">Long-term</option></select>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+    <div class="mobile-form-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div><label>Category</label>
         <select id="f-category-select">
           <option value="">None</option>
@@ -83,7 +86,7 @@ ${themeScript()}
       <div><label>Due Date</label>
         <input type="date" id="f-due"></div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+    <div class="mobile-form-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div style="margin-top:12px;">
         <label style="display:inline;cursor:pointer">
           <input type="checkbox" id="f-recurring" style="width:auto;margin-right:6px;"> Recurring task
@@ -117,7 +120,7 @@ ${themeScript()}
         <input type="text" id="f-location-name" placeholder="e.g. Home, Office, Grocery Store" style="flex:1">
         <button id="get-location-btn" title="Use current location" style="padding:10px 14px;font-size:14px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;color:var(--teal);flex-shrink:0;">&#128205;</button>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px;">
+      <div class="mobile-form-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px;">
         <input type="number" step="any" id="f-location-lat" placeholder="Latitude" style="font-size:11px;">
         <input type="number" step="any" id="f-location-lng" placeholder="Longitude" style="font-size:11px;">
         <input type="number" id="f-location-radius" placeholder="Radius (m)" value="200" style="font-size:11px;">
@@ -751,6 +754,7 @@ bindEvents([
   ['get-location-btn','click',getLocation],
   ['add-dep-btn','click',addDep],
   ['cancel-modal-btn','click',closeModal],
+  ['modal-close-x','click',closeModal],
   ['save-todo-btn','click',saveTodo],
   ['save-template-btn','click',saveAsTemplate],
   ['delete-btn','click',deleteTodo],

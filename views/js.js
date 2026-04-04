@@ -56,6 +56,8 @@ if (navigator.serviceWorker) {
 var _touchStartX=0,_touchStartY=0;
 document.addEventListener('touchstart',function(e){_touchStartX=e.changedTouches[0].screenX;_touchStartY=e.changedTouches[0].screenY;},{passive:true});
 document.addEventListener('touchend',function(e){
+  // Don't swipe-navigate when a modal is open
+  if(document.querySelector('.modal-overlay.active'))return;
   var dx=e.changedTouches[0].screenX-_touchStartX,dy=e.changedTouches[0].screenY-_touchStartY;
   if(Math.abs(dx)>100&&Math.abs(dx)>Math.abs(dy)*1.5){
     var pages=['/','/todos','/emails','/notes','/calendar','/contacts','/review','/analytics','/settings'];
@@ -116,5 +118,9 @@ document.addEventListener('click',function(e){
   if(ub){e.stopPropagation();undoAction(ub.dataset.undoType,ub.dataset.undoId,ub.dataset.undoAction);}
   var nt=e.target.closest('#nav-toggle-btn');
   if(nt){document.querySelector('.nav-links').classList.toggle('mobile-open');}
+  // Close modal on overlay click (click on .modal-overlay but not .modal content)
+  if(e.target.classList.contains('modal-overlay')&&e.target.classList.contains('active')){
+    e.target.classList.remove('active');
+  }
 });
 `;
