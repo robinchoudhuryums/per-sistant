@@ -5,10 +5,10 @@ module.exports = function() {
     res.send(`${pageHead("Analytics")}
 <body>
 ${themeScript()}
+${navBar("/analytics")}
 <div class="container">
-  ${navBar("/analytics")}
   <h1>Analytics</h1>
-  <p class="subtitle">Productivity insights and trends</p>
+  <p class="subtitle">Productivity insights and trends.</p>
 
   <div class="filters" id="period-filters">
     <button data-period="week" class="active">This Week</button>
@@ -33,11 +33,11 @@ ${themeScript()}
   <div class="section" style="margin-bottom:24px;">
     <h2>Activity Heatmap (90 Days)</h2>
     <div id="heatmap" style="display:flex;flex-wrap:wrap;gap:2px;"></div>
-    <div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-top:8px;font-size:10px;color:var(--text-muted);">
-      Less <div style="width:12px;height:12px;border-radius:2px;background:var(--surface-2);"></div>
-      <div style="width:12px;height:12px;border-radius:2px;background:rgba(111,207,151,0.3);"></div>
-      <div style="width:12px;height:12px;border-radius:2px;background:rgba(111,207,151,0.6);"></div>
-      <div style="width:12px;height:12px;border-radius:2px;background:var(--green);"></div> More
+    <div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase;">
+      Less <div style="width:12px;height:12px;border-radius:2px;background:var(--paper-2);"></div>
+      <div style="width:12px;height:12px;border-radius:2px;background:color-mix(in oklch, var(--good) 30%, transparent);"></div>
+      <div style="width:12px;height:12px;border-radius:2px;background:color-mix(in oklch, var(--good) 60%, transparent);"></div>
+      <div style="width:12px;height:12px;border-radius:2px;background:var(--good);"></div> More
     </div>
   </div>
 
@@ -65,14 +65,14 @@ async function load() {
   var data = await fetch('/api/analytics?period='+curPeriod).then(r=>r.json());
 
   // Overview cards
-  var scoreColor = data.productivity_score >= 70 ? 'green' : data.productivity_score >= 40 ? 'yellow' : 'red';
+  var scoreColor = data.productivity_score >= 70 ? 'green' : data.productivity_score >= 40 ? 'warm' : 'red';
   document.getElementById('overview-cards').innerHTML = [
     {label:'Productivity Score',value:data.productivity_score,cls:scoreColor},
     {label:'Tasks Completed',value:data.total_completed,cls:'green'},
     {label:'Tasks Created',value:data.total_created,cls:'warm'},
-    {label:'Completion Rate',value:data.completion_rate+'%',cls:data.completion_rate>=70?'green':data.completion_rate>=40?'yellow':'red'},
+    {label:'Completion Rate',value:data.completion_rate+'%',cls:data.completion_rate>=70?'green':data.completion_rate>=40?'warm':'red'},
     {label:'Avg. Completion Time',value:data.avg_completion_hours?data.avg_completion_hours+'h':'N/A',cls:'teal'},
-    {label:'Emails Sent',value:data.emails_sent||0,cls:'blue'},
+    {label:'Emails Sent',value:data.emails_sent||0,cls:'teal'},
     {label:'Notes Created',value:data.notes_created||0,cls:'warm'},
   ].map(c => '<div class="card"><div class="label">'+c.label+'</div><div class="value '+c.cls+'">'+c.value+'</div></div>').join('');
 
@@ -83,7 +83,7 @@ async function load() {
     ? days.map(d => {
         var h = Math.max((parseInt(d.count)/maxDay)*160, 4);
         var label = new Date(d.day).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
-        return '<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0;"><div style="background:var(--green);width:100%;max-width:40px;height:'+h+'px;border-radius:4px 4px 0 0;transition:height 0.3s;"></div><div style="font-size:9px;color:var(--text-muted);margin-top:4px;text-align:center;white-space:nowrap;">'+label+'</div><div style="font-size:11px;font-weight:500;margin-top:2px;">'+d.count+'</div></div>';
+        return '<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0;"><div style="background:var(--good);width:100%;max-width:40px;height:'+h+'px;border-radius:2px 2px 0 0;transition:height 0.3s;"></div><div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:4px;text-align:center;white-space:nowrap;letter-spacing:0.04em;">'+label+'</div><div style="font-family:var(--mono);font-size:11px;font-weight:500;margin-top:2px;font-variant-numeric:tabular-nums;">'+d.count+'</div></div>';
       }).join('')
     : '<div class="empty-msg">No data yet</div>';
 
@@ -94,16 +94,16 @@ async function load() {
   var maxDow = Math.max(...dowData, 1);
   document.getElementById('dow-chart').innerHTML = dowData.map((count,i) => {
     var h = Math.max((count/maxDow)*160, 4);
-    return '<div style="display:flex;flex-direction:column;align-items:center;flex:1;"><div style="background:var(--teal);width:100%;max-width:36px;height:'+h+'px;border-radius:4px 4px 0 0;"></div><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">'+dowNames[i]+'</div><div style="font-size:11px;font-weight:500;margin-top:2px;">'+count+'</div></div>';
+    return '<div style="display:flex;flex-direction:column;align-items:center;flex:1;"><div style="background:var(--accent);width:100%;max-width:36px;height:'+h+'px;border-radius:2px 2px 0 0;"></div><div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:4px;letter-spacing:0.08em;text-transform:uppercase;">'+dowNames[i]+'</div><div style="font-family:var(--mono);font-size:11px;font-weight:500;margin-top:2px;font-variant-numeric:tabular-nums;">'+count+'</div></div>';
   }).join('');
 
   // Priority breakdown
-  var priColors = {urgent:'var(--red)',high:'var(--yellow)',medium:'var(--blue)',low:'var(--green)'};
+  var priColors = {urgent:'var(--warn)',high:'var(--warn)',medium:'var(--accent)',low:'var(--good)'};
   var priTotal = (data.priority_breakdown||[]).reduce((s,p)=>s+parseInt(p.count),0) || 1;
   document.getElementById('priority-chart').innerHTML = (data.priority_breakdown||[]).length
     ? (data.priority_breakdown||[]).map(p => {
         var pct = Math.round(parseInt(p.count)/priTotal*100);
-        return '<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="width:70px;font-size:12px;font-weight:400;text-transform:capitalize;">'+p.priority+'</div><div style="flex:1;height:20px;background:var(--surface-2);border-radius:4px;overflow:hidden;"><div style="height:100%;width:'+pct+'%;background:'+priColors[p.priority]+';border-radius:4px;transition:width 0.3s;"></div></div><div style="width:50px;text-align:right;font-size:12px;font-weight:500;">'+p.count+'</div></div>';
+        return '<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);"><div style="width:70px;font-size:12px;text-transform:capitalize;">'+p.priority+'</div><div style="flex:1;height:16px;background:var(--paper-2);border-radius:2px;overflow:hidden;"><div style="height:100%;width:'+pct+'%;background:'+priColors[p.priority]+';border-radius:2px;transition:width 0.3s;"></div></div><div style="width:50px;text-align:right;font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums;">'+p.count+'</div></div>';
       }).join('')
     : '<div class="empty-msg">No active tasks</div>';
 
@@ -112,16 +112,16 @@ async function load() {
     ? (data.category_breakdown||[]).map(c => {
         var total = parseInt(c.count), done = parseInt(c.completed);
         var pct = total > 0 ? Math.round(done/total*100) : 0;
-        return '<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="width:100px;font-size:12px;font-weight:400;text-transform:capitalize;">'+esc(c.category)+'</div><div style="flex:1;height:20px;background:var(--surface-2);border-radius:4px;overflow:hidden;"><div style="height:100%;width:'+pct+'%;background:var(--warm);border-radius:4px;"></div></div><div style="width:80px;text-align:right;font-size:11px;color:var(--text-muted);">'+done+'/'+total+' ('+pct+'%)</div></div>';
+        return '<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);"><div style="width:100px;font-size:12px;text-transform:capitalize;">'+esc(c.category)+'</div><div style="flex:1;height:16px;background:var(--paper-2);border-radius:2px;overflow:hidden;"><div style="height:100%;width:'+pct+'%;background:var(--accent);border-radius:2px;"></div></div><div style="width:80px;text-align:right;font-family:var(--mono);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;">'+done+'/'+total+' ('+pct+'%)</div></div>';
       }).join('')
     : '<div class="empty-msg">No data yet</div>';
 
   // Streak leaders
   document.getElementById('streak-leaders').innerHTML = (data.streak_leaders||[]).length
     ? (data.streak_leaders||[]).map((s,i) =>
-        '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="font-size:18px;font-weight:300;color:var(--text-muted);width:30px;text-align:center;">'+(i+1)+'</div><div style="flex:1;"><div style="font-size:14px;font-weight:400;">'+esc(s.title)+'</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+s.recurrence_rule+' &middot; Best: '+s.best_streak+'</div></div><div style="text-align:right;"><span class="badge streak">&#x1F525; '+s.streak_count+'</span></div></div>'
+        '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);"><div style="font-family:var(--display);font-size:18px;color:var(--muted);width:30px;text-align:center;font-variant-numeric:tabular-nums;">'+(i+1)+'</div><div style="flex:1;"><div style="font-size:14px;">'+esc(s.title)+'</div><div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px;letter-spacing:0.04em;">'+s.recurrence_rule+' &middot; Best: '+s.best_streak+'</div></div><div style="text-align:right;"><span class="badge streak">&#x1F525; '+s.streak_count+'</span></div></div>'
       ).join('')
-    : '<div class="empty-msg">No streaks yet. Complete recurring tasks to build streaks!</div>';
+    : '<div class="empty-msg">No streaks yet. Complete recurring tasks to build streaks.</div>';
 
   // Heatmap (GitHub-style, 90 days)
   var heatmap = data.heatmap || [];
@@ -135,7 +135,7 @@ async function load() {
     var key = d.toISOString().split('T')[0];
     var count = heatmapMap[key] || 0;
     var intensity = count === 0 ? 0 : count <= maxHeat * 0.33 ? 1 : count <= maxHeat * 0.66 ? 2 : 3;
-    var colors = ['var(--surface-2)', 'rgba(111,207,151,0.3)', 'rgba(111,207,151,0.6)', 'var(--green)'];
+    var colors = ['var(--paper-2)', 'color-mix(in oklch, var(--good) 30%, transparent)', 'color-mix(in oklch, var(--good) 60%, transparent)', 'var(--good)'];
     heatHtml += '<div title="'+key+': '+count+' tasks" style="width:12px;height:12px;border-radius:2px;background:'+colors[intensity]+';"></div>';
   }
   document.getElementById('heatmap').innerHTML = heatHtml;
