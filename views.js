@@ -179,13 +179,19 @@ function themeScript() {
       });
     });
 
+    // Server hydrate — only for first visits (no local choice yet).
+    // Once the user has picked a palette/mode locally, localStorage is
+    // authoritative; the server PATCH from the picker handlers is the only
+    // thing that updates it. This prevents navigation from clobbering a just-
+    // set preference when the PATCH hasn't persisted yet (or the column is
+    // missing and the server returns a default).
     fetch('/api/settings').then(function(r){return r.json();}).then(function(s){
       if (!s) return;
       var cur = getUI(), changed = false;
-      if (s.palette && PALETTES.indexOf(s.palette) >= 0 && cur.palette !== s.palette) {
+      if (!cur.palette && s.palette && PALETTES.indexOf(s.palette) >= 0) {
         cur.palette = s.palette; applyPalette(s.palette); changed = true;
       }
-      if ((s.theme === 'dark' || s.theme === 'light') && cur.mode !== s.theme) {
+      if (!cur.mode && (s.theme === 'dark' || s.theme === 'light')) {
         cur.mode = s.theme; applyMode(s.theme); changed = true;
       }
       if (changed) {
