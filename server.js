@@ -27,7 +27,13 @@ try { cron = require("node-cron"); } catch { cron = null; }
 
 const app = express();
 app.set("trust proxy", 1);
-app.use(express.json({ limit: "1mb" }));
+// Capture the raw request bytes alongside the parsed JSON. HMAC-signed
+// webhook handlers (e.g. routes/perfin.js) need the exact payload the sender
+// signed; restringifying req.body is not guaranteed to match byte-for-byte.
+app.use(express.json({
+  limit: "1mb",
+  verify: (req, _res, buf) => { req.rawBody = buf; },
+}));
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 
 // ---------------------------------------------------------------------------
@@ -101,12 +107,14 @@ async function processScheduledEmails() {
     for (const email of r.rows) {
       try {
         const transporter = getSmtpTransporter();
-        await transporter.sendMail({
+        const mail = {
           from: process.env.SMTP_FROM || process.env.SMTP_USER,
           to: email.recipient_email,
           subject: email.subject,
           text: email.body,
-        });
+        };
+        if (email.body_html) mail.html = email.body_html;
+        await transporter.sendMail(mail);
         await pool.query("UPDATE emails SET status = 'sent', sent_at = now() WHERE id = $1", [email.id]);
         console.log(`Sent scheduled email ${email.id} to ${email.recipient_email}`);
       } catch (err) {
@@ -168,6 +176,7 @@ async function start() {
     if (config.PERFIN_URL) console.log(`Linked to Perfin: ${config.PERFIN_URL}`);
     if (config.AUTH_SECRET) console.log(`Authentication: ${config.AUTH_MODE} mode`);
     if (process.env.SMTP_HOST) console.log("SMTP configured for email sending");
+    if (process.env.PERSISTENT_WEBHOOK_SECRET) console.log("Perfin webhook receiver enabled");
 
     // Start keep-alive self-ping (Render free tier)
     startKeepAlive(PORT);
