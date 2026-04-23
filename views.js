@@ -1,8 +1,6 @@
 // ============================================================================
 // Per-sistant — Shared Views (CSS, JS, HTML helpers)
 // ============================================================================
-// Warm-paper design system. CSS is split across three files so each fits in a
-// single push; they concatenate into one <style> block at page-head time.
 
 const { PERFIN_URL } = require("./config");
 
@@ -11,6 +9,10 @@ const CSS_COMPONENTS = require("./views/css-components");
 const CSS_PAGES = require("./views/css-pages");
 const SHARED_CSS = CSS_CORE + CSS_COMPONENTS + CSS_PAGES;
 const SHARED_JS = require("./views/js");
+const PRIMITIVES_JS = require("./views/primitives");
+// Settings-only enhancement that adds a palette picker to the Appearance
+// section. Loaded globally; it no-ops off the /settings route.
+const SETTINGS_PATCH = require("./views/settings-patch");
 
 function pageHead(title) {
   return `<!DOCTYPE html>
@@ -27,13 +29,13 @@ function pageHead(title) {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <style>${SHARED_CSS}</style>
+  <style>${SHARED_CSS}${APPBAR_PICKER_CSS}</style>
   <script>${SHARED_JS}</script>
+  <script>${PRIMITIVES_JS}</script>
+  <script>${SETTINGS_PATCH}</script>
 </head>`;
 }
 
-// Navigation items, shared between sidebar render paths.
-// Icons kept small and line-based to match the mono-label aesthetic.
 const NAV = [
   { href: "/",         label: "Dashboard", id: "dashboard" },
   { href: "/todos",    label: "To-Dos",    id: "todos" },
@@ -47,7 +49,6 @@ const NAV = [
 ];
 
 function navIcon(id) {
-  // Tiny 14x14 stroke-only glyphs matching the design bundle's aesthetic.
   const c = 'currentColor', sw = '1.3';
   switch (id) {
     case 'dashboard': return `<svg width="14" height="14" viewBox="0 0 14 14"><rect x="1" y="1" width="5" height="5" fill="none" stroke="${c}" stroke-width="${sw}"/><rect x="8" y="1" width="5" height="5" fill="none" stroke="${c}" stroke-width="${sw}"/><rect x="1" y="8" width="5" height="5" fill="none" stroke="${c}" stroke-width="${sw}"/><rect x="8" y="8" width="5" height="5" fill="none" stroke="${c}" stroke-width="${sw}"/></svg>`;
@@ -63,10 +64,20 @@ function navIcon(id) {
   }
 }
 
-// navBar(activePath) — renders the sidebar plus the app bar with breadcrumbs.
-// The sidebar is position:fixed; body has padding-left:220px (css.js) so main
-// content isn't obscured. Pages keep their existing `<div class="container">`
-// wrapper unchanged.
+const APPBAR_PICKER_CSS = `
+.appbar .ui-controls { display: flex; align-items: center; gap: 10px; }
+.appbar .mode-toggle {
+  background: transparent; border: 1px solid var(--line); cursor: pointer;
+  padding: 5px 10px; border-radius: 2px; color: var(--muted);
+  font-family: var(--mono); font-size: 10px; font-weight: 500;
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.appbar .mode-toggle:hover { background: var(--paper-2); color: var(--ink); }
+@media (max-width: 480px) {
+  .appbar .mode-toggle { padding: 4px 8px; font-size: 9px; }
+}
+`;
+
 function navBar(activePath) {
   const active = (NAV.find(n => n.href === activePath) || {}).id || 'dashboard';
   const links = NAV.map(n => `
@@ -107,57 +118,84 @@ function navBar(activePath) {
     <span class="here">${here}</span>
   </nav>
   <div class="spacer"></div>
+  <div class="ui-controls">
+    <button id="mode-toggle" class="mode-toggle" aria-label="Toggle light/dark mode">Light</button>
+  </div>
 </header>`;
 }
 
-// themeScript — applies saved palette + mode to body on every page and wires
-// the sidebar collapse + mobile toggle. Pulls server-side prefs once via
-// /api/settings for first-load correctness across devices.
 function themeScript() {
   return `<script>
   (function(){
-    function apply() {
-      try {
-        var saved = JSON.parse(localStorage.getItem('ps-ui') || '{}');
-        var palette = saved.palette || 'copper';
-        var mode = saved.mode || 'light';
-        document.body.setAttribute('data-palette', palette);
-        document.body.setAttribute('data-mode', mode);
-        if (saved.collapsed === true) document.body.classList.add('sidebar-collapsed');
-      } catch {}
+    var PALETTES = ['copper','indigo','forest','slate','plum','mono'];
+    function getUI() { try { return JSON.parse(localStorage.getItem('ps-ui') || '{}'); } catch { return {}; } }
+    function setUI(u) { localStorage.setItem('ps-ui', JSON.stringify(u)); }
+    function applyPalette(p) { document.body && document.body.setAttribute('data-palette', p); }
+    function applyMode(m) { document.body && document.body.setAttribute('data-mode', m); }
+    function applyCollapsed(c) { document.body && document.body.classList.toggle('sidebar-collapsed', !!c); }
+
+    function paint() {
+      var s = getUI();
+      applyPalette(s.palette || 'copper');
+      applyMode(s.mode || 'light');
+      applyCollapsed(s.collapsed === true);
     }
-    if (document.body) apply();
+    if (document.body) paint();
+
+    function patchServer(field, value) {
+      var body = {}; body[field] = value;
+      fetch('/api/settings', {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      }).catch(function(){});
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
-      apply();
+      paint();
+      var mt = document.getElementById('mode-toggle');
+      if (mt) mt.textContent = (getUI().mode === 'dark') ? 'Dark' : 'Light';
+
       var btn = document.getElementById('sidebar-collapse-btn');
       if (btn) btn.addEventListener('click', function() {
         document.body.classList.toggle('sidebar-collapsed');
-        var s = {};
-        try { s = JSON.parse(localStorage.getItem('ps-ui') || '{}'); } catch {}
+        var s = getUI();
         s.collapsed = document.body.classList.contains('sidebar-collapsed');
-        localStorage.setItem('ps-ui', JSON.stringify(s));
+        setUI(s);
       });
+
       var mob = document.getElementById('mobile-sidebar-toggle');
       if (mob) mob.addEventListener('click', function() {
         document.body.classList.toggle('sidebar-open');
       });
+
+      if (mt) mt.addEventListener('click', function() {
+        var s = getUI();
+        var next = s.mode === 'dark' ? 'light' : 'dark';
+        s.mode = next; setUI(s);
+        applyMode(next);
+        mt.textContent = next === 'dark' ? 'Dark' : 'Light';
+        patchServer('theme', next);
+      });
     });
+
     fetch('/api/settings').then(function(r){return r.json();}).then(function(s){
       if (!s) return;
-      var cur = {};
-      try { cur = JSON.parse(localStorage.getItem('ps-ui') || '{}'); } catch {}
-      if (s.palette && cur.palette !== s.palette) {
-        cur.palette = s.palette;
-        if (document.body) document.body.setAttribute('data-palette', s.palette);
+      var cur = getUI(), changed = false;
+      if (s.palette && PALETTES.indexOf(s.palette) >= 0 && cur.palette !== s.palette) {
+        cur.palette = s.palette; applyPalette(s.palette); changed = true;
       }
-      if (s.theme === 'dark' || s.theme === 'light') {
-        cur.mode = s.theme;
-        if (document.body) document.body.setAttribute('data-mode', s.theme);
+      if ((s.theme === 'dark' || s.theme === 'light') && cur.mode !== s.theme) {
+        cur.mode = s.theme; applyMode(s.theme); changed = true;
       }
-      localStorage.setItem('ps-ui', JSON.stringify(cur));
+      if (changed) {
+        setUI(cur);
+        var mt = document.getElementById('mode-toggle');
+        if (mt) mt.textContent = cur.mode === 'dark' ? 'Dark' : 'Light';
+      }
     }).catch(function(){});
   })();
 </script>`;
 }
 
-module.exports = { SHARED_CSS, SHARED_JS, pageHead, navBar, themeScript };
+module.exports = { SHARED_CSS, SHARED_JS, PRIMITIVES_JS, SETTINGS_PATCH, pageHead, navBar, themeScript };

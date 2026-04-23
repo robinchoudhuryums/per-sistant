@@ -5,14 +5,14 @@ module.exports = function() {
     res.send(`${pageHead("Weekly Review")}
 <body>
 ${themeScript()}
+${navBar("/review")}
 <div class="container">
-  ${navBar("/review")}
   <h1>Weekly Review</h1>
   <p class="subtitle" id="review-period"></p>
 
   <div class="top-cards" id="review-cards"></div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
     <div class="section">
       <h2>Completed This Week</h2>
       <div id="completed-list"></div>
@@ -24,14 +24,14 @@ ${themeScript()}
   </div>
 
   <!-- AI Summary -->
-  <div id="review-summary-section" style="display:none;margin-top:24px;">
+  <div id="review-summary-section" style="display:none;margin-top:20px;">
     <div class="section">
       <h2>AI Weekly Summary</h2>
-      <div id="review-summary" style="font-size:14px;font-weight:300;line-height:1.7;"></div>
+      <div id="review-summary" style="font-size:14px;line-height:1.7;color:var(--ink);"></div>
     </div>
   </div>
 
-  <div class="section" style="margin-top:24px;">
+  <div class="section" style="margin-top:20px;">
     <h2>Coming Up Next Week</h2>
     <div id="next-week-list"></div>
   </div>
@@ -55,8 +55,8 @@ async function load() {
     : '<div class="empty-msg">No tasks completed yet this week</div>';
 
   document.getElementById('overdue-list').innerHTML = data.overdue_tasks.length
-    ? data.overdue_tasks.map(t => '<div class="todo-item"><div class="todo-content"><div class="todo-title" style="color:var(--red)">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span style="color:var(--red)">Due: '+new Date(t.due_date).toLocaleDateString()+'</span></div></div></div>').join('')
-    : '<div class="empty-msg">No overdue tasks!</div>';
+    ? data.overdue_tasks.map(t => '<div class="todo-item"><div class="todo-content"><div class="todo-title" style="color:var(--warn)">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span style="color:var(--warn)">Due: '+new Date(t.due_date).toLocaleDateString()+'</span></div></div></div>').join('')
+    : '<div class="empty-msg">No overdue tasks.</div>';
 
   document.getElementById('next-week-list').innerHTML = data.upcoming_tasks.length
     ? data.upcoming_tasks.map(t => '<div class="todo-item"><div class="todo-content"><div class="todo-title">'+esc(t.title)+'</div><div class="todo-meta"><span class="badge '+t.priority+'">'+t.priority+'</span><span>Due: '+new Date(t.due_date).toLocaleDateString()+'</span></div></div></div>').join('')

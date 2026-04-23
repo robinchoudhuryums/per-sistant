@@ -5,17 +5,18 @@ module.exports = function() {
   res.send(`${pageHead("Calendar")}
 <body>
 ${themeScript()}
+${navBar("/calendar")}
 <div class="container">
-  ${navBar("/calendar")}
   <h1>Calendar</h1>
-  <p class="subtitle">Tasks, emails, and reminders at a glance</p>
+  <p class="subtitle">Tasks, emails, and reminders at a glance.</p>
 
-  <div class="actions">
+  <div class="actions" style="align-items:center;">
     <button id="btn-prev-month">&larr; Previous</button>
-    <span id="cal-title" style="font-size:18px;font-weight:300;padding:0 16px;"></span>
+    <span id="cal-title" class="mono-label" style="padding:0 10px;font-size:12px;color:var(--ink);"></span>
     <button id="btn-next-month">Next &rarr;</button>
-    <a href="/api/calendar.ics" class="btn" style="margin-left:auto;" download>Export iCal</a>
-    <button id="btn-today" style="margin-left:auto;">Today</button>
+    <div style="flex:1"></div>
+    <a href="/api/calendar.ics" class="btn" download>Export iCal</a>
+    <button id="btn-today">Today</button>
   </div>
 
   <div class="section">
@@ -50,7 +51,6 @@ async function load() {
   for (var d = 1; d <= daysInMonth; d++) {
     var date = new Date(calYear, calMonth, d);
     var isToday = date.getTime() === today.getTime();
-    var dateStr = calYear+'-'+String(calMonth+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
     var dayEvents = events.filter(e => {
       var ed = new Date(e.event_date);
       return ed.getFullYear()===calYear && ed.getMonth()===calMonth && ed.getDate()===d;
@@ -59,7 +59,7 @@ async function load() {
     dayEvents.slice(0,3).forEach(e => {
       html += '<div class="cal-event '+e.type+(e.recurring_projection?' recurring-proj':'')+'">'+( e.recurring_projection?'&#x1F501; ':'')+esc(e.title)+'</div>';
     });
-    if (dayEvents.length > 3) html += '<div style="font-size:9px;color:var(--text-muted)">+'+(dayEvents.length-3)+' more</div>';
+    if (dayEvents.length > 3) html += '<div style="font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:0.04em;">+'+(dayEvents.length-3)+' more</div>';
     html += '</div>';
   }
   // Next month padding
