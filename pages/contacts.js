@@ -5,10 +5,10 @@ module.exports = function() {
   res.send(`${pageHead("Contacts")}
 <body>
 ${themeScript()}
+${navBar("/contacts")}
 <div class="container">
-  ${navBar("/contacts")}
   <h1>Contacts</h1>
-  <p class="subtitle">Manage your email contacts for quick lookup</p>
+  <p class="subtitle">Manage your email contacts for quick lookup.</p>
 
   <div class="actions">
     <button class="primary" id="btn-add-contact">+ Add Contact</button>
@@ -106,7 +106,6 @@ function importCSV(input) {
     for (var i = 0; i < lines.length; i++) {
       var parts = lines[i].split(',').map(s => s.trim().replace(/^["']|["']$/g, ''));
       if (parts.length >= 2) {
-        // Skip header row
         if (i === 0 && (parts[0].toLowerCase() === 'name' || parts[1].toLowerCase() === 'email')) continue;
         contacts.push({ name: parts[0], email: parts[1] });
       }
