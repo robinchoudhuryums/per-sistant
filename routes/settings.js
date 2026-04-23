@@ -28,6 +28,10 @@ module.exports = function ({ pool, config }) {
       settings.smtp_configured = !!(process.env.SMTP_HOST && process.env.SMTP_USER);
       settings.ai_configured = isAIAvailable();
       settings.perfin_url = PERFIN_URL || settings.perfin_url || null;
+      // True when PERSISTENT_WEBHOOK_SECRET is set so the inbound Perfin
+      // webhook will validate; the settings UI uses this to warn the user
+      // when the receiver isn't ready.
+      settings.perfin_webhook_configured = !!process.env.PERSISTENT_WEBHOOK_SECRET;
       res.json(settings);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -36,7 +40,7 @@ module.exports = function ({ pool, config }) {
 
   router.patch("/api/settings", async (req, res) => {
     try {
-      const { theme, session_timeout_minutes, default_horizon, perfin_url, dashboard_layout, slack_webhook_url, keep_alive_enabled, keep_alive_start, keep_alive_end, keep_alive_timezone } = req.body;
+      const { theme, session_timeout_minutes, default_horizon, perfin_url, perfin_webhook_recipient, dashboard_layout, slack_webhook_url, keep_alive_enabled, keep_alive_start, keep_alive_end, keep_alive_timezone } = req.body;
       const fields = [];
       const params = [];
       let idx = 1;
@@ -44,6 +48,7 @@ module.exports = function ({ pool, config }) {
       if (session_timeout_minutes !== undefined) { fields.push(`session_timeout_minutes = $${idx++}`); params.push(session_timeout_minutes); }
       if (default_horizon !== undefined) { fields.push(`default_horizon = $${idx++}`); params.push(default_horizon); }
       if (perfin_url !== undefined) { fields.push(`perfin_url = $${idx++}`); params.push(perfin_url || null); }
+      if (perfin_webhook_recipient !== undefined) { fields.push(`perfin_webhook_recipient = $${idx++}`); params.push(perfin_webhook_recipient || null); }
       if (dashboard_layout !== undefined) { fields.push(`dashboard_layout = $${idx++}`); params.push(JSON.stringify(dashboard_layout)); }
       if (slack_webhook_url !== undefined) { fields.push(`slack_webhook_url = $${idx++}`); params.push(slack_webhook_url || null); }
       if (keep_alive_enabled !== undefined) { fields.push(`keep_alive_enabled = $${idx++}`); params.push(!!keep_alive_enabled); }
