@@ -6,6 +6,9 @@ const { PERFIN_URL } = require("./config");
 
 const SHARED_CSS = require("./views/css");
 const SHARED_JS = require("./views/js");
+// Palette override — injected AFTER SHARED_CSS so forest/mint tokens win.
+// Keep as a separate module so future palette tweaks don't touch the big CSS.
+const SHARED_PALETTE = require("./views/css-palette");
 
 function pageHead(title) {
   return `<!DOCTYPE html>
@@ -21,7 +24,7 @@ function pageHead(title) {
   <meta name="theme-color" content="#0a0b14">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <style>${SHARED_CSS}</style>
+  <style>${SHARED_CSS}${SHARED_PALETTE}</style>
   <script>${SHARED_JS}</script>
 </head>`;
 }
@@ -70,4 +73,4 @@ function themeScript() {
   </script>`;
 }
 
-module.exports = { SHARED_CSS, SHARED_JS, pageHead, navBar, themeScript };
+module.exports = { SHARED_CSS, SHARED_JS, SHARED_PALETTE, pageHead, navBar, themeScript };
