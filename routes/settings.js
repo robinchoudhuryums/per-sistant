@@ -2,6 +2,8 @@ const express = require("express");
 const { isAIAvailable } = require("../ai");
 const { loadKeepAliveConfig } = require("../services/keep-alive");
 
+const VALID_PALETTES = ["copper", "indigo", "forest", "slate", "plum", "mono"];
+
 module.exports = function ({ pool, config }) {
   const router = express.Router();
   const { AUTH_MODE, PERFIN_URL } = config;
@@ -24,14 +26,12 @@ module.exports = function ({ pool, config }) {
   router.get("/api/settings", async (req, res) => {
     try {
       const r = await pool.query("SELECT * FROM user_settings WHERE id = 1");
-      const settings = r.rows[0] || { theme: "dark", session_timeout_minutes: 15, default_horizon: "short" };
+      const settings = r.rows[0] || { theme: "dark", session_timeout_minutes: 15, default_horizon: "short", palette: "copper" };
       settings.smtp_configured = !!(process.env.SMTP_HOST && process.env.SMTP_USER);
       settings.ai_configured = isAIAvailable();
       settings.perfin_url = PERFIN_URL || settings.perfin_url || null;
-      // True when PERSISTENT_WEBHOOK_SECRET is set so the inbound Perfin
-      // webhook will validate; the settings UI uses this to warn the user
-      // when the receiver isn't ready.
       settings.perfin_webhook_configured = !!process.env.PERSISTENT_WEBHOOK_SECRET;
+      settings.palette = settings.palette || "copper";
       res.json(settings);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -40,7 +40,7 @@ module.exports = function ({ pool, config }) {
 
   router.patch("/api/settings", async (req, res) => {
     try {
-      const { theme, session_timeout_minutes, default_horizon, perfin_url, perfin_webhook_recipient, dashboard_layout, slack_webhook_url, keep_alive_enabled, keep_alive_start, keep_alive_end, keep_alive_timezone } = req.body;
+      const { theme, session_timeout_minutes, default_horizon, perfin_url, perfin_webhook_recipient, palette, dashboard_layout, slack_webhook_url, keep_alive_enabled, keep_alive_start, keep_alive_end, keep_alive_timezone } = req.body;
       const fields = [];
       const params = [];
       let idx = 1;
@@ -49,6 +49,10 @@ module.exports = function ({ pool, config }) {
       if (default_horizon !== undefined) { fields.push(`default_horizon = $${idx++}`); params.push(default_horizon); }
       if (perfin_url !== undefined) { fields.push(`perfin_url = $${idx++}`); params.push(perfin_url || null); }
       if (perfin_webhook_recipient !== undefined) { fields.push(`perfin_webhook_recipient = $${idx++}`); params.push(perfin_webhook_recipient || null); }
+      if (palette !== undefined) {
+        if (!VALID_PALETTES.includes(palette)) return res.status(400).json({ error: `palette must be one of ${VALID_PALETTES.join(", ")}` });
+        fields.push(`palette = $${idx++}`); params.push(palette);
+      }
       if (dashboard_layout !== undefined) { fields.push(`dashboard_layout = $${idx++}`); params.push(JSON.stringify(dashboard_layout)); }
       if (slack_webhook_url !== undefined) { fields.push(`slack_webhook_url = $${idx++}`); params.push(slack_webhook_url || null); }
       if (keep_alive_enabled !== undefined) { fields.push(`keep_alive_enabled = $${idx++}`); params.push(!!keep_alive_enabled); }
