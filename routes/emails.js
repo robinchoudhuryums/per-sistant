@@ -35,7 +35,7 @@ module.exports = function createEmailRoutes({ pool, config, helpers }) {
 
   router.post("/api/emails", async (req, res) => {
     try {
-      const { recipient_name, recipient_email, subject, body, scheduled_at } = req.body;
+      const { recipient_name, recipient_email, subject, body, body_html, scheduled_at } = req.body;
       if (!recipient_email || !subject || !body) {
         return res.status(400).json({ error: "Recipient email, subject, and body are required." });
       }
@@ -45,8 +45,8 @@ module.exports = function createEmailRoutes({ pool, config, helpers }) {
       }
       const status = scheduled_at ? "scheduled" : "draft";
       const r = await pool.query(
-        `INSERT INTO emails (recipient_name, recipient_email, subject, body, status, scheduled_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [recipient_name || null, recipient_email, subject, body, status, scheduled_at || null]
+        `INSERT INTO emails (recipient_name, recipient_email, subject, body, body_html, status, scheduled_at) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+        [recipient_name || null, recipient_email, subject, body, body_html || null, status, scheduled_at || null]
       );
       res.json(r.rows[0]);
     } catch (err) {
@@ -56,7 +56,7 @@ module.exports = function createEmailRoutes({ pool, config, helpers }) {
 
   router.patch("/api/emails/:id", async (req, res) => {
     try {
-      const { recipient_name, recipient_email, subject, body, scheduled_at, status } = req.body;
+      const { recipient_name, recipient_email, subject, body, body_html, scheduled_at, status } = req.body;
       const fields = [];
       const params = [];
       let idx = 1;
@@ -64,6 +64,7 @@ module.exports = function createEmailRoutes({ pool, config, helpers }) {
       if (recipient_email !== undefined) { fields.push(`recipient_email = $${idx++}`); params.push(recipient_email); }
       if (subject !== undefined) { fields.push(`subject = $${idx++}`); params.push(subject); }
       if (body !== undefined) { fields.push(`body = $${idx++}`); params.push(body); }
+      if (body_html !== undefined) { fields.push(`body_html = $${idx++}`); params.push(body_html); }
       if (scheduled_at !== undefined) { fields.push(`scheduled_at = $${idx++}`); params.push(scheduled_at); }
       if (status !== undefined) { fields.push(`status = $${idx++}`); params.push(status); }
       if (!fields.length) return res.status(400).json({ error: "No fields to update." });
@@ -103,12 +104,14 @@ module.exports = function createEmailRoutes({ pool, config, helpers }) {
         secure: process.env.SMTP_PORT === "465",
         auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
       });
-      await transporter.sendMail({
+      const mail = {
         from: process.env.SMTP_FROM || process.env.SMTP_USER,
         to: email.recipient_email,
         subject: email.subject,
         text: email.body,
-      });
+      };
+      if (email.body_html) mail.html = email.body_html;
+      await transporter.sendMail(mail);
       await pool.query("UPDATE emails SET status = 'sent', sent_at = now() WHERE id = $1", [req.params.id]);
       res.json({ ok: true, message: "Email sent successfully." });
     } catch (err) {
