@@ -5,19 +5,19 @@ module.exports = function() {
   res.send(`${pageHead("Notes")}
 <body>
 ${themeScript()}
+${navBar("/notes")}
 <div class="container">
-  ${navBar("/notes")}
   <h1>Notes</h1>
-  <p class="subtitle">Quick notes and reminders</p>
+  <p class="subtitle">Quick notes and reminders.</p>
 
   <div class="actions">
-    <button class="primary" id="new-note-btn">+ New Note</button>
-    <button id="note-select-toggle">Select</button>
+    <button class="btn primary" id="new-note-btn">+ New Note</button>
+    <button class="btn" id="note-select-toggle">Select</button>
   </div>
-  <div id="note-bulk-bar" style="display:none;padding:10px 16px;margin-bottom:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);align-items:center;gap:8px;font-size:13px;">
+  <div id="note-bulk-bar" style="display:none;padding:10px 16px;margin-bottom:12px;background:var(--paper-2);border:1px solid var(--line);border-radius:var(--radius);align-items:center;gap:8px;font-size:13px;">
     <span id="note-bulk-count">0 selected</span>
-    <button id="note-bulk-del-btn" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
-    <button id="note-select-all-btn" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
+    <button class="btn danger" id="note-bulk-del-btn">Delete</button>
+    <button class="btn" id="note-select-all-btn" style="margin-left:auto;">Select All</button>
   </div>
 
   <div class="notes-grid" id="notes-grid"></div>
@@ -35,13 +35,13 @@ ${themeScript()}
       <label style="display:inline;cursor:pointer;font-size:11px;margin:0;">
         <input type="checkbox" id="n-markdown" style="width:auto;margin-right:4px;"> Markdown
       </label>
-      <button id="n-preview-btn" style="display:none;padding:2px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;">Preview</button>
+      <button class="btn" id="n-preview-btn" style="display:none;">Preview</button>
     </div>
     <div style="position:relative;">
       <textarea id="n-content" style="min-height:200px" placeholder="Write your note... (supports **bold**, *italic*, - lists, > quotes, [links](url))"></textarea>
-      <button id="note-voice-btn" title="Voice input" style="position:absolute;top:10px;right:10px;padding:6px 10px;font-size:14px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:var(--surface);color:var(--warm);z-index:1;">&#127908;</button>
+      <button id="note-voice-btn" title="Voice input" style="position:absolute;top:10px;right:10px;padding:6px 10px;font-size:14px;border:1px solid var(--line);border-radius:2px;cursor:pointer;background:var(--paper-card);color:var(--accent);z-index:1;">&#127908;</button>
     </div>
-    <div id="n-md-preview" style="display:none;min-height:100px;max-height:300px;overflow-y:auto;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);font-size:13px;line-height:1.6;margin-bottom:12px;"></div>
+    <div id="n-md-preview" style="display:none;min-height:100px;max-height:300px;overflow-y:auto;padding:12px 16px;background:var(--paper-card);border:1px solid var(--line);border-radius:var(--radius);font-size:13px;line-height:1.6;margin-bottom:12px;"></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div><label>Color</label>
         <select id="n-color"><option value="default">Default</option><option value="warm">Warm</option><option value="teal">Teal</option><option value="green">Green</option><option value="blue">Blue</option></select>
@@ -55,23 +55,23 @@ ${themeScript()}
       </label>
     </div>
     <div style="margin-top:12px;">
-      <label>Tags <button id="suggest-tags-btn" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Suggest</button></label>
+      <label>Tags <button class="btn" id="suggest-tags-btn" style="float:right;">AI Suggest</button></label>
       <div id="n-tags-list" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;"></div>
       <div style="display:flex;gap:8px;">
         <input type="text" id="n-tag-input" placeholder="Add tag..." style="flex:1">
-        <button id="add-tag-btn" style="padding:8px 12px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:6px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Add</button>
+        <button class="btn primary" id="add-tag-btn">Add</button>
       </div>
     </div>
     <div class="modal-actions">
-      <button id="close-note-btn">Cancel</button>
-      <button class="primary" id="save-note-btn">Save</button>
-      <button class="danger" id="n-delete-btn" style="display:none">Delete</button>
+      <button class="btn" id="close-note-btn">Cancel</button>
+      <button class="btn primary" id="save-note-btn">Save</button>
+      <button class="btn danger" id="n-delete-btn" style="display:none">Delete</button>
     </div>
   </div>
 </div>
 
 <script>
-var colorMap = {warm:'var(--warm)',teal:'var(--teal)',green:'var(--green)',blue:'var(--blue)',default:'var(--border)'};
+var colorMap = {warm:'var(--accent)',teal:'var(--accent)',green:'var(--good)',blue:'var(--accent)',default:'var(--line)'};
 var currentTags = [];
 var noteSelectMode = false, noteSelectedIds = new Set();
 function toggleNoteSelect() {
@@ -92,7 +92,7 @@ async function noteBulkAction(action) {
 
 function renderTags() {
   document.getElementById('n-tags-list').innerHTML = currentTags.map((t,i) =>
-    '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:500;background:var(--surface-2);border:1px solid var(--border);color:var(--text-muted);">'+esc(t)+'<span data-action="remove-tag" data-idx="'+i+'" style="cursor:pointer;color:var(--red);font-size:12px;">&times;</span></span>'
+    '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:2px;font-family:var(--mono);font-size:10px;font-weight:500;background:var(--paper-2);border:1px solid var(--line);color:var(--muted);letter-spacing:0.04em;">'+esc(t)+'<span data-action="remove-tag" data-idx="'+i+'" style="cursor:pointer;color:var(--warn);font-size:12px;">&times;</span></span>'
   ).join('');
 }
 function addTag() {
@@ -122,11 +122,11 @@ async function load() {
   var notes = await fetch('/api/notes').then(r=>r.json());
   if (!notes.length) { document.getElementById('notes-grid').innerHTML = '<div class="empty-msg" style="grid-column:1/-1">No notes yet. Create your first note!</div>'; return; }
   document.getElementById('notes-grid').innerHTML = notes.map(n => {
-    var borderStyle = n.pinned ? 'border-color:'+(colorMap[n.color]||'var(--warm)') : (n.color!=='default'?'border-color:'+colorMap[n.color]:'');
-    var tagsHtml = n.tags && n.tags.length ? '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px;">'+n.tags.map(t=>'<span style="padding:2px 8px;border-radius:12px;font-size:9px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-muted);">'+esc(t)+'</span>').join('')+'</div>' : '';
+    var borderStyle = n.pinned ? 'border-left-color:'+(colorMap[n.color]||'var(--accent)') : (n.color!=='default'?'border-left:2px solid '+colorMap[n.color]:'');
+    var tagsHtml = n.tags && n.tags.length ? '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px;">'+n.tags.map(t=>'<span style="padding:2px 8px;border-radius:2px;font-family:var(--mono);font-size:9px;background:var(--paper-2);border:1px solid var(--line);color:var(--muted);letter-spacing:0.04em;">'+esc(t)+'</span>').join('')+'</div>' : '';
     return '<div class="note-card'+(n.pinned?' pinned':'')+'" style="position:relative;'+borderStyle+'" data-action="open-note" data-id="'+n.id+'">'+
-      '<input type="checkbox" class="note-bulk-check" data-id="'+n.id+'" style="display:'+(noteSelectMode?'block':'none')+';position:absolute;top:10px;right:10px;accent-color:var(--warm);cursor:pointer;z-index:2;">'+
-      (n.pinned?'<div style="font-size:10px;color:var(--warm);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">&#128204; Pinned</div>':'')+
+      '<input type="checkbox" class="note-bulk-check" data-id="'+n.id+'" style="display:'+(noteSelectMode?'block':'none')+';position:absolute;top:10px;right:10px;accent-color:var(--accent);cursor:pointer;z-index:2;">'+
+      (n.pinned?'<div style="font-family:var(--mono);font-size:9px;color:var(--accent);text-transform:uppercase;letter-spacing:0.12em;margin-bottom:6px;">&#128204; Pinned</div>':'')+
       (n.title?'<div class="note-title">'+esc(n.title)+(n.format==='markdown'?'<span class="md-badge">MD</span>':'')+'</div>':(!n.title && n.format==='markdown'?'<div style="margin-bottom:4px;"><span class="md-badge">MD</span></div>':''))+
       '<div class="note-preview'+(n.format==='markdown'?' md':'')+'">'+(n.format==='markdown'?renderMd(n.content):esc(n.content))+'</div>'+
       tagsHtml+
@@ -140,7 +140,7 @@ function toggleMdPreview() {
   var isMd = document.getElementById('n-markdown').checked;
   var previewBtn = document.getElementById('n-preview-btn');
   var previewEl = document.getElementById('n-md-preview');
-  previewBtn.style.display = isMd ? 'inline-block' : 'none';
+  previewBtn.style.display = isMd ? 'inline-flex' : 'none';
   if (isMd && previewEl.style.display !== 'none') {
     previewEl.innerHTML = renderMd(document.getElementById('n-content').value);
   } else if (!isMd) {
@@ -184,10 +184,10 @@ async function openEditNote(id) {
   document.getElementById('n-reminder').value = n.reminder_at?n.reminder_at.slice(0,16):'';
   document.getElementById('n-pinned').checked = n.pinned;
   document.getElementById('n-markdown').checked = n.format === 'markdown';
-  document.getElementById('n-preview-btn').style.display = n.format === 'markdown' ? 'inline-block' : 'none';
+  document.getElementById('n-preview-btn').style.display = n.format === 'markdown' ? 'inline-flex' : 'none';
   document.getElementById('n-preview-btn').textContent = 'Preview';
   document.getElementById('n-md-preview').style.display = 'none';
-  document.getElementById('n-delete-btn').style.display = 'inline-block';
+  document.getElementById('n-delete-btn').style.display = 'inline-flex';
   currentTags = n.tags || []; renderTags();
   document.getElementById('note-modal').classList.add('active');
 }
