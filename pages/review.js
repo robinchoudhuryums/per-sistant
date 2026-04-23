@@ -10,6 +10,12 @@ ${navBar("/review")}
   <h1>Weekly Review</h1>
   <p class="subtitle" id="review-period"></p>
 
+  <!-- Weekly theme — AI-generated one-liner based on this week's completed tasks -->
+  <div id="theme-section" class="section" style="display:none;margin-bottom:20px;">
+    <h2>This week's theme</h2>
+    <div id="theme-content" style="font-family:var(--display);font-size:20px;font-weight:500;letter-spacing:-0.3px;line-height:1.3;color:var(--ink);"></div>
+  </div>
+
   <div class="top-cards" id="review-cards"></div>
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
@@ -76,6 +82,27 @@ async function load() {
       document.getElementById('review-summary-section').style.display = 'block';
     }
   }).catch(function(){});
+
+  // Weekly theme — single-sentence "what was this week about?" via /api/ai/query.
+  // Only triggers when there are enough completed tasks to be meaningful (≥3).
+  // Uses the ad-hoc query endpoint rather than extending /api/ai/review-summary
+  // so the existing endpoint keeps returning its multi-sentence summary.
+  if (data.tasks_completed.length >= 3) {
+    var titles = data.tasks_completed.map(function(t) { return t.title; }).slice(0, 30).join(' | ');
+    fetch('/api/ai/query', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        query: 'In one short sentence (10 words or fewer, no quotes), what was the theme of the work I completed this week? Tasks: ' + titles,
+      }),
+    }).then(function(r){return r.json();}).then(function(d) {
+      if (d && d.answer) {
+        var theme = d.answer.trim().replace(/^["'"'']|["'"'']$/g, '');
+        document.getElementById('theme-content').textContent = theme;
+        document.getElementById('theme-section').style.display = 'block';
+      }
+    }).catch(function(){});
+  }
 }
 
 load();
