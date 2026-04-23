@@ -72,6 +72,7 @@ app.use(require("./routes/pwa")(deps));
 // Page Routes
 // ---------------------------------------------------------------------------
 app.get("/", require("./pages/dashboard")());
+app.get("/today", require("./pages/today")());
 app.get("/todos", require("./pages/todos")());
 app.get("/emails", require("./pages/emails")());
 app.get("/notes", require("./pages/notes")());
