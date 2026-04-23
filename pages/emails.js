@@ -5,21 +5,21 @@ module.exports = function() {
   res.send(`${pageHead("Emails")}
 <body>
 ${themeScript()}
+${navBar("/emails")}
 <div class="container">
-  ${navBar("/emails")}
   <h1>Emails</h1>
-  <p class="subtitle">Draft, schedule, and send emails</p>
+  <p class="subtitle">Draft, schedule, and send emails.</p>
 
   <div class="actions">
-    <button class="primary" id="compose-btn">+ Compose</button>
-    <button id="quick-send-btn">Quick Send</button>
-    <button id="templates-btn">Templates</button>
-    <button id="email-select-toggle">Select</button>
+    <button class="btn primary" id="compose-btn">+ Compose</button>
+    <button class="btn" id="quick-send-btn">Quick Send</button>
+    <button class="btn" id="templates-btn">Templates</button>
+    <button class="btn" id="email-select-toggle">Select</button>
   </div>
-  <div id="email-bulk-bar" style="display:none;padding:10px 16px;margin-bottom:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);align-items:center;gap:8px;font-size:13px;">
+  <div id="email-bulk-bar" style="display:none;padding:10px 16px;margin-bottom:12px;background:var(--paper-2);border:1px solid var(--line);border-radius:var(--radius);align-items:center;gap:8px;font-size:13px;">
     <span id="email-bulk-count">0 selected</span>
-    <button id="email-bulk-del-btn" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Delete</button>
-    <button id="email-select-all-btn" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Select All</button>
+    <button class="btn danger" id="email-bulk-del-btn">Delete</button>
+    <button class="btn" id="email-select-all-btn" style="margin-left:auto;">Select All</button>
   </div>
 
   <div class="filters" id="email-filters">
@@ -46,24 +46,24 @@ ${themeScript()}
     <input type="email" id="e-email" placeholder="email@example.com">
     <label>Subject</label>
     <input type="text" id="e-subject" placeholder="Subject line">
-    <label>Body <button id="ai-draft-btn" style="float:right;padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--teal);border-radius:6px;cursor:pointer;background:transparent;color:var(--teal);font-family:inherit;text-transform:uppercase;letter-spacing:0.5px;">AI Draft</button></label>
+    <label>Body <button class="btn" id="ai-draft-btn" style="float:right;">AI Draft</button></label>
     <textarea id="e-body" style="min-height:160px" placeholder="Write your email..."></textarea>
-    <div id="tone-buttons" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
-      <span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;padding:5px 0;">Adjust tone:</span>
-      <button data-tone="more formal" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Formal</button>
-      <button data-tone="more casual" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Casual</button>
-      <button data-tone="shorter" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Shorter</button>
-      <button data-tone="friendlier" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Friendlier</button>
-      <button data-tone="more direct" class="tone-btn" style="padding:4px 10px;font-size:10px;font-weight:500;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--text-muted);font-family:inherit;">Direct</button>
+    <div id="tone-buttons" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center;">
+      <span class="mono-label" style="padding:5px 0;">Adjust tone</span>
+      <button class="btn tone-btn" data-tone="more formal">Formal</button>
+      <button class="btn tone-btn" data-tone="more casual">Casual</button>
+      <button class="btn tone-btn" data-tone="shorter">Shorter</button>
+      <button class="btn tone-btn" data-tone="friendlier">Friendlier</button>
+      <button class="btn tone-btn" data-tone="more direct">Direct</button>
     </div>
     <label>Schedule Send (optional)</label>
     <input type="datetime-local" id="e-schedule">
     <div class="modal-actions">
-      <button id="close-compose-btn">Cancel</button>
-      <button class="primary" id="save-email-btn">Save Draft</button>
-      <button class="primary" id="schedule-btn" style="border-color:var(--yellow);color:var(--yellow)">Schedule</button>
-      <button id="send-now-btn" style="border-color:var(--green);color:var(--green)">Send Now</button>
-      <button class="danger" id="e-delete-btn" style="display:none">Delete</button>
+      <button class="btn" id="close-compose-btn">Cancel</button>
+      <button class="btn primary" id="save-email-btn">Save Draft</button>
+      <button class="btn" id="schedule-btn" style="color:var(--warn);border-color:var(--warn);">Schedule</button>
+      <button class="btn" id="send-now-btn" style="color:var(--good);border-color:var(--good);">Send Now</button>
+      <button class="btn danger" id="e-delete-btn" style="display:none">Delete</button>
     </div>
   </div>
 </div>
@@ -72,7 +72,7 @@ ${themeScript()}
 <div class="modal-overlay" id="quick-modal">
   <div class="modal">
     <h2>Quick Send</h2>
-    <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">
+    <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">
       Example: "Send an email to Mom Tuesday morning at 9AM about dinner plans"
     </p>
     <label>What would you like to send?</label>
@@ -84,9 +84,9 @@ ${themeScript()}
       </div>
     </div>
     <div class="modal-actions">
-      <button id="close-quick-btn">Cancel</button>
-      <button class="primary" id="parse-quick-btn">Parse & Preview</button>
-      <button class="primary" id="q-confirm" style="display:none">Confirm & Schedule</button>
+      <button class="btn" id="close-quick-btn">Cancel</button>
+      <button class="btn primary" id="parse-quick-btn">Parse & Preview</button>
+      <button class="btn primary" id="q-confirm" style="display:none">Confirm & Schedule</button>
     </div>
   </div>
 </div>
@@ -117,7 +117,7 @@ async function load() {
   var emails = await fetch('/api/emails'+q).then(r=>r.json());
   if (!emails.length) { document.getElementById('email-list').innerHTML = '<div class="empty-msg">No emails found</div>'; return; }
   document.getElementById('email-list').innerHTML = '<table><thead><tr><th style="width:30px;"></th><th>Status</th><th>To</th><th>Subject</th><th>Scheduled</th><th>Actions</th></tr></thead><tbody>' +
-    emails.map(e => '<tr><td><input type="checkbox" class="email-bulk-check" data-id="'+e.id+'" style="display:'+(emailSelectMode?'inline-block':'none')+';accent-color:var(--warm);cursor:pointer;"></td><td><span class="badge '+e.status+'">'+e.status+'</span></td><td>'+esc(e.recipient_name||e.recipient_email)+'</td><td>'+esc(e.subject)+'</td><td>'+(e.scheduled_at?new Date(e.scheduled_at).toLocaleString():'—')+'</td><td><div class="todo-actions"><button data-action="edit-email" data-id="'+e.id+'">&#9998;</button><button class="delete" data-action="delete-email" data-id="'+e.id+'">&#10005;</button></div></td></tr>'
+    emails.map(e => '<tr><td><input type="checkbox" class="email-bulk-check" data-id="'+e.id+'" style="display:'+(emailSelectMode?'inline-block':'none')+';accent-color:var(--accent);cursor:pointer;"></td><td><span class="badge '+e.status+'">'+e.status+'</span></td><td>'+esc(e.recipient_name||e.recipient_email)+'</td><td>'+esc(e.subject)+'</td><td>'+(e.scheduled_at?new Date(e.scheduled_at).toLocaleString():'—')+'</td><td><div class="todo-actions"><button data-action="edit-email" data-id="'+e.id+'">&#9998;</button><button class="delete" data-action="delete-email" data-id="'+e.id+'">&#10005;</button></div></td></tr>'
     ).join('') + '</tbody></table>';
 }
 
@@ -144,7 +144,7 @@ async function openEditEmail(id) {
   document.getElementById('e-subject').value = e.subject;
   document.getElementById('e-body').value = e.body;
   document.getElementById('e-schedule').value = e.scheduled_at?e.scheduled_at.slice(0,16):'';
-  document.getElementById('e-delete-btn').style.display = 'inline-block';
+  document.getElementById('e-delete-btn').style.display = 'inline-flex';
   document.getElementById('compose-modal').classList.add('active');
 }
 
@@ -252,9 +252,9 @@ async function openTemplates() {
   if (templates.length) {
     html += templates.map(t => '<div class="todo-item" style="cursor:pointer" data-action="use-tpl" data-id="'+t.id+'"><div class="todo-content"><div class="todo-title">'+esc(t.name)+'</div><div class="todo-meta"><span>'+esc(t.subject)+'</span></div></div><div class="todo-actions"><button data-action="delete-tpl" data-id="'+t.id+'">&#10005;</button></div></div>').join('');
   } else { html += '<div class="empty-msg">No templates yet</div>'; }
-  html += '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);"><h2 style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">Save Current as Template</h2><input type="text" id="tpl-name" placeholder="Template name" style="width:100%;padding:8px 12px;font-size:13px;font-family:inherit;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);margin-bottom:8px;"><button data-action="save-tpl" class="primary" style="padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--warm);border-radius:8px;cursor:pointer;background:transparent;color:var(--warm);font-family:inherit;">Save Template</button></div>';
+  html += '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line);"><h2>Save Current as Template</h2><input type="text" id="tpl-name" placeholder="Template name" style="width:100%;margin-bottom:8px;"><button class="btn primary" data-action="save-tpl">Save Template</button></div>';
   var overlay = document.createElement('div'); overlay.className = 'modal-overlay active'; overlay.id = 'tpl-modal';
-  overlay.innerHTML = '<div class="modal">'+html+'<div class="modal-actions"><button data-action="close-tpl">Close</button></div></div>';
+  overlay.innerHTML = '<div class="modal">'+html+'<div class="modal-actions"><button class="btn" data-action="close-tpl">Close</button></div></div>';
   document.body.appendChild(overlay);
 }
 async function useTemplate(id) {
@@ -328,9 +328,9 @@ async function parseQuick() {
     '<div style="font-size:13px;"><strong>To:</strong> '+esc(name||'?')+' &lt;'+esc(email||'enter email')+'&gt;<br>'+
     '<strong>Subject:</strong> '+esc(parsedQuick.subject)+'<br>'+
     '<strong>Scheduled:</strong> '+(schedDate?schedDate.toLocaleString():'Not scheduled')+'<br><br>'+
-    '<div style="white-space:pre-wrap;color:var(--text-muted)">'+esc(parsedQuick.body)+'</div></div>';
+    '<div style="white-space:pre-wrap;color:var(--muted)">'+esc(parsedQuick.body)+'</div></div>';
   document.getElementById('q-preview').style.display = 'block';
-  document.getElementById('q-confirm').style.display = 'inline-block';
+  document.getElementById('q-confirm').style.display = 'inline-flex';
 }
 
 function parseTimeExpr(text) {
