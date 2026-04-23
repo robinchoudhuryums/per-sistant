@@ -11,6 +11,9 @@ const CSS_COMPONENTS = require("./views/css-components");
 const CSS_PAGES = require("./views/css-pages");
 const SHARED_CSS = CSS_CORE + CSS_COMPONENTS + CSS_PAGES;
 const SHARED_JS = require("./views/js");
+// Visual primitives — exposed on window.PsPrimitives. Pure SVG-string
+// helpers + auto-upgrade for any .card[data-spark="..."].
+const PRIMITIVES_JS = require("./views/primitives");
 
 // 6 palettes from the design bundle. Swatch hex is what the user sees in the
 // appbar picker; the actual --accent is defined in css.js per palette.
@@ -40,6 +43,7 @@ function pageHead(title) {
   <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>${SHARED_CSS}${APPBAR_PICKER_CSS}</style>
   <script>${SHARED_JS}</script>
+  <script>${PRIMITIVES_JS}</script>
 </head>`;
 }
 
@@ -71,8 +75,6 @@ function navIcon(id) {
   }
 }
 
-// Inline appbar-picker CSS — kept here (not in css-components) so it lives
-// alongside the markup that uses it. Tiny so the size cost is negligible.
 const APPBAR_PICKER_CSS = `
 .appbar .ui-controls { display: flex; align-items: center; gap: 14px; }
 .appbar .palette-swatches { display: flex; gap: 6px; }
@@ -149,9 +151,6 @@ function navBar(activePath) {
 </header>`;
 }
 
-// themeScript — first-paint palette/mode application + sidebar wiring +
-// appbar palette/mode pickers. Persists to both localStorage (for instant
-// next paint) and PATCH /api/settings (for cross-device).
 function themeScript() {
   return `<script>
   (function(){
@@ -162,7 +161,6 @@ function themeScript() {
     function applyMode(m) { document.body && document.body.setAttribute('data-mode', m); }
     function applyCollapsed(c) { document.body && document.body.classList.toggle('sidebar-collapsed', !!c); }
 
-    // First paint
     function paint() {
       var s = getUI();
       applyPalette(s.palette || 'copper');
@@ -230,7 +228,6 @@ function themeScript() {
       });
     });
 
-    // Cross-device hydrate from server (one-shot)
     fetch('/api/settings').then(function(r){return r.json();}).then(function(s){
       if (!s) return;
       var cur = getUI(), changed = false;
@@ -246,4 +243,4 @@ function themeScript() {
 </script>`;
 }
 
-module.exports = { SHARED_CSS, SHARED_JS, pageHead, navBar, themeScript };
+module.exports = { SHARED_CSS, SHARED_JS, PRIMITIVES_JS, pageHead, navBar, themeScript };
