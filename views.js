@@ -1,8 +1,6 @@
 // ============================================================================
 // Per-sistant — Shared Views (CSS, JS, HTML helpers)
 // ============================================================================
-// Warm-paper design system. CSS is split across three files so each fits in a
-// single push; they concatenate into one <style> block at page-head time.
 
 const { PERFIN_URL } = require("./config");
 
@@ -11,20 +9,10 @@ const CSS_COMPONENTS = require("./views/css-components");
 const CSS_PAGES = require("./views/css-pages");
 const SHARED_CSS = CSS_CORE + CSS_COMPONENTS + CSS_PAGES;
 const SHARED_JS = require("./views/js");
-// Visual primitives — exposed on window.PsPrimitives. Pure SVG-string
-// helpers + auto-upgrade for any .card[data-spark="..."].
 const PRIMITIVES_JS = require("./views/primitives");
-
-// 6 palettes from the design bundle. Swatch hex is what the user sees in the
-// appbar picker; the actual --accent is defined in css.js per palette.
-const PALETTES = [
-  { id: "copper", swatch: "#b5714a" },
-  { id: "indigo", swatch: "#4d5bce" },
-  { id: "forest", swatch: "#3f7b5a" },
-  { id: "slate",  swatch: "#4e7bc4" },
-  { id: "plum",   swatch: "#a0507a" },
-  { id: "mono",   swatch: "#0a0a0a" },
-];
+// Settings-only enhancement that adds a palette picker to the Appearance
+// section. Loaded globally; it no-ops off the /settings route.
+const SETTINGS_PATCH = require("./views/settings-patch");
 
 function pageHead(title) {
   return `<!DOCTYPE html>
@@ -44,6 +32,7 @@ function pageHead(title) {
   <style>${SHARED_CSS}${APPBAR_PICKER_CSS}</style>
   <script>${SHARED_JS}</script>
   <script>${PRIMITIVES_JS}</script>
+  <script>${SETTINGS_PATCH}</script>
 </head>`;
 }
 
@@ -76,16 +65,7 @@ function navIcon(id) {
 }
 
 const APPBAR_PICKER_CSS = `
-.appbar .ui-controls { display: flex; align-items: center; gap: 14px; }
-.appbar .palette-swatches { display: flex; gap: 6px; }
-.appbar .palette-swatches button {
-  width: 18px; height: 18px; border-radius: 50%; padding: 0; cursor: pointer;
-  border: 2px solid transparent;
-  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.10);
-  transition: border-color 0.15s, transform 0.1s;
-}
-.appbar .palette-swatches button:hover { transform: scale(1.1); }
-.appbar .palette-swatches button.active { border-color: var(--ink); }
+.appbar .ui-controls { display: flex; align-items: center; gap: 10px; }
 .appbar .mode-toggle {
   background: transparent; border: 1px solid var(--line); cursor: pointer;
   padding: 5px 10px; border-radius: 2px; color: var(--muted);
@@ -94,9 +74,6 @@ const APPBAR_PICKER_CSS = `
 }
 .appbar .mode-toggle:hover { background: var(--paper-2); color: var(--ink); }
 @media (max-width: 480px) {
-  .appbar .palette-swatches { gap: 4px; }
-  .appbar .palette-swatches button { width: 16px; height: 16px; }
-  .appbar .ui-controls { gap: 8px; }
   .appbar .mode-toggle { padding: 4px 8px; font-size: 9px; }
 }
 `;
@@ -114,9 +91,6 @@ function navBar(activePath) {
          <span class="label">Perfin</span>
        </a>` : '';
   const here = (NAV.find(n => n.href === activePath) || {}).label || 'Per-sistant';
-  const swatches = PALETTES.map(p =>
-    `<button data-palette="${p.id}" style="background:${p.swatch}" title="${p.id}" aria-label="${p.id} palette"></button>`
-  ).join('');
   return `
 <aside class="sidebar">
   <div class="sidebar-brand">
@@ -145,7 +119,6 @@ function navBar(activePath) {
   </nav>
   <div class="spacer"></div>
   <div class="ui-controls">
-    <div class="palette-swatches" id="palette-swatches">${swatches}</div>
     <button id="mode-toggle" class="mode-toggle" aria-label="Toggle light/dark mode">Light</button>
   </div>
 </header>`;
@@ -169,16 +142,6 @@ function themeScript() {
     }
     if (document.body) paint();
 
-    function syncSwatches() {
-      var s = getUI();
-      var cur = s.palette || 'copper';
-      document.querySelectorAll('#palette-swatches button').forEach(function(b) {
-        b.classList.toggle('active', b.dataset.palette === cur);
-      });
-      var mt = document.getElementById('mode-toggle');
-      if (mt) mt.textContent = (s.mode === 'dark') ? 'Dark' : 'Light';
-    }
-
     function patchServer(field, value) {
       var body = {}; body[field] = value;
       fetch('/api/settings', {
@@ -190,7 +153,8 @@ function themeScript() {
 
     document.addEventListener('DOMContentLoaded', function() {
       paint();
-      syncSwatches();
+      var mt = document.getElementById('mode-toggle');
+      if (mt) mt.textContent = (getUI().mode === 'dark') ? 'Dark' : 'Light';
 
       var btn = document.getElementById('sidebar-collapse-btn');
       if (btn) btn.addEventListener('click', function() {
@@ -205,25 +169,12 @@ function themeScript() {
         document.body.classList.toggle('sidebar-open');
       });
 
-      var sw = document.getElementById('palette-swatches');
-      if (sw) sw.addEventListener('click', function(e) {
-        var t = e.target.closest('button[data-palette]');
-        if (!t) return;
-        var p = t.dataset.palette;
-        if (PALETTES.indexOf(p) < 0) return;
-        var s = getUI(); s.palette = p; setUI(s);
-        applyPalette(p);
-        syncSwatches();
-        patchServer('palette', p);
-      });
-
-      var mt = document.getElementById('mode-toggle');
       if (mt) mt.addEventListener('click', function() {
         var s = getUI();
         var next = s.mode === 'dark' ? 'light' : 'dark';
         s.mode = next; setUI(s);
         applyMode(next);
-        syncSwatches();
+        mt.textContent = next === 'dark' ? 'Dark' : 'Light';
         patchServer('theme', next);
       });
     });
@@ -237,10 +188,14 @@ function themeScript() {
       if ((s.theme === 'dark' || s.theme === 'light') && cur.mode !== s.theme) {
         cur.mode = s.theme; applyMode(s.theme); changed = true;
       }
-      if (changed) { setUI(cur); syncSwatches(); }
+      if (changed) {
+        setUI(cur);
+        var mt = document.getElementById('mode-toggle');
+        if (mt) mt.textContent = cur.mode === 'dark' ? 'Dark' : 'Light';
+      }
     }).catch(function(){});
   })();
 </script>`;
 }
 
-module.exports = { SHARED_CSS, SHARED_JS, PRIMITIVES_JS, pageHead, navBar, themeScript };
+module.exports = { SHARED_CSS, SHARED_JS, PRIMITIVES_JS, SETTINGS_PATCH, pageHead, navBar, themeScript };
