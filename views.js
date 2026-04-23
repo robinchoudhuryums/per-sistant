@@ -37,6 +37,7 @@ function pageHead(title) {
 }
 
 const NAV = [
+  { href: "/today",    label: "Today",     id: "today" },
   { href: "/",         label: "Dashboard", id: "dashboard" },
   { href: "/todos",    label: "To-Dos",    id: "todos" },
   { href: "/emails",   label: "Emails",    id: "emails" },
@@ -51,6 +52,7 @@ const NAV = [
 function navIcon(id) {
   const c = 'currentColor', sw = '1.3';
   switch (id) {
+    case 'today': return `<svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.5" fill="none" stroke="${c}" stroke-width="${sw}"/><line x1="7" y1="7" x2="7" y2="4" stroke="${c}" stroke-width="${sw}" stroke-linecap="round"/><line x1="7" y1="7" x2="9.5" y2="7" stroke="${c}" stroke-width="${sw}" stroke-linecap="round"/></svg>`;
     case 'dashboard': return `<svg width="14" height="14" viewBox="0 0 14 14"><rect x="1" y="1" width="5" height="5" fill="none" stroke="${c}" stroke-width="${sw}"/><rect x="8" y="1" width="5" height="5" fill="none" stroke="${c}" stroke-width="${sw}"/><rect x="1" y="8" width="5" height="5" fill="none" stroke="${c}" stroke-width="${sw}"/><rect x="8" y="8" width="5" height="5" fill="none" stroke="${c}" stroke-width="${sw}"/></svg>`;
     case 'todos': return `<svg width="14" height="14" viewBox="0 0 14 14"><rect x="1.5" y="1.5" width="11" height="11" fill="none" stroke="${c}" stroke-width="${sw}"/><path d="M4 7 L6 9 L10 5" fill="none" stroke="${c}" stroke-width="1.6" stroke-linecap="round"/></svg>`;
     case 'emails': return `<svg width="14" height="14" viewBox="0 0 14 14"><rect x="1.5" y="3" width="11" height="8" fill="none" stroke="${c}" stroke-width="${sw}"/><path d="M1.5 3.5 L7 8 L12.5 3.5" fill="none" stroke="${c}" stroke-width="${sw}"/></svg>`;
