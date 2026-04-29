@@ -129,24 +129,34 @@ async function processScheduledEmails() {
 }
 
 // ---------------------------------------------------------------------------
-// Start server
+// Lifecycle
 // ---------------------------------------------------------------------------
+// Two modes:
+//   start()                         — standalone: listen, keep-alive, signals
+//   start({ standalone: false })    — embedded: migrations + crons only,
+//                                     shell handles listen/keep-alive/signals.
+//
+// Migrations and cron jobs run in BOTH modes — they're DB-bound work that
+// belongs to this app regardless of whether it owns the HTTP listener.
+
 const PORT = parseInt(process.env.PORT || "3001", 10);
 
-async function start() {
+async function start(opts = {}) {
+  const standalone = opts.standalone !== false;
+
   if (process.env.NEON_DATABASE_URL) {
     await runMigrations();
   } else {
     console.log("No NEON_DATABASE_URL set — running without database (API calls will fail)");
   }
 
-  // Start email scheduler (every minute)
+  // Email scheduler (every minute)
   if (cron) {
     cron.schedule("* * * * *", processScheduledEmails);
     console.log("Email scheduler started (checks every minute)");
   }
 
-  // Process recurring tasks — auto-generate next instance for overdue recurring
+  // Recurring task processor — auto-generate next instance for overdue recurring
   if (cron) {
     cron.schedule("0 0 * * *", async () => {
       try {
@@ -170,6 +180,11 @@ async function start() {
       } catch (err) { console.error("Recurring task error:", err.message); }
     });
     console.log("Recurring task processor started (daily at midnight)");
+  }
+
+  if (!standalone) {
+    // Embedded mode: shell owns the HTTP listener, keep-alive, and signals.
+    return { app };
   }
 
   const server = app.listen(PORT, "0.0.0.0", () => {
@@ -197,8 +212,15 @@ async function start() {
   }
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
+
+  return { app, server };
 }
 
-start().catch(console.error);
+// Standalone bootstrap — only when this file is the process entry point.
+// Required by the unified shell: it does `require("./server")` and gets
+// `{ app, start, pool, ... }` without a second listener firing up.
+if (require.main === module) {
+  start().catch(console.error);
+}
 
-module.exports = { app, pool, processScheduledEmails, parseTimeExpr: null };
+module.exports = { app, pool, start, processScheduledEmails, parseTimeExpr: null };
